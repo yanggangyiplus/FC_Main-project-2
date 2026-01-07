@@ -12,7 +12,7 @@ from app.database import get_db
 from app.models.models import Receipt
 from app.models.user import User
 from app.schemas import ReceiptCreate, ReceiptResponse, ReceiptStatsResponse
-from app.services.ai_service import ClaudeOCRService, TesseractOCRService
+from app.services.ai_service import GeminiOCRService, TesseractOCRService
 from app.api.routes.auth import get_current_user
 
 router = APIRouter(
@@ -21,8 +21,11 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)]
 )
 
-claude_ocr = ClaudeOCRService()
+gemini_ocr = GeminiOCRService()  # Gemini Vision API 사용
 tesseract_ocr = TesseractOCRService()
+
+# 하위 호환성을 위한 별칭
+claude_ocr = gemini_ocr
 
 
 @router.get("/", response_model=List[ReceiptResponse])
@@ -98,11 +101,14 @@ async def upload_and_process_receipt(
     # Read file content
     content = await file.read()
     
-    # Try Claude first, fallback to Tesseract
+    # MIME 타입 결정
+    mime_type = file.content_type or 'image/jpeg'
+    
+    # Try Gemini Vision first, fallback to Tesseract
     try:
-        ocr_result = await claude_ocr.extract_receipt_data(content)
+        ocr_result = await gemini_ocr.extract_receipt_data(content, mime_type)
     except Exception as e:
-        print(f"Claude OCR failed: {e}, falling back to Tesseract")
+        print(f"Gemini OCR failed: {e}, falling back to Tesseract")
         try:
             ocr_result = await tesseract_ocr.extract_receipt_data(content)
         except Exception as e:
