@@ -164,6 +164,18 @@ class APIClient {
     })
   }
 
+  async extractTextFromImage(imageFile: File, method: string = 'gemini') {
+    const formData = new FormData()
+    formData.append('file', imageFile)
+
+    return this.client.post('/ai/ocr/extract-text', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      params: { method },
+    })
+  }
+
   // Receipt endpoints
   async getReceipts(date?: string, category?: string) {
     return this.client.get('/receipts', {

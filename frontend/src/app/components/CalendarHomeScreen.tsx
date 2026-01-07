@@ -89,6 +89,7 @@ export function CalendarHomeScreen() {
   const [showAddTodoModal, setShowAddTodoModal] = useState(false);
   const [selectedTodoForDetail, setSelectedTodoForDetail] = useState<string | null>(null);
   const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
+  const [extractedText, setExtractedText] = useState<string>("");
   // 체크리스트 항목 상태 관리 (id별로 completed 상태 저장)
   const [checklistItemStates, setChecklistItemStates] = useState<Record<string, Record<string, boolean>>>({});
 
@@ -522,14 +523,18 @@ export function CalendarHomeScreen() {
     toast.success("일정 시간이 변경되었습니다.");
   };
 
-  const handleInputMethodSelect = (method: 'voice' | 'camera' | 'text') => {
+  const handleInputMethodSelect = (method: 'voice' | 'camera' | 'text', text?: string) => {
     setShowInputMethodModal(false);
 
-    if (method === 'voice') {
-      toast.info('음성 입력을 시작합니다.');
-    } else if (method === 'camera') {
-      toast.info('이미지 촬영을 시작합니다.');
-    } else {
+    if (text && text.trim()) {
+      // 추출된 텍스트가 있으면 저장하고 AddTodoModal 열기
+      setExtractedText(text);
+      setEditingTodoId(null);
+      setShowAddTodoModal(true);
+    } else if (method === 'text') {
+      // 텍스트 직접 입력 (텍스트 없이 저장 버튼 클릭)
+      setExtractedText("");
+      setEditingTodoId(null);
       setShowAddTodoModal(true);
     }
   };
@@ -1294,10 +1299,17 @@ export function CalendarHomeScreen() {
           isOpen={showAddTodoModal}
           onClose={() => {
             setShowAddTodoModal(false);
+            setExtractedText(""); // 텍스트 초기화
             setEditingTodoId(null);
           }}
           onSave={handleSaveDetailedTodo}
-          initialData={editingTodoId ? todos.find(t => t.id === editingTodoId) : undefined}
+          initialData={
+            editingTodoId 
+              ? todos.find(t => t.id === editingTodoId)
+              : extractedText 
+                ? { memo: extractedText }
+                : undefined
+          }
         />
       )}
 

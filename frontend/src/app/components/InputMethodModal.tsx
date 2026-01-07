@@ -1,16 +1,20 @@
-import { X, Mic, Camera, FileText, Play, Square, Pause, RotateCcw, Eye } from "lucide-react";
+import { X, Mic, Camera, FileText, Play, Square, Pause, RotateCcw, Eye, Loader2 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
+import { apiClient } from "@/services/apiClient";
+import { toast } from "sonner";
 
 interface InputMethodModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (method: 'voice' | 'camera' | 'text') => void;
+  onSelect: (method: 'voice' | 'camera' | 'text', text?: string) => void;
 }
 
 export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModalProps) {
   const [activeMethod, setActiveMethod] = useState<'voice' | 'camera' | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [text, setText] = useState<string>("");
+  const [isProcessing, setIsProcessing] = useState(false);
 
   // Audio Recording State
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -58,13 +62,16 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
         }
       };
 
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
         const url = URL.createObjectURL(audioBlob);
         setAudioBlob(audioBlob);
         setAudioUrl(url);
         setIsRecording(false);
         stream.getTracks().forEach(track => track.stop());
+        
+        // STT로 텍스트 추출
+        await transcribeAudio(audioBlob);
       };
 
       mediaRecorder.start();
@@ -107,6 +114,31 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
     }
   };
 
+  // STT로 음성을 텍스트로 변환
+  const transcribeAudio = async (audioBlob: Blob) => {
+    setIsProcessing(true);
+    try {
+      const audioFile = new File([audioBlob], 'recording.wav', { type: 'audio/wav' });
+      const response = await apiClient.transcribeAudio(audioFile, 'todo');
+      
+      if (response.data && response.data.text) {
+        const transcribedText = response.data.text;
+        // 최대 1000자로 제한
+        const limitedText = transcribedText.slice(0, 1000);
+        setText(prev => {
+          const newText = prev ? prev + '\n' + limitedText : limitedText;
+          return newText.slice(0, 1000);
+        });
+        toast.success("음성이 텍스트로 변환되었습니다.");
+      }
+    } catch (error) {
+      console.error("STT error:", error);
+      toast.error("음성 변환에 실패했습니다.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // --- Camera Logic ---
   const startCamera = async () => {
     try {
@@ -139,10 +171,10 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
         const imageUrl = canvas.toDataURL("image/jpeg");
         setCapturedImage(imageUrl);
 
-        // Convert to Blob for upload
+        // Convert to Blob for OCR
         canvas.toBlob(async (blob) => {
           if (blob) {
-            await uploadImage(blob);
+            await extractTextFromImage(blob);
           }
         }, 'image/jpeg');
       }
@@ -155,33 +187,30 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
     }
   };
 
-  const uploadImage = async (blob: Blob) => {
+  // OCR로 이미지에서 텍스트 추출
+  const extractTextFromImage = async (blob: Blob) => {
     setIsUploading(true);
-    const formData = new FormData();
-    formData.append("file", blob, "capture.jpg");
-
+    setIsProcessing(true);
     try {
-      const token = localStorage.getItem('access_token');
-      const response = await fetch('http://localhost:8000/memos/', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Upload failed response:', response.status, errorText);
-        throw new Error(`Upload failed: ${response.status} ${errorText}`);
+      const imageFile = new File([blob], 'capture.jpg', { type: 'image/jpeg' });
+      const response = await apiClient.extractTextFromImage(imageFile, 'gemini');
+      
+      if (response.data && response.data.text) {
+        const extractedText = response.data.text;
+        // 최대 1000자로 제한
+        const limitedText = extractedText.slice(0, 1000);
+        setText(prev => {
+          const newText = prev ? prev + '\n' + limitedText : limitedText;
+          return newText.slice(0, 1000);
+        });
+        toast.success("이미지에서 텍스트를 추출했습니다.");
       }
-      console.log("Image uploaded and saved as Memo");
-      // alert("이미지가 저장되었습니다."); // Optional feedback
     } catch (error) {
-      console.error("Error uploading image:", error);
-      alert("이미지 저장에 실패했습니다.");
+      console.error("OCR error:", error);
+      toast.error("텍스트 추출에 실패했습니다.");
     } finally {
       setIsUploading(false);
+      setIsProcessing(false);
     }
   };
 
@@ -198,7 +227,15 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
   };
 
   const handleTextClick = () => {
-    onSelect('text');
+    onSelect('text', text);
+  };
+
+  const handleSave = () => {
+    if (text.trim()) {
+      onSelect('text', text);
+    } else {
+      toast.error("텍스트를 입력해주세요.");
+    }
   };
 
   const handleClose = () => {
@@ -230,11 +267,29 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
             </h3>
           </div>
 
-          <div className="w-full bg-white rounded-2xl p-8 mb-4 min-h-[180px] flex items-center justify-center shadow-sm">
-            <p className="text-[#9CA3AF] text-center">
-              텍스트를 작성 해 주세요.<br />
-              최대 1000자
-            </p>
+          {/* 텍스트 입력 영역 */}
+          <div className="w-full bg-white rounded-2xl p-4 mb-4 shadow-sm">
+            <textarea
+              value={text}
+              onChange={(e) => {
+                const newText = e.target.value.slice(0, 1000);
+                setText(newText);
+              }}
+              placeholder="텍스트를 작성 해 주세요.&#10;최대 1000자"
+              className="w-full min-h-[180px] p-4 border border-[#E5E7EB] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-[#1F2937] placeholder-[#9CA3AF]"
+              maxLength={1000}
+            />
+            <div className="flex justify-between items-center mt-2">
+              <span className="text-xs text-[#9CA3AF]">
+                {text.length} / 1000자
+              </span>
+              {isProcessing && (
+                <div className="flex items-center gap-2 text-xs text-[#FF9B82]">
+                  <Loader2 size={14} className="animate-spin" />
+                  처리 중...
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Voice UI */}
@@ -336,17 +391,42 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
             </p>
           </div>
 
-          <div className="flex justify-center gap-6">
-            <button onClick={handleVoiceClick} className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95">
+          <div className="flex justify-center gap-6 mb-4">
+            <button 
+              onClick={handleVoiceClick} 
+              disabled={isProcessing}
+              className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
               <Mic size={32} className="text-[#FF9B82]" />
             </button>
-            <button onClick={handleCameraClick} className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95">
+            <button 
+              onClick={handleCameraClick} 
+              disabled={isProcessing}
+              className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
               <Camera size={32} className="text-[#FF9B82]" />
             </button>
-            <button onClick={handleTextClick} className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95">
+            <button 
+              onClick={handleTextClick} 
+              disabled={isProcessing}
+              className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
               <FileText size={32} className="text-[#FF9B82]" />
             </button>
           </div>
+
+          {/* 저장 버튼 */}
+          <button
+            onClick={handleSave}
+            disabled={!text.trim() || isProcessing}
+            className="w-full py-3 bg-[#FF9B82] text-white rounded-lg font-medium hover:bg-[#FF8A6D] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {isProcessing ? (
+              <>
+                <Loader2 size={18} className="animate-spin" />
+                처리 중...
+              </>
+            ) : (
+              '저장'
+            )}
+          </button>
         </div>
       </div>
     </div>
