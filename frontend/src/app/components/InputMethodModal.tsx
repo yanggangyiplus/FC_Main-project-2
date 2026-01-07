@@ -247,25 +247,27 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="w-full max-w-[375px] min-h-screen bg-[#F5F5F5] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-4 bg-white border-b border-[#E5E7EB]">
+      <div className="w-full max-w-[375px] h-screen bg-[#F5F5F5] flex flex-col relative">
+        {/* Header - 항상 상단에 고정 */}
+        <div className="flex-shrink-0 flex items-center justify-between px-4 py-4 bg-white border-b border-[#E5E7EB] z-[100]">
           <h2 className="font-semibold text-[#1F2937]">일정 추가</h2>
           <button
             onClick={handleClose}
             className="p-2 hover:bg-[#F3F4F6] rounded-lg transition-colors"
+            disabled={isProcessing}
           >
             <X size={24} className="text-[#6B7280]" />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 flex flex-col items-center justify-center px-6 py-8">
-          <div className="text-center mb-8">
-            <h3 className="text-xl font-semibold text-[#1F2937] border-b-2 border-[#D1D5DB] inline-block pb-2">
-              일정 작성
-            </h3>
-          </div>
+        {/* Content - 스크롤 가능 */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="flex flex-col items-center px-6 py-8">
+            <div className="text-center mb-8">
+              <h3 className="text-xl font-semibold text-[#1F2937] border-b-2 border-[#D1D5DB] inline-block pb-2">
+                일정 작성
+              </h3>
+            </div>
 
           {/* 텍스트 입력 영역 */}
           <div className="w-full bg-white rounded-2xl p-4 mb-4 shadow-sm">
@@ -387,7 +389,13 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
 
           <div className="text-center mb-6">
             <p className="text-[#6B7280]">
-              녹음을<br />시작합니다.
+              {activeMethod === 'camera' ? (
+                <>사진에서<br />텍스트를 읽고 있습니다.</>
+              ) : activeMethod === 'voice' ? (
+                <>녹음을<br />시작합니다.</>
+              ) : (
+                <>텍스트를<br />입력해주세요.</>
+              )}
             </p>
           </div>
 
@@ -412,21 +420,22 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
             </button>
           </div>
 
-          {/* 저장 버튼 */}
-          <button
-            onClick={handleSave}
-            disabled={!text.trim() || isProcessing}
-            className="w-full py-3 bg-[#FF9B82] text-white rounded-lg font-medium hover:bg-[#FF8A6D] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            {isProcessing ? (
-              <>
-                <Loader2 size={18} className="animate-spin" />
-                처리 중...
-              </>
-            ) : (
-              '저장'
-            )}
-          </button>
+            {/* 저장 버튼 */}
+            <button
+              onClick={handleSave}
+              disabled={!text.trim() || isProcessing}
+              className="w-full py-3 bg-[#FF9B82] text-white rounded-lg font-medium hover:bg-[#FF8A6D] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  처리 중...
+                </>
+              ) : (
+                '저장'
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>
