@@ -283,7 +283,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
                       ...formData,
                       isAllDay,
                       startTime: isAllDay ? '00:00' : formData.startTime,
-                      endTime: isAllDay ? '24:00' : formData.endTime,
+                      endTime: isAllDay ? '' : formData.endTime,
                     });
                   }}
                   className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-2 focus:ring-[#FF9B82]"

@@ -1,6 +1,7 @@
 """
 Todo endpoints for CRUD operations and automation
 """
+import json
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -64,8 +65,8 @@ async def get_todos(
             "repeat_end_date": todo.repeat_end_date.isoformat() if todo.repeat_end_date else None,
             "repeat_days": todo.repeat_days,
             "has_notification": todo.has_notification,
-            "notification_times": todo.notification_times,
-            "family_member_ids": todo.family_member_ids,
+            "notification_times": json.loads(todo.notification_times) if todo.notification_times else [],
+            "family_member_ids": json.loads(todo.family_member_ids) if todo.family_member_ids else [],
             "checklist_items": [item.text for item in todo.checklist_items],  # 문자열 리스트로 변환
             "created_at": todo.created_at,
             "updated_at": todo.updated_at
@@ -162,8 +163,8 @@ async def get_todo(
         "repeat_end_date": todo.repeat_end_date.isoformat() if todo.repeat_end_date else None,
         "repeat_days": todo.repeat_days,
         "has_notification": todo.has_notification,
-        "notification_times": todo.notification_times,
-        "family_member_ids": todo.family_member_ids,
+        "notification_times": json.loads(todo.notification_times) if todo.notification_times else [],
+        "family_member_ids": json.loads(todo.family_member_ids) if todo.family_member_ids else [],
         "checklist_items": [item.text for item in todo.checklist_items],  # 문자열 리스트로 변환
         "created_at": todo.created_at,  # datetime 객체 그대로 사용
         "updated_at": todo.updated_at   # datetime 객체 그대로 사용
@@ -266,8 +267,8 @@ async def create_todo(
         "repeat_end_date": db_todo_with_items.repeat_end_date.isoformat() if db_todo_with_items.repeat_end_date else None,
         "repeat_days": db_todo_with_items.repeat_days,
         "has_notification": db_todo_with_items.has_notification,
-        "notification_times": db_todo_with_items.notification_times,
-        "family_member_ids": db_todo_with_items.family_member_ids,
+        "notification_times": json.loads(db_todo_with_items.notification_times) if db_todo_with_items.notification_times else [],
+        "family_member_ids": json.loads(db_todo_with_items.family_member_ids) if db_todo_with_items.family_member_ids else [],
         "checklist_items": [item.text for item in db_todo_with_items.checklist_items],  # 문자열 리스트로 변환
         "created_at": db_todo_with_items.created_at,  # datetime 객체 그대로 사용
         "updated_at": db_todo_with_items.updated_at   # datetime 객체 그대로 사용
@@ -286,7 +287,7 @@ async def update_todo(
 ):
     """Update todo"""
     import json
-    from datetime import time as time_obj
+    from datetime import time as time_obj, datetime, datetime
     
     todo = db.query(Todo).filter(
         Todo.id == todo_id,
@@ -309,20 +310,33 @@ async def update_todo(
         todo.memo = todo_update.memo
     if todo_update.location is not None:
         todo.location = todo_update.location
-    if todo_update.date is not None:
-        todo.date = todo_update.date
+    if todo_update.date is not None and todo_update.date.strip():
+        # 문자열 날짜를 date 객체로 변환
+        try:
+            todo.date = datetime.strptime(todo_update.date.strip(), '%Y-%m-%d').date()
+        except (ValueError, AttributeError):
+            # 날짜 형식이 잘못된 경우 무시
+            pass
     if todo_update.start_time is not None:
-        try:
-            hours, minutes = map(int, todo_update.start_time.split(':'))
-            todo.start_time = time_obj(hours, minutes)
-        except:
-            pass
+        # 빈 문자열이거나 None이면 null로 설정
+        if todo_update.start_time == "" or todo_update.start_time is None:
+            todo.start_time = None
+        else:
+            try:
+                hours, minutes = map(int, todo_update.start_time.split(':'))
+                todo.start_time = time_obj(hours, minutes)
+            except:
+                todo.start_time = None
     if todo_update.end_time is not None:
-        try:
-            hours, minutes = map(int, todo_update.end_time.split(':'))
-            todo.end_time = time_obj(hours, minutes)
-        except:
-            pass
+        # 빈 문자열이거나 None이면 null로 설정
+        if todo_update.end_time == "" or todo_update.end_time is None:
+            todo.end_time = None
+        else:
+            try:
+                hours, minutes = map(int, todo_update.end_time.split(':'))
+                todo.end_time = time_obj(hours, minutes)
+            except:
+                todo.end_time = None
     if todo_update.all_day is not None:
         todo.all_day = todo_update.all_day
     if todo_update.category is not None:
@@ -333,8 +347,13 @@ async def update_todo(
         todo.priority = todo_update.priority
     if todo_update.repeat_type is not None:
         todo.repeat_type = todo_update.repeat_type
-    if todo_update.repeat_end_date is not None:
-        todo.repeat_end_date = todo_update.repeat_end_date
+    if todo_update.repeat_end_date is not None and todo_update.repeat_end_date.strip():
+        # 문자열 날짜를 date 객체로 변환
+        try:
+            todo.repeat_end_date = datetime.strptime(todo_update.repeat_end_date.strip(), '%Y-%m-%d').date()
+        except (ValueError, AttributeError):
+            # 날짜 형식이 잘못된 경우 무시
+            pass
     if todo_update.repeat_days is not None:
         todo.repeat_days = todo_update.repeat_days
     if todo_update.has_notification is not None:
@@ -388,8 +407,8 @@ async def update_todo(
         "repeat_end_date": updated_todo.repeat_end_date.isoformat() if updated_todo.repeat_end_date else None,
         "repeat_days": updated_todo.repeat_days,
         "has_notification": updated_todo.has_notification,
-        "notification_times": updated_todo.notification_times,
-        "family_member_ids": updated_todo.family_member_ids,
+        "notification_times": json.loads(updated_todo.notification_times) if updated_todo.notification_times else [],
+        "family_member_ids": json.loads(updated_todo.family_member_ids) if updated_todo.family_member_ids else [],
         "checklist_items": [item.text for item in updated_todo.checklist_items],  # 문자열 리스트로 변환
         "created_at": updated_todo.created_at,  # datetime 객체 그대로 사용
         "updated_at": updated_todo.updated_at   # datetime 객체 그대로 사용
@@ -526,8 +545,8 @@ async def update_todo_status(
         "repeat_end_date": updated_todo.repeat_end_date.isoformat() if updated_todo.repeat_end_date else None,
         "repeat_days": updated_todo.repeat_days,
         "has_notification": updated_todo.has_notification,
-        "notification_times": updated_todo.notification_times,
-        "family_member_ids": updated_todo.family_member_ids,
+        "notification_times": json.loads(updated_todo.notification_times) if updated_todo.notification_times else [],
+        "family_member_ids": json.loads(updated_todo.family_member_ids) if updated_todo.family_member_ids else [],
         "checklist_items": [item.text for item in updated_todo.checklist_items],  # 문자열 리스트로 변환
         "created_at": updated_todo.created_at,  # datetime 객체 그대로 사용
         "updated_at": updated_todo.updated_at   # datetime 객체 그대로 사용

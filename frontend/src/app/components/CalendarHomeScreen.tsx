@@ -721,33 +721,73 @@ export function CalendarHomeScreen() {
   };
 
   const handleSaveDetailedTodo = async (formData: TodoFormData) => {
-    // Calculate duration from start and end time
-    const [startHours, startMinutes] = formData.startTime.split(':').map(Number);
-    const [endHours, endMinutes] = formData.endTime.split(':').map(Number);
-    const duration = (endHours * 60 + endMinutes) - (startHours * 60 + startMinutes);
+    // Calculate duration from start and end time (only if not all day)
+    let duration = 60; // 기본값
+    if (!formData.isAllDay && formData.startTime && formData.endTime) {
+      try {
+        const [startHours, startMinutes] = formData.startTime.split(':').map(Number);
+        const [endHours, endMinutes] = formData.endTime.split(':').map(Number);
+        duration = (endHours * 60 + endMinutes) - (startHours * 60 + startMinutes);
+        if (duration <= 0) duration = 60; // 최소 1시간
+      } catch (e) {
+        duration = 60;
+      }
+    }
 
     try {
       if (editingTodoId) {
         console.log("일정 수정 시작:", editingTodoId, formData);
         // 수정 모드 - API 호출
-        const todoData = {
+        // 기존 일정 정보 가져오기
+        const existingTodo = todos.find(t => t.id === editingTodoId);
+
+        // 날짜 형식 정규화 함수
+        const normalizeDate = (date: any): string => {
+          if (typeof date === 'string') {
+            return date;
+          } else if (date && typeof date === 'object' && 'getFullYear' in date) {
+            const d = date as Date;
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          } else {
+            return String(date || '');
+          }
+        };
+
+        // 날짜 형식 정규화
+        const newDateStr = normalizeDate(formData.date);
+
+        // all_day가 true일 때는 start_time과 end_time을 null로 설정
+        const todoData: any = {
           title: formData.title,
           description: formData.memo || "",
           memo: formData.memo || "",
           location: formData.location || "",
-          date: formData.date,
-          start_time: formData.startTime,
-          end_time: formData.endTime,
+          date: newDateStr, // 날짜는 항상 전송 (사용자가 변경할 수 있도록)
           all_day: formData.isAllDay,
           category: formData.category,
-          status: todos.find(t => t.id === editingTodoId)?.completed ? 'completed' : 'pending',
+          status: existingTodo?.completed ? 'completed' : 'pending',
           has_notification: formData.hasNotification,
           notification_times: formData.alarmTimes || [],
           repeat_type: formData.repeatType || "none",
           checklist_items: formData.checklistItems.filter(item => item.trim() !== ''),
         };
 
+        // all_day가 false일 때만 start_time과 end_time 설정
+        // 빈 문자열이나 "24:00" 같은 잘못된 값은 null로 변환
+        if (!formData.isAllDay && formData.startTime && formData.endTime) {
+          // 빈 문자열이나 유효하지 않은 시간은 null로 설정
+          const startTime = formData.startTime.trim() === '' || formData.startTime === '24:00' ? null : formData.startTime;
+          const endTime = formData.endTime.trim() === '' || formData.endTime === '24:00' ? null : formData.endTime;
+          todoData.start_time = startTime;
+          todoData.end_time = endTime;
+        } else {
+          // all_day가 true이거나 시간이 없으면 null로 설정
+          todoData.start_time = null;
+          todoData.end_time = null;
+        }
+
         console.log("일정 수정 데이터:", todoData);
+        console.log("일정 수정 데이터 JSON:", JSON.stringify(todoData, null, 2));
         const response = await apiClient.updateTodo(editingTodoId, todoData);
         console.log("일정 수정 응답:", response);
 
@@ -876,8 +916,20 @@ export function CalendarHomeScreen() {
     } catch (error: any) {
       console.error("일정 저장 실패:", error);
       console.error("에러 상세:", error.response?.data || error.message);
+      console.error("에러 상세 (전체):", JSON.stringify(error.response?.data, null, 2));
+      if (error.response?.data?.detail && Array.isArray(error.response.data.detail)) {
+        console.error("검증 에러 상세:");
+        error.response.data.detail.forEach((err: any, index: number) => {
+          console.error(`[${index}] 필드: ${err.loc?.join('.') || 'unknown'}, 메시지: ${err.msg || 'unknown'}, 타입: ${err.type || 'unknown'}`);
+        });
+      }
       console.error("에러 스택:", error.stack);
-      toast.error(`일정 저장에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
+      const errorMessage = error.response?.data?.detail
+        ? (Array.isArray(error.response.data.detail)
+          ? error.response.data.detail.map((e: any) => `${e.loc?.join('.')}: ${e.msg}`).join(', ')
+          : error.response.data.detail)
+        : error.message || "알 수 없는 오류";
+      toast.error(`일정 저장에 실패했습니다: ${errorMessage}`);
     }
   };
 

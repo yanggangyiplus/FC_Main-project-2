@@ -88,7 +88,7 @@ class TodoUpdate(BaseModel):
     """할일 수정"""
     title: Optional[str] = None
     description: Optional[str] = None
-    date: Optional[date] = None
+    date: Optional[str] = None  # 문자열로 받아서 엔드포인트에서 변환
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     all_day: Optional[bool] = None
@@ -98,7 +98,7 @@ class TodoUpdate(BaseModel):
     location: Optional[str] = None
     memo: Optional[str] = None
     repeat_type: Optional[str] = None
-    repeat_end_date: Optional[date] = None
+    repeat_end_date: Optional[str] = None  # 문자열로 받아서 엔드포인트에서 변환
     repeat_days: Optional[str] = None
     has_notification: Optional[bool] = None
     notification_times: Optional[List[str]] = None
@@ -204,7 +204,16 @@ class OCRRequest(BaseModel):
 
 
 class OCRResponse(BaseModel):
-    """OCR 응답"""
+    """OCR 텍스트 추출 응답"""
+    text: str
+    language: Optional[str] = "unknown"
+    confidence: float = 0.0
+    method: Optional[str] = None
+    timestamp: Optional[str] = None
+
+
+class OCRReceiptResponse(BaseModel):
+    """OCR 영수증 추출 응답"""
     vendor: Optional[str] = None
     amount: Optional[float] = None
     date: Optional[date] = None

@@ -304,6 +304,95 @@ JSON 형식으로만 응답해주세요. 다른 설명 없이 JSON만 반환해�
         return mime_types.get(ext, 'audio/mpeg')
 
 
+class GeminiOCRService:
+    """
+    Google Gemini Vision API OCR 서비스
+    이미지에서 텍스트 추출
+    """
+    
+    def __init__(self, api_key: str = None):
+        self.api_key = api_key or settings.google_gemini_api_key
+        
+        if not self.api_key:
+            logger.warning("Google Gemini API key not configured")
+    
+    async def extract_text(
+        self,
+        image_data: bytes,
+        mime_type: str = 'image/jpeg'
+    ) -> Dict:
+        """
+        이미지에서 텍스트 추출 (바이트 데이터 직접 처리)
+        """
+        if not self.api_key:
+            logger.error("Google Gemini API key not configured")
+            return {
+                'success': False,
+                'text': '',
+                'error': 'API key not configured',
+                'backend': 'gemini',
+            }
+        
+        try:
+            import google.generativeai as genai
+            import base64
+            from PIL import Image
+            import io
+            
+            genai.configure(api_key=self.api_key)
+            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            
+            # 이미지 데이터를 PIL Image로 변환하여 검증
+            try:
+                image = Image.open(io.BytesIO(image_data))
+                # 이미지를 RGB로 변환 (RGBA인 경우)
+                if image.mode != 'RGB':
+                    image = image.convert('RGB')
+                
+                # 이미지를 base64로 인코딩
+                buffer = io.BytesIO()
+                image.save(buffer, format='JPEG')
+                image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            except Exception as img_error:
+                logger.error(f"이미지 처리 오류: {img_error}")
+                # 직접 base64 인코딩 시도
+                image_base64 = base64.b64encode(image_data).decode('utf-8')
+            
+            # 프롬프트 작성
+            prompt = "이 이미지에서 모든 텍스트를 정확하게 추출해주세요. 한국어와 영어 모두 포함해서 추출해주세요. 텍스트가 없으면 '텍스트 없음'이라고 응답해주세요."
+            
+            # Gemini API 호출
+            response = model.generate_content([
+                {
+                    "mime_type": "image/jpeg",
+                    "data": image_base64
+                },
+                prompt
+            ])
+            
+            extracted_text = response.text.strip()
+            
+            # "텍스트 없음" 체크
+            if extracted_text.lower() in ['텍스트 없음', 'no text', 'text not found']:
+                extracted_text = ""
+            
+            return {
+                'success': True,
+                'text': extracted_text,
+                'confidence': 0.95,
+                'backend': 'gemini',
+            }
+            
+        except Exception as e:
+            logger.error(f"Gemini OCR error: {e}")
+            return {
+                'success': False,
+                'text': '',
+                'error': str(e),
+                'backend': 'gemini',
+            }
+
+
 class ClaudeOCRService:
     """
     Claude Vision API OCR 서비스

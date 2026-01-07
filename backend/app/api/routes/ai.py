@@ -6,12 +6,15 @@ from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import datetime
+import logging
 
 from app.database import get_db
 from app.models.user import User
-from app.schemas import STTResponse, OCRResponse
-from app.services.ai_service import GeminiSTTService, ClaudeOCRService, TesseractOCRService
+from app.schemas import STTResponse, OCRResponse, OCRReceiptResponse
+from app.services.ai_service import GeminiSTTService, GeminiOCRService, ClaudeOCRService, TesseractOCRService
 from app.api.routes.auth import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/ai",
@@ -20,6 +23,7 @@ router = APIRouter(
 )
 
 gemini_stt = GeminiSTTService()
+gemini_ocr = GeminiOCRService()
 claude_ocr = ClaudeOCRService()
 tesseract_ocr = TesseractOCRService()
 
@@ -79,35 +83,65 @@ async def transcribe_audio(
 @router.post("/ocr/extract-text", response_model=OCRResponse)
 async def extract_text_from_image(
     file: UploadFile = File(...),
-    method: str = "claude",
+    method: str = "gemini",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Extract text from image using Claude Vision or Tesseract OCR
+    Extract text from image using Gemini Vision, Claude Vision, or Tesseract OCR
     
     Methods:
-    - claude: High accuracy (requires API key)
+    - gemini: Google Gemini Vision (recommended, requires API key)
+    - claude: Claude Vision (requires API key)
     - tesseract: Local fallback (60-70% accuracy)
     """
     
     try:
         content = await file.read()
         
-        if method == "claude":
+        # MIME 타입 결정
+        mime_type = file.content_type or 'image/jpeg'
+        if not mime_type.startswith('image/'):
+            mime_type = 'image/jpeg'
+        
+        if method == "gemini":
+            result = await gemini_ocr.extract_text(content, mime_type)
+        elif method == "claude":
             result = await claude_ocr.extract_text(content)
         else:
             result = await tesseract_ocr.extract_text(content)
         
-        return {
-            "text": result["text"],
+        logger.info(f"OCR 서비스 결과: {result}")
+        logger.info(f"OCR 결과 타입: {type(result)}")
+        logger.info(f"OCR 결과 keys: {result.keys() if isinstance(result, dict) else 'not dict'}")
+        
+        if not result.get('success', False):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"OCR 처리 실패: {result.get('error', 'Unknown error')}"
+            )
+        
+        # result에서 text 추출
+        extracted_text = result.get("text", "")
+        logger.info(f"OCR 추출된 텍스트 (처음 100자): {extracted_text[:100] if extracted_text else 'empty'}")
+        logger.info(f"OCR 추출된 텍스트 길이: {len(extracted_text) if extracted_text else 0}")
+        
+        response_data = {
+            "text": extracted_text,
             "language": result.get("language", "unknown"),
             "confidence": result.get("confidence", 0.0),
             "method": method,
             "timestamp": datetime.utcnow().isoformat()
         }
         
+        logger.info(f"OCR 응답 데이터: {response_data}")
+        
+        return response_data
+        
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"OCR 처리 중 오류 발생: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"OCR 처리 실패: {str(e)}"

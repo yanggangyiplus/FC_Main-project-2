@@ -1,4 +1,4 @@
-import { X, Mic, Camera, FileText, Play, Square, Pause, RotateCcw, Eye, Upload } from "lucide-react";
+import { X, Mic, Camera, FileText, Play, Square, Pause, RotateCcw, Eye, Upload, FileSearch } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { apiClient } from "@/services/apiClient";
 import { toast } from "sonner";
@@ -42,12 +42,19 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [currentImageBlob, setCurrentImageBlob] = useState<Blob | null>(null); // 현재 이미지 Blob 저장
+  const [extractionFailed, setExtractionFailed] = useState(false); // 추출 실패 여부
   // STT State
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcribedText, setTranscribedText] = useState<string>("");
   // LLM 일정 정보 추출 State
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedTodoInfo, setExtractedTodoInfo] = useState<ExtractedTodoInfo | null>(null);
+
+  // transcribedText 상태 변경 디버깅
+  useEffect(() => {
+    console.log("transcribedText 상태 변경됨:", transcribedText);
+  }, [transcribedText]);
 
   useEffect(() => {
     return () => {
@@ -234,9 +241,22 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
     };
     reader.readAsDataURL(file);
 
-    // Blob으로 변환하여 업로드
+    // Blob으로 변환하여 저장
     const blob = file.slice(0, file.size, file.type);
-    await uploadImage(blob);
+    setCurrentImageBlob(blob);
+
+    // 텍스트와 일정 정보 초기화
+    setTranscribedText("");
+    setExtractedTodoInfo(null);
+    setExtractionFailed(false);
+
+    // 자동으로 텍스트 추출 시도
+    try {
+      await uploadImage(blob);
+    } catch (error) {
+      console.error("자동 텍스트 추출 실패:", error);
+      setExtractionFailed(true);
+    }
 
     // 파일 input 초기화
     if (fileInputRef.current) {
@@ -255,10 +275,22 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
         const imageUrl = canvas.toDataURL("image/jpeg");
         setCapturedImage(imageUrl);
 
-        // Convert to Blob for upload
+        // Convert to Blob for storage
         canvas.toBlob(async (blob) => {
           if (blob) {
-            await uploadImage(blob);
+            setCurrentImageBlob(blob);
+            // 텍스트와 일정 정보 초기화
+            setTranscribedText("");
+            setExtractedTodoInfo(null);
+            setExtractionFailed(false);
+
+            // 자동으로 텍스트 추출 시도
+            try {
+              await uploadImage(blob);
+            } catch (error) {
+              console.error("자동 텍스트 추출 실패:", error);
+              setExtractionFailed(true);
+            }
           }
         }, 'image/jpeg');
       }
@@ -271,19 +303,44 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
     }
   };
 
+  // 수동 텍스트 추출 핸들러
+  const handleExtractText = async () => {
+    if (!currentImageBlob) {
+      toast.error("이미지가 없습니다.");
+      return;
+    }
+
+    setExtractionFailed(false);
+    await uploadImage(currentImageBlob);
+  };
+
   const uploadImage = async (blob: Blob) => {
     setIsUploading(true);
-    const formData = new FormData();
-    formData.append("file", blob, "capture.jpg");
+    setExtractionFailed(false);
 
     try {
       // OCR로 텍스트 추출
       const ocrResponse = await apiClient.extractTextFromImage(blob);
-      console.log("OCR 응답:", ocrResponse);
+      console.log("OCR 응답 전체:", ocrResponse);
+      console.log("OCR 응답 data:", ocrResponse?.data);
+      console.log("OCR 응답 data JSON:", JSON.stringify(ocrResponse?.data, null, 2));
+      console.log("OCR 응답 data.text:", ocrResponse?.data?.text);
+      console.log("OCR 응답 data.data:", ocrResponse?.data?.data);
+      console.log("OCR 응답 data.data?.text:", ocrResponse?.data?.data?.text);
 
-      if (ocrResponse && ocrResponse.data && ocrResponse.data.text) {
-        const extractedText = ocrResponse.data.text;
+      // 응답 구조 확인 및 텍스트 추출 (여러 가능한 구조 시도)
+      const extractedText = ocrResponse?.data?.text
+        || ocrResponse?.data?.data?.text
+        || (typeof ocrResponse?.data === 'string' ? ocrResponse.data : "")
+        || "";
+
+      console.log("추출된 텍스트:", extractedText);
+      console.log("추출된 텍스트 길이:", extractedText?.length);
+      console.log("transcribedText 상태 업데이트 전:", transcribedText);
+
+      if (extractedText && extractedText.trim().length > 0) {
         setTranscribedText(extractedText);
+        console.log("transcribedText 상태 업데이트 후:", extractedText);
         toast.success("이미지에서 텍스트를 추출했습니다.");
 
         // LLM으로 일정 정보 추출
@@ -311,25 +368,30 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
             };
             setExtractedTodoInfo(extractedInfo);
             toast.success("일정 정보가 자동으로 추출되었습니다.");
+            setExtractionFailed(false);
           } else {
             console.error("일정 정보 추출 응답 데이터 없음:", todoInfoResponse);
             toast.error("일정 정보 추출에 실패했습니다.");
+            setExtractionFailed(true);
           }
         } catch (error: any) {
           console.error("일정 정보 추출 실패:", error);
           console.error("에러 상세:", error.response?.data || error.message);
           toast.error(`일정 정보 추출 실패: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
+          setExtractionFailed(true);
         } finally {
           setIsExtracting(false);
         }
       } else {
         console.error("OCR 응답 데이터 없음:", ocrResponse);
         toast.error("텍스트 추출에 실패했습니다.");
+        setExtractionFailed(true);
       }
     } catch (error: any) {
       console.error("Error processing image:", error);
       console.error("에러 상세:", error.response?.data || error.message);
       toast.error(`이미지 처리 실패: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
+      setExtractionFailed(true);
     } finally {
       setIsUploading(false);
     }
@@ -481,7 +543,7 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
                     <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-white text-sm">
-                      카메라를 시작하거나 사진을 선택해주세요
+                      사진을 첨부해 주세요.
                     </div>
                   )}
                 </div>
@@ -501,11 +563,23 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
                       <button onClick={handleCapture} disabled className="flex-1 py-2 bg-gray-200 text-gray-400 rounded-lg flex items-center justify-center gap-1 cursor-not-allowed">
                         <Camera size={18} /> 촬영
                       </button>
+                      <button
+                        onClick={handleExtractText}
+                        disabled={isUploading || isExtracting || !currentImageBlob}
+                        className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${extractionFailed || !transcribedText
+                          ? 'bg-[#6366F1] text-white hover:bg-[#5558E3]'
+                          : 'bg-[#10B981] text-white hover:bg-[#059669]'
+                          }`}
+                      >
+                        <FileSearch size={18} />
+                        {isUploading || isExtracting
+                          ? '추출 중...'
+                          : extractionFailed || !transcribedText
+                            ? '텍스트 추출'
+                            : '다시 추출'}
+                      </button>
                       <button onClick={handleRetake} className="flex-1 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg hover:bg-[#E5E7EB] flex items-center justify-center gap-1">
                         <RotateCcw size={18} /> 다시 선택
-                      </button>
-                      <button onClick={handleView} className="flex-1 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] flex items-center justify-center gap-1">
-                        <Eye size={18} /> 보기
                       </button>
                     </>
                   ) : (
@@ -520,13 +594,13 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
                         }}
                         className="flex-1 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] flex items-center justify-center gap-1"
                       >
-                        <Camera size={18} /> {stream ? '촬영' : '카메라 시작'}
+                        <Camera size={18} /> {stream ? '촬영' : '카메라'}
                       </button>
                       <button
                         onClick={() => fileInputRef.current?.click()}
                         className="flex-1 py-2 bg-[#6366F1] text-white rounded-lg hover:bg-[#5558E3] flex items-center justify-center gap-1"
                       >
-                        <Upload size={18} /> 사진 선택
+                        <Upload size={18} /> 업로드
                       </button>
                       <button
                         onClick={() => {
