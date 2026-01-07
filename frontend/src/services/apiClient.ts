@@ -180,6 +180,81 @@ class APIClient {
       params: { date },
     })
   }
+
+  // Routine (시간표) endpoints
+  async getRoutines() {
+    return this.client.get('/routines')
+  }
+
+  async getRoutine(id: string) {
+    return this.client.get(`/routines/${id}`)
+  }
+
+  async createRoutine(data: any) {
+    return this.client.post('/routines', data)
+  }
+
+  async updateRoutine(id: string, data: any) {
+    return this.client.patch(`/routines/${id}`, data)
+  }
+
+  async deleteRoutine(id: string) {
+    return this.client.delete(`/routines/${id}`)
+  }
+
+  // Family endpoints
+  async getFamilyMembers() {
+    return this.client.get('/family/members')
+  }
+
+  async createFamilyMember(data: any) {
+    return this.client.post('/family/members', data)
+  }
+
+  async updateFamilyMember(id: string, data: any) {
+    return this.client.patch(`/family/members/${id}`, data)
+  }
+
+  async deleteFamilyMember(id: string) {
+    return this.client.delete(`/family/members/${id}`)
+  }
+
+  // User endpoints
+  async updateUser(data: any) {
+    return this.client.patch('/auth/me', data)
+  }
+
+  // File upload endpoints
+  async uploadAudioFile(audioFile: File, todoId?: string) {
+    const formData = new FormData()
+    formData.append('file', audioFile)
+    if (todoId) {
+      formData.append('todo_id', todoId)
+    }
+
+    return this.client.post('/files/audio', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    })
+  }
+
+  async uploadImageFile(imageFile: File, todoId?: string, memoId?: string) {
+    const formData = new FormData()
+    formData.append('file', imageFile)
+    if (todoId) {
+      formData.append('todo_id', todoId)
+    }
+    if (memoId) {
+      formData.append('memo_id', memoId)
+    }
+
+    return this.client.post('/files/image', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    })
+  }
 }
 
 export const apiClient = new APIClient()

@@ -34,6 +34,8 @@ class Todo(BaseModel):
     
     title = Column(String(255), nullable=False)
     description = Column(Text)
+    memo = Column(Text)  # 메모
+    location = Column(String(255))  # 장소
     
     date = Column(Date, nullable=False, index=True)
     start_time = Column(Time)
@@ -207,4 +209,85 @@ class Memo(BaseModel):
     __table_args__ = (
         Index('idx_memos_user', 'user_id'),
         Index('idx_memos_created_at', 'created_at'),
+    )
+
+
+class Routine(BaseModel):
+    """시간표/루틴"""
+    __tablename__ = "routines"
+    
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    member_id = Column(String(36), ForeignKey("family_members.id", ondelete="SET NULL"), index=True)
+    
+    name = Column(String(255), nullable=False)
+    color = Column(String(50))
+    category = Column(String(50))
+    memo = Column(Text)
+    
+    # 시간표 슬롯 (JSON 형식으로 저장)
+    # 예: [{"day": 1, "startTime": "09:00", "duration": 60}, ...]
+    time_slots = Column(Text, nullable=False)  # JSON 배열
+    
+    # 캘린더 연동 여부
+    add_to_calendar = Column(Boolean, default=False)
+    
+    # 관계
+    user = relationship("User", back_populates="routines")
+    member = relationship("FamilyMember")
+    
+    __table_args__ = (
+        Index('idx_routines_user', 'user_id'),
+        Index('idx_routines_member', 'member_id'),
+    )
+
+
+class AudioFile(BaseModel):
+    """녹음 파일"""
+    __tablename__ = "audio_files"
+    
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    todo_id = Column(String(36), ForeignKey("todos.id", ondelete="SET NULL"), index=True)
+    
+    file_path = Column(String(500), nullable=False)
+    file_url = Column(String(500))
+    file_name = Column(String(255))
+    file_size = Column(Integer)  # bytes
+    mime_type = Column(String(100))
+    
+    transcribed_text = Column(Text)  # STT로 변환된 텍스트
+    
+    # 관계
+    user = relationship("User", back_populates="audio_files")
+    todo = relationship("Todo")
+    
+    __table_args__ = (
+        Index('idx_audio_files_user', 'user_id'),
+        Index('idx_audio_files_todo', 'todo_id'),
+    )
+
+
+class ImageFile(BaseModel):
+    """이미지 파일 (사진)"""
+    __tablename__ = "image_files"
+    
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    todo_id = Column(String(36), ForeignKey("todos.id", ondelete="SET NULL"), index=True)
+    memo_id = Column(String(36), ForeignKey("memos.id", ondelete="SET NULL"), index=True)
+    
+    file_path = Column(String(500), nullable=False)
+    file_url = Column(String(500))
+    file_name = Column(String(255))
+    file_size = Column(Integer)  # bytes
+    mime_type = Column(String(100))
+    
+    extracted_text = Column(Text)  # OCR로 추출된 텍스트
+    
+    # 관계
+    user = relationship("User", back_populates="image_files")
+    todo = relationship("Todo")
+    memo = relationship("Memo")
+    
+    __table_args__ = (
+        Index('idx_image_files_user', 'user_id'),
+        Index('idx_image_files_todo', 'todo_id'),
     )

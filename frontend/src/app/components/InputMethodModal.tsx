@@ -74,7 +74,7 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
         if (mediaRecorder.state === 'recording') {
           mediaRecorder.stop();
         }
-      }, 10000);
+      }, 30000); // 30초로 변경
 
     } catch (error) {
       console.error("Error accessing microphone:", error);
@@ -244,7 +244,7 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
                 <div className="flex items-center gap-2">
                   <div className={`w-3 h-3 rounded-full bg-[#FF9B82] ${isRecording ? 'animate-pulse' : ''}`} />
                   <span className="text-sm text-[#6B7280]">
-                    {isRecording ? '녹음 중... (최대 10초)' : '녹음 완료'}
+                    {isRecording ? '녹음 중... (최대 30초)' : '녹음 완료'}
                   </span>
                 </div>
 

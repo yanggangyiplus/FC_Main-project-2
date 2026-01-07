@@ -67,7 +67,15 @@ export function RoutineView({
   } | null>(null);
 
   const [resizeMode, setResizeMode] = useState<'top' | 'bottom' | null>(null);
+  const [hasMoved, setHasMoved] = useState(false);
   const [dragStartY, setDragStartY] = useState(0);
+  const [tempRoutineUpdate, setTempRoutineUpdate] = useState<{
+    routineId: string;
+    slotIndex: number;
+    day: number;
+    startTime: string;
+    duration: number;
+  } | null>(null);
 
   // Popup State
   const [hoveredRoutine, setHoveredRoutine] = useState<{
@@ -128,11 +136,11 @@ export function RoutineView({
       setNewRoutineEndTime("10:00");
     }
     setNewRoutineDays(routine.timeSlots.map(s => s.day));
-    
+
     // 해당 시간표가 이미 캘린더에 추가되어 있는지 확인
     const isInCalendar = todos.some(t => t.id.startsWith(`routine-calendar-${routine.id}-`));
     setAddToCalendar(isInCalendar);
-    
+
     setShowAddRoutine(true);
   };
 
@@ -153,6 +161,11 @@ export function RoutineView({
     if (newRoutineDays.length === 0) {
       toast.error("최소 1개 이상의 요일을 선택해주세요.");
       return;
+    }
+
+    // 새로 추가하는 경우에만 체크박스 초기화
+    if (!editingRoutineId) {
+      setAddToCalendar(false);
     }
 
     const colors = [
@@ -182,12 +195,13 @@ export function RoutineView({
           })
         };
         onUpdateRoutine(updatedRoutine); // Use prop
-        
+
         // 캘린더 추가/제거 처리
         if (onToggleRoutineInCalendar) {
           onToggleRoutineInCalendar(updatedRoutine, addToCalendar);
         }
-        
+
+        // 수정 모드에서는 체크박스 상태를 유지 (초기화하지 않음)
         setEditingRoutineId(null);
         toast.success("시간표 항목이 수정되었습니다.");
       }
@@ -205,12 +219,12 @@ export function RoutineView({
         }),
       };
       onAddRoutine(newRoutine); // Use prop
-      
+
       // 캘린더 추가/제거 처리
       if (onToggleRoutineInCalendar) {
         onToggleRoutineInCalendar(newRoutine, addToCalendar);
       }
-      
+
       toast.success(`${newRoutineName} 항목이 추가되었습니다.`);
     }
 
@@ -218,7 +232,8 @@ export function RoutineView({
     setNewRoutineStartTime("09:00");
     setNewRoutineEndTime("10:00");
     setNewRoutineDays([]);
-    setAddToCalendar(false);
+    // 체크박스 상태는 초기화하지 않음 (다음에 수정할 때 유지되도록)
+    // setAddToCalendar(false); // 주석 처리
     setShowAddRoutine(false);
   };
 
@@ -231,6 +246,7 @@ export function RoutineView({
     duration: number
   ) => {
     e.stopPropagation();
+    setHasMoved(false);
     setDraggedRoutine({ routineId, day, slotIndex, originalTime: time, originalDuration: duration });
     setDragStartY(e.clientY);
     setResizeMode(null); // Move
@@ -256,12 +272,20 @@ export function RoutineView({
 
     // Prevent default selection
     e.preventDefault();
+    e.stopPropagation();
 
     const deltaY = e.clientY - dragStartY;
 
     if (Math.abs(deltaY) > 5) {
-      // Sensitivity logic
-      const minutesDelta = Math.round((deltaY / window.innerHeight) * (24 * 60));
+      setHasMoved(true);
+      // Sensitivity logic - 컨테이너 높이 기준으로 계산
+      const container = e.currentTarget as HTMLElement;
+      const containerHeight = container.clientHeight || 480; // 기본값 480px (24시간 * 20px)
+      // 각 시간 슬롯이 20px 높이이므로, 20px = 60분
+      const minutesPerPixel = (24 * 60) / containerHeight;
+      const minutesDelta = Math.round(deltaY * minutesPerPixel);
+
+      console.log("드래그 중:", { deltaY, containerHeight, minutesDelta });
 
       const [hours, minutes] = draggedRoutine.originalTime.split(":").map(Number);
       const startTotalMinutes = hours * 60 + minutes;
@@ -298,25 +322,48 @@ export function RoutineView({
       const validHours = Math.max(0, Math.min(23, newHours));
       const newTime = `${String(validHours).padStart(2, "0")}:${String(newMins).padStart(2, "0")}`;
 
-      // Find routine and update it via prop
-      const routineToUpdate = routines.find(r => r.id === draggedRoutine.routineId);
-      if (routineToUpdate) {
-        const updatedRoutine = {
-          ...routineToUpdate,
-          timeSlots: routineToUpdate.timeSlots.map((slot, index) =>
-            index === draggedRoutine.slotIndex && slot.day === draggedRoutine.day
-              ? { ...slot, startTime: newTime, duration: newDuration }
-              : slot
-          )
-        };
-        onUpdateRoutine(updatedRoutine);
-      }
+      // 드래그 중에는 임시 상태만 저장 (API 호출은 handleMouseUp에서)
+      setTempRoutineUpdate({
+        routineId: draggedRoutine.routineId,
+        slotIndex: draggedRoutine.slotIndex,
+        day: draggedRoutine.day,
+        startTime: newTime,
+        duration: newDuration
+      });
     }
   };
 
   const handleMouseUp = () => {
+    console.log("handleMouseUp 호출:", { draggedRoutine, hasMoved, tempRoutineUpdate });
+
+    // 드래그가 아닌 클릭인 경우 수정 모드로 진입
+    if (draggedRoutine && !hasMoved) {
+      console.log("클릭 감지 - 수정 모드 진입");
+      const routine = routines.find(r => r.id === draggedRoutine.routineId);
+      if (routine) {
+        handleEditClick(routine);
+      }
+    } else if (draggedRoutine && hasMoved && tempRoutineUpdate) {
+      console.log("드래그 완료 - API 호출", tempRoutineUpdate);
+      // 드래그가 끝났을 때만 API 호출
+      const routineToUpdate = routines.find(r => r.id === tempRoutineUpdate.routineId);
+      if (routineToUpdate) {
+        const updatedRoutine = {
+          ...routineToUpdate,
+          timeSlots: routineToUpdate.timeSlots.map((slot, index) =>
+            index === tempRoutineUpdate.slotIndex && slot.day === tempRoutineUpdate.day
+              ? { ...slot, startTime: tempRoutineUpdate.startTime, duration: tempRoutineUpdate.duration }
+              : slot
+          )
+        };
+        console.log("업데이트할 시간표:", updatedRoutine);
+        onUpdateRoutine(updatedRoutine);
+      }
+    }
     setDraggedRoutine(null);
     setResizeMode(null);
+    setHasMoved(false);
+    setTempRoutineUpdate(null);
   };
 
   const handleMouseEnter = (e: React.MouseEvent, routine: RoutineItem, slot: any) => {
@@ -562,15 +609,25 @@ export function RoutineView({
                     return routine.timeSlots.map((slot, slotIndex) => {
                       if (slot.day !== dayIndex) return null;
 
-                      const top = getTimePosition(slot.startTime);
-                      const height = getDurationHeight(slot.duration);
+                      // 드래그 중인 경우 임시 업데이트 값 사용
+                      const isDragging = draggedRoutine?.routineId === routine.id &&
+                        draggedRoutine?.day === dayIndex &&
+                        draggedRoutine?.slotIndex === slotIndex;
+
+                      const displayStartTime = isDragging && tempRoutineUpdate
+                        ? tempRoutineUpdate.startTime
+                        : slot.startTime;
+                      const displayDuration = isDragging && tempRoutineUpdate
+                        ? tempRoutineUpdate.duration
+                        : slot.duration;
+
+                      const top = getTimePosition(displayStartTime);
+                      const height = getDurationHeight(displayDuration);
 
                       return (
                         <div
                           key={`${routine.id}-${slotIndex}-${memberId}`}
-                          className={`absolute left-0.5 right-0.5 rounded px-1 py-1 cursor-move text-white shadow-sm hover:shadow-md transition-shadow group ${draggedRoutine?.routineId === routine.id &&
-                            draggedRoutine?.day === dayIndex &&
-                            draggedRoutine?.slotIndex === slotIndex
+                          className={`absolute left-0.5 right-0.5 rounded px-1 py-1 cursor-move text-white shadow-sm hover:shadow-md transition-shadow group ${isDragging
                             ? "ring-2 ring-white scale-105 z-20"
                             : "z-10"
                             }`}
@@ -585,10 +642,6 @@ export function RoutineView({
                           onMouseDown={(e) =>
                             handleMouseDown(e, routine.id, dayIndex, slotIndex, slot.startTime, slot.duration)
                           }
-                          onDoubleClick={(e) => {
-                            e.stopPropagation();
-                            handleEditClick(routine);
-                          }}
                           onMouseEnter={(e) => handleMouseEnter(e, routine, slot)}
                           onMouseLeave={handleMouseLeave}
                         >

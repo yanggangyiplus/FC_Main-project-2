@@ -12,7 +12,13 @@ interface MyPageScreenProps {
   onEmojiChange: (emoji: string) => void;
 }
 
-const EMOJI_LIST = ["🐼", "🐻", "🐨", "🐯", "🦁", "🐶", "🐱", "🐰", "🐭", "🐹", "🐷", "🐸", "🐵", "🦊", "🐺", "🐗", "🐴", "🦄", "🐝", "🐛", "🦋", "🐌", "🐞", "🐜", "🦟", "🦗", "🕷️", "🦂", "🐢", "🐍", "🦎", "🦖", "🦕", "🐙", "🦑", "🦐", "🦞", "🦀", "🐡", "🐠", "🐟", "🐬", "🐳", "🐋", "🦈", "🐊", "🐅", "🐆", "🦓", "🦍", "🦧", "🐘", "🦛", "🦏", "🐪", "🐫", "🦒", "🦘", "🦡", "🐾", "🦃", "🐓", "🐔", "🐣", "🐤", "🐥", "🐦", "🐧", "🦅", "🦆", "🦢", "🦉", "🦩", "🦚", "🦜", "🐦‍⬛", "🪿", "🦤", "🪶", "🦅", "🦆", "🦢", "🦉", "🦩", "🦚", "🦜", "🐦‍⬛", "🪿", "🦤", "🪶"];
+// 중복 제거된 이모지 리스트 (동물 + 사람)
+const EMOJI_LIST = [
+  // 동물 이모지
+  "🐼", "🐻", "🐨", "🐯", "🦁", "🐶", "🐱", "🐰", "🐭", "🐹", "🐷", "🐸", "🐵", "🦊", "🐺", "🐗", "🐴", "🦄", "🐝", "🐛", "🦋", "🐌", "🐞", "🐜", "🦟", "🦗", "🕷️", "🦂", "🐢", "🐍", "🦎", "🦖", "🦕", "🐙", "🦑", "🦐", "🦞", "🦀", "🐡", "🐠", "🐟", "🐬", "🐳", "🐋", "🦈", "🐊", "🐅", "🐆", "🦓", "🦍", "🦧", "🐘", "🦛", "🦏", "🐪", "🐫", "🦒", "🦘", "🦡", "🐾", "🦃", "🐓", "🐔", "🐣", "🐤", "🐥", "🐦", "🐧", "🦅", "🦆", "🦢", "🦉", "🦩", "🦚", "🦜", "🐦‍⬛", "🪿", "🦤", "🪶",
+  // 사람 이모지
+  "👤", "👥", "👨", "👩", "👨‍🦱", "👩‍🦱", "👨‍🦰", "👩‍🦰", "👨‍🦳", "👩‍🦳", "👨‍🦲", "👩‍🦲", "👶", "👧", "👦", "🧑", "🧑‍🦱", "🧑‍🦰", "🧑‍🦳", "🧑‍🦲", "👨‍👩‍👧", "👨‍👩‍👦", "👨‍👩‍👧‍👦", "👨‍👨‍👦", "👩‍👩‍👧", "👴", "👵", "🧓", "👱", "👱‍♂️", "👱‍♀️"
+];
 
 export function MyPageScreen({ isOpen, onClose, userName, userEmail, selectedEmoji, onUserNameChange, onEmojiChange }: MyPageScreenProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -82,17 +88,16 @@ export function MyPageScreen({ isOpen, onClose, userName, userEmail, selectedEmo
                     </button>
                   </div>
                   <div className="grid grid-cols-8 gap-2">
-                    {EMOJI_LIST.map((emoji) => (
+                    {EMOJI_LIST.map((emoji, index) => (
                       <button
-                        key={emoji}
+                        key={`emoji-${index}-${emoji}`}
                         onClick={() => {
                           onEmojiChange(emoji);
                           setShowEmojiPicker(false);
                           toast.success("프로필 이모지가 변경되었습니다!");
                         }}
-                        className={`w-10 h-10 text-2xl rounded-lg hover:bg-[#F3F4F6] transition-colors flex items-center justify-center ${
-                          selectedEmoji === emoji ? 'bg-[#FFE8E0] ring-2 ring-[#FF9B82]' : ''
-                        }`}
+                        className={`w-10 h-10 text-2xl rounded-lg hover:bg-[#F3F4F6] transition-colors flex items-center justify-center ${selectedEmoji === emoji ? 'bg-[#FFE8E0] ring-2 ring-[#FF9B82]' : ''
+                          }`}
                       >
                         {emoji}
                       </button>

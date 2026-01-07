@@ -31,6 +31,9 @@ class User(BaseModel):
     notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
     receipts = relationship("Receipt", back_populates="user", cascade="all, delete-orphan")
     memos = relationship("Memo", back_populates="user", cascade="all, delete-orphan")
+    routines = relationship("Routine", back_populates="user", cascade="all, delete-orphan")
+    audio_files = relationship("AudioFile", back_populates="user", cascade="all, delete-orphan")
+    image_files = relationship("ImageFile", back_populates="user", cascade="all, delete-orphan")
     
     # 인덱스
     __table_args__ = (

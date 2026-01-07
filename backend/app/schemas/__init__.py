@@ -1,8 +1,8 @@
 """
 Pydantic 스키마 (데이터 검증)
 """
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
+from typing import Optional, List, Union, Any
 from datetime import datetime, date
 from decimal import Decimal
 
@@ -44,13 +44,39 @@ class TodoBase(BaseModel):
     """할일 기본 스키마"""
     title: str
     description: Optional[str] = None
-    date: date
+    date: date  # Pydantic v2가 자동으로 문자열을 date로 변환
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     all_day: bool = False
     category: Optional[str] = None
     priority: str = "medium"
     status: str = "pending"
+    location: Optional[str] = None
+    memo: Optional[str] = None
+    repeat_type: Optional[str] = "none"  # none, daily, weekly, monthly, yearly
+    repeat_end_date: Optional[date] = None
+    repeat_days: Optional[str] = None
+    has_notification: bool = False
+    notification_times: Optional[List[str]] = None
+    family_member_ids: Optional[List[str]] = None
+    checklist_items: Optional[List[str]] = None
+    
+    # Pydantic v2 설정
+    model_config = {
+        "json_encoders": {
+            date: lambda v: v.isoformat() if v else None
+        },
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "title": "새 일정",
+                    "date": "2024-01-15",
+                    "start_time": "09:00",
+                    "end_time": "10:00"
+                }
+            ]
+        }
+    }
 
 
 class TodoCreate(TodoBase):
@@ -62,8 +88,22 @@ class TodoUpdate(BaseModel):
     """할일 수정"""
     title: Optional[str] = None
     description: Optional[str] = None
+    date: Optional[date] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    all_day: Optional[bool] = None
+    category: Optional[str] = None
     status: Optional[str] = None
     priority: Optional[str] = None
+    location: Optional[str] = None
+    memo: Optional[str] = None
+    repeat_type: Optional[str] = None
+    repeat_end_date: Optional[date] = None
+    repeat_days: Optional[str] = None
+    has_notification: Optional[bool] = None
+    notification_times: Optional[List[str]] = None
+    family_member_ids: Optional[List[str]] = None
+    checklist_items: Optional[List[str]] = None
 
 
 class TodoResponse(TodoBase):
@@ -209,3 +249,50 @@ class ReceiptStatsResponse(BaseModel):
     total_count: int
     average_amount: float
     payment_types: dict
+
+
+# ==================== Routine ==================== 
+
+class RoutineTimeSlot(BaseModel):
+    """시간표 시간 슬롯"""
+    day: int  # 0(일) ~ 6(토)
+    startTime: str  # "HH:MM"
+    duration: int  # 분 단위
+
+
+class RoutineBase(BaseModel):
+    """시간표 기본 스키마"""
+    name: str
+    member_id: str
+    color: Optional[str] = None
+    category: Optional[str] = None
+    memo: Optional[str] = None
+    time_slots: List[RoutineTimeSlot]
+    add_to_calendar: bool = False
+
+
+class RoutineCreate(RoutineBase):
+    """시간표 생성"""
+    pass
+
+
+class RoutineUpdate(BaseModel):
+    """시간표 수정"""
+    name: Optional[str] = None
+    member_id: Optional[str] = None
+    color: Optional[str] = None
+    category: Optional[str] = None
+    memo: Optional[str] = None
+    time_slots: Optional[List[RoutineTimeSlot]] = None
+    add_to_calendar: Optional[bool] = None
+
+
+class RoutineResponse(RoutineBase):
+    """시간표 응답"""
+    id: str
+    user_id: str
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True

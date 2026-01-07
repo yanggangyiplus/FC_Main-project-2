@@ -42,8 +42,10 @@ async def add_family_member(
         user_id=current_user.id,
         name=member.name,
         emoji=member.emoji,
-        color=member.color or "#000000",
-        relation=member.relation or "other"
+        color_code=member.color or "#000000",
+        relation=member.relation or "other",
+        phone_number=getattr(member, 'phone_number', None),
+        notes=getattr(member, 'notes', None)
     )
     
     db.add(db_member)
@@ -75,14 +77,16 @@ async def get_family_member(
     return member
 
 
-@router.put("/members/{member_id}", response_model=FamilyMemberResponse)
+@router.patch("/members/{member_id}", response_model=FamilyMemberResponse)
 async def update_family_member(
     member_id: str,
-    member_update: FamilyMemberCreate,
+    member_update: dict,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Update family member"""
+    from app.schemas import FamilyMemberCreate
+    
     member = db.query(FamilyMember).filter(
         FamilyMember.id == member_id,
         FamilyMember.user_id == current_user.id,
@@ -95,10 +99,20 @@ async def update_family_member(
             detail="가족 구성원을 찾을 수 없습니다"
         )
     
-    member.name = member_update.name
-    member.emoji = member_update.emoji
-    member.color = member_update.color or member.color
-    member.relation = member_update.relation or member.relation
+    # 업데이트할 필드만 변경
+    if 'name' in member_update:
+        member.name = member_update['name']
+    if 'emoji' in member_update:
+        member.emoji = member_update['emoji']
+    if 'color' in member_update:
+        member.color_code = member_update['color']
+    if 'relation' in member_update:
+        member.relation = member_update['relation']
+    if 'phone_number' in member_update:
+        member.phone_number = member_update['phone_number']
+    if 'notes' in member_update:
+        member.notes = member_update['notes']
+    
     member.updated_at = datetime.utcnow()
     
     db.commit()

@@ -40,10 +40,18 @@ export interface TodoFormData {
   repeatType: 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
 }
 
+// 로컬 날짜를 YYYY-MM-DD 형식으로 변환하는 헬퍼 함수
+const formatLocalDate = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+};
+
 export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoModalProps) {
   const [formData, setFormData] = useState<TodoFormData>({
     title: initialData?.title || '',
-    date: initialData?.date || new Date().toISOString().split('T')[0],
+    date: initialData?.date || formatLocalDate(new Date()),
     startTime: initialData?.startTime || initialData?.time || '09:00',
     endTime: initialData?.endTime || '10:00',
     isAllDay: initialData?.isAllDay || false,
@@ -62,7 +70,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
     if (initialData) {
       setFormData({
         title: initialData.title || '',
-        date: initialData.date || new Date().toISOString().split('T')[0],
+        date: initialData.date || formatLocalDate(new Date()),
         startTime: initialData.startTime || initialData.time || '09:00',
         endTime: initialData.endTime || '10:00',
         isAllDay: initialData.isAllDay || false,
@@ -79,7 +87,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
       // 초기화
       setFormData({
         title: '',
-        date: new Date().toISOString().split('T')[0],
+        date: formatLocalDate(new Date()),
         startTime: '09:00',
         endTime: '10:00',
         isAllDay: false,

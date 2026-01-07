@@ -52,11 +52,34 @@ async def global_exception_handler(request: Request, exc: Exception):
     if os.getenv("ENVIRONMENT") == "development":
         response_data["traceback"] = error_traceback
     
-    return JSONResponse(
+    # CORS 헤더 추가
+    response = JSONResponse(
         status_code=500,
         content=response_data
     )
+    
+    # CORS 헤더 수동 추가 (에러 발생 시에도 CORS 헤더 전송)
+    from app.config import get_cors_origins
+    origin = request.headers.get("origin")
+    if origin and origin in get_cors_origins():
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+    
+    return response
 
+
+# 루트 경로
+@app.get("/")
+async def root():
+    """루트 엔드포인트"""
+    return {
+        "message": "Always Plan API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health"
+    }
 
 # 헬스 체크
 @app.get("/health")
@@ -70,13 +93,15 @@ async def health_check():
 
 
 # 라우터 포함
-from app.api.routes import auth, todos, receipts, ai, family
+from app.api.routes import auth, todos, receipts, ai, family, routines, files
 
 app.include_router(auth.router)
 app.include_router(todos.router)
 app.include_router(receipts.router)
 app.include_router(ai.router)
 app.include_router(family.router)
+app.include_router(routines.router)
+app.include_router(files.router)
 
 from app.api.routes import memos
 app.include_router(memos.router)

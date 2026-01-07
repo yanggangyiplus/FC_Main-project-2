@@ -302,6 +302,27 @@ async def get_current_user(
     return user
 
 
+@router.patch("/me")
+async def update_current_user(
+    user_update: dict,
+    current_user: 'User' = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """현재 사용자 정보 업데이트"""
+    from app.schemas import UserUpdate
+    
+    # UserUpdate 스키마로 변환
+    update_data = UserUpdate(**user_update)
+    
+    # 업데이트할 필드만 추출
+    update_dict = update_data.dict(exclude_unset=True)
+    
+    # 사용자 정보 업데이트
+    updated_user = UserRepository.update(db, current_user.id, update_dict)
+    
+    return updated_user.to_dict()
+
+
 @router.get("/me")
 async def get_current_user_endpoint(
     current_user: 'User' = Depends(get_current_user)
