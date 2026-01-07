@@ -19,6 +19,7 @@ import {
   Calendar,
   Repeat,
   Trash2,
+  MapPin,
 } from "lucide-react";
 import { TodoAddSheet } from "./TodoAddSheet";
 import { MemberAddSheet } from "./MemberAddSheet";
@@ -49,6 +50,7 @@ export function CalendarHomeScreen() {
   const [userEmail, setUserEmail] = useState("momflow@email.com");
   const [userName, setUserName] = useState("홍길동");
   const [selectedEmoji, setSelectedEmoji] = useState("🐼");
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   // Family members for user selection
   interface FamilyMember {
@@ -209,6 +211,7 @@ export function CalendarHomeScreen() {
     endTime?: string;
     isAllDay?: boolean;
     memo?: string;
+    location?: string;
     hasNotification?: boolean;
     alarmTimes?: string[];
     repeatType?: "none" | "daily" | "weekly" | "monthly";
@@ -264,6 +267,7 @@ export function CalendarHomeScreen() {
         endTime: formData.endTime,
         isAllDay: formData.isAllDay,
         memo: formData.memo,
+        location: formData.location,
         hasNotification: formData.hasNotification,
         alarmTimes: formData.alarmTimes,
         repeatType: formData.repeatType,
@@ -291,6 +295,7 @@ export function CalendarHomeScreen() {
         endTime: formData.endTime,
         isAllDay: formData.isAllDay,
         memo: formData.memo,
+        location: formData.location,
         hasNotification: formData.hasNotification,
         alarmTimes: formData.alarmTimes,
         repeatType: formData.repeatType,
@@ -770,19 +775,20 @@ export function CalendarHomeScreen() {
                   <MonthCalendar
                     todos={todos}
                     routines={filteredRoutines}
+                    selectedDate={selectedDate}
                     onDateSelect={(date) => {
-                      toast.info(`${date} 날짜를 선택했습니다.`);
+                      setSelectedDate(date);
                     }}
                     onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
                   />
 
-                  {/* Recent To-Do List (최근 3개) */}
+                  {/* Selected Date Todos */}
                   <div className="pt-4 border-t border-[#F3F4F6]">
                     <h3 className="font-semibold text-[#1F2937] mb-3 px-1">
-                      최근 일정
+                      일정
                     </h3>
                     <div className="space-y-2">
-                      {displayTodos.slice(0, 3).map((todo) => (
+                      {(selectedDate ? todos.filter(t => t.date === selectedDate) : displayTodos).map((todo) => (
                         <div
                           key={todo.id}
                           className={`${getCategoryColor(todo.category)} border-l-4 rounded-lg p-3 cursor-pointer hover:shadow-sm transition-all`}
@@ -1012,6 +1018,14 @@ export function CalendarHomeScreen() {
                         </span>
                       </div>
 
+                      {/* 장소 */}
+                      {todo.location && (
+                        <div className="flex items-center gap-3 text-sm text-[#6B7280]">
+                          <MapPin size={18} className="text-[#9CA3AF]" />
+                          <span>{todo.location}</span>
+                        </div>
+                      )}
+
                       {/* 미루기 설정 */}
                       <div className="flex items-center gap-3 text-sm text-[#6B7280] pt-3 border-t border-[#E5E7EB]">
                         <label className="flex items-center gap-2 cursor-pointer">
@@ -1029,7 +1043,7 @@ export function CalendarHomeScreen() {
                             }}
                             className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-2 focus:ring-[#FF9B82]"
                           />
-                          <span className="text-sm text-[#1F2937]">오늘 일정 완료하지 못하면 다음날로 미루기</span>
+                          <span className="text-sm text-[#1F2937]">미루기</span>
                         </label>
                       </div>
 
@@ -1115,15 +1129,28 @@ export function CalendarHomeScreen() {
                   </div>
                 </div>
 
-                {/* 수정 버튼 */}
-                <div className="mt-6 pt-4 border-t border-[#E5E7EB]">
+                {/* 수정 및 삭제 버튼 */}
+                <div className="mt-6 pt-4 border-t border-[#E5E7EB] flex gap-3">
+                  <button
+                    onClick={() => {
+                      if (window.confirm('이 일정을 삭제하시겠습니까?')) {
+                        setTodos(prev => prev.filter(t => t.id !== todo.id));
+                        setSelectedTodoForDetail(null);
+                        toast.success('일정이 삭제되었습니다.');
+                      }
+                    }}
+                    className="flex-1 px-4 py-3 bg-[#EF4444] text-white rounded-lg hover:bg-[#DC2626] transition-colors font-medium flex items-center justify-center gap-2"
+                  >
+                    <Trash2 size={18} />
+                    삭제
+                  </button>
                   <button
                     onClick={() => {
                       setEditingTodoId(todo.id);
                       setShowAddTodoModal(true);
                       setSelectedTodoForDetail(null);
                     }}
-                    className="w-full px-4 py-3 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] transition-colors font-medium flex items-center justify-center gap-2"
+                    className="flex-1 px-4 py-3 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] transition-colors font-medium flex items-center justify-center gap-2"
                   >
                     <Edit2 size={18} />
                     수정

@@ -13,11 +13,12 @@ interface MonthCalendarProps {
     date?: string;
   }>;
   routines?: RoutineItem[]; // Added routines prop
+  selectedDate?: string | null; // 선택된 날짜
   onDateSelect?: (date: string) => void;
   onTodoClick?: (todoId: string) => void;
 }
 
-export function MonthCalendar({ todos, routines = [], onDateSelect, onTodoClick }: MonthCalendarProps) {
+export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect, onTodoClick }: MonthCalendarProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [hoveredDate, setHoveredDate] = useState<number | null>(null);
 
@@ -73,20 +74,24 @@ export function MonthCalendar({ todos, routines = [], onDateSelect, onTodoClick 
     const events = getEventsForDay(day);
     const hasEvent = events.length > 0;
     const isTodayDate = isToday(day);
+    const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const isSelectedDate = selectedDate === dateStr && !isTodayDate;
 
     days.push(
       <button
         key={day}
         onClick={() => {
-          const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
           onDateSelect?.(dateStr);
         }}
         onMouseEnter={() => setHoveredDate(day)}
         onMouseLeave={() => setHoveredDate(null)}
-        className={`aspect-square flex flex-col items-center justify-center rounded-lg relative transition-all hover:bg-[#FFF0EB] ${isTodayDate
-          ? "bg-[#FF9B82] text-white font-bold"
-          : "text-[#1F2937]"
-          }`}
+        className={`aspect-square flex flex-col items-center justify-center rounded-lg relative transition-all hover:bg-[#FFF0EB] ${
+          isTodayDate
+            ? "bg-[#FF9B82] text-white font-bold"
+            : isSelectedDate
+            ? "bg-[#FFE8E0] text-[#1F2937]"
+            : "text-[#1F2937]"
+        }`}
       >
         <span className="text-sm">{day}</span>
         {hasEvent && !isTodayDate && (

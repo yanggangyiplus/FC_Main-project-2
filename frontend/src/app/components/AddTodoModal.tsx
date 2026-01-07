@@ -1,4 +1,4 @@
-import { X, Calendar, Clock, Tag, Bell, Repeat, Plus, Trash2 } from "lucide-react";
+import { X, Calendar, Clock, Tag, Bell, Repeat, Plus, Trash2, MapPin } from "lucide-react";
 import { useState, useEffect } from "react";
 
 interface AddTodoModalProps {
@@ -17,6 +17,7 @@ interface AddTodoModalProps {
     category?: string;
     checklistItems?: string[];
     memo?: string;
+    location?: string;
     hasNotification?: boolean;
     alarmTimes?: string[];
     repeatType?: 'none' | 'daily' | 'weekly' | 'monthly';
@@ -33,6 +34,7 @@ export interface TodoFormData {
   category: string;
   checklistItems: string[]; // 항상 체크리스트 항목 사용
   memo: string;
+  location?: string; // 장소
   hasNotification: boolean;
   alarmTimes: string[];
   repeatType: 'none' | 'daily' | 'weekly' | 'monthly';
@@ -49,6 +51,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
     category: initialData?.category || '생활',
     checklistItems: initialData?.checklistItems && initialData.checklistItems.length > 0 ? initialData.checklistItems : [''],
     memo: initialData?.memo || '',
+    location: initialData?.location || '',
     hasNotification: initialData?.hasNotification || false,
     alarmTimes: initialData?.alarmTimes || [],
     repeatType: initialData?.repeatType || 'none',
@@ -67,6 +70,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
         category: initialData.category || '생활',
         checklistItems: initialData.checklistItems && initialData.checklistItems.length > 0 ? initialData.checklistItems : [''],
         memo: initialData.memo || '',
+        location: initialData.location || '',
         hasNotification: initialData.hasNotification || false,
         alarmTimes: initialData.alarmTimes || [],
         repeatType: initialData.repeatType || 'none',
@@ -165,6 +169,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
       category: '생활',
       checklistItems: [''],
       memo: '',
+      location: '',
       hasNotification: false,
       alarmTimes: [],
       repeatType: 'none',
@@ -319,6 +324,21 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
                   항목 추가
                 </button>
               </div>
+            </div>
+
+            {/* 장소 */}
+            <div>
+              <label className="block text-sm font-medium text-[#1F2937] mb-2 flex items-center gap-2">
+                <MapPin size={18} className="text-[#FF9B82]" />
+                장소
+              </label>
+              <input
+                type="text"
+                value={formData.location || ''}
+                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                placeholder="장소를 입력하세요"
+                className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
+              />
             </div>
 
             {/* 메모 */}
