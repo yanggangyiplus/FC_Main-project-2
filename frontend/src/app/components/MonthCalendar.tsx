@@ -57,12 +57,8 @@ export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect
       .filter((todo) => todo.date === dateStr)
       .map(t => ({ title: t.title, type: 'todo' })); // You might want color from category here if available
 
-    // 2. Routines (Active on this day of week)
-    const dayRoutines = routines
-      .filter(routine => routine.timeSlots.some(slot => slot.day === dayOfWeek))
-      .map(r => ({ title: r.name, type: 'routine' }));
-
-    return [...dayTodos, ...dayRoutines];
+    // 시간표는 캘린더에 표시하지 않음 (체크박스로 선택했을 때만 일정으로 추가됨)
+    return dayTodos;
   };
 
   const days = [];

@@ -56,35 +56,8 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
       regularTodos = [...regularTodos, ...todayMockTodos.filter(t => !regularTodos.find(rt => rt.id === t.id))];
     }
 
-    // 2. Routine Instances
-    const routineTodos: any[] = [];
-    routines.forEach(routine => {
-      routine.timeSlots.forEach(slot => {
-        if (slot.day === dayOfWeek) {
-          const instanceId = `routine-${routine.id}-${dateStr}`;
-
-          // Check for shadowing (exception exists)
-          const isShadowed = regularTodos.some(t => t.id === instanceId);
-
-          if (!isShadowed) {
-            routineTodos.push({
-              id: instanceId,
-              title: routine.name,
-              time: slot.startTime,
-              duration: slot.duration,
-              completed: false,
-              category: routine.category || "기타",
-              date: dateStr,
-              isRoutine: true,
-              routineId: routine.id,
-              // Mock other fields
-            });
-          }
-        }
-      });
-    });
-
-    return [...regularTodos, ...routineTodos];
+    // 시간표는 캘린더에 표시하지 않음 (체크박스로 선택했을 때만 일정으로 추가됨)
+    return regularTodos;
   };
 
   const getTimePosition = (time: string) => {

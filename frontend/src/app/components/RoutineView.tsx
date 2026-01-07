@@ -33,6 +33,8 @@ interface RoutineViewProps {
   onAddRoutine: (routine: RoutineItem) => void;
   onUpdateRoutine: (routine: RoutineItem) => void;
   onDeleteRoutine: (id: string) => void;
+  onToggleRoutineInCalendar?: (routine: RoutineItem, addToCalendar: boolean) => void;
+  todos?: Array<{ id: string }>; // 캘린더 일정 확인용
 }
 
 export function RoutineView({
@@ -44,13 +46,16 @@ export function RoutineView({
   onAddRoutine,
   onUpdateRoutine,
   onDeleteRoutine,
+  onToggleRoutineInCalendar,
+  todos = [],
 }: RoutineViewProps) {
 
   const [showAddRoutine, setShowAddRoutine] = useState(false);
   const [newRoutineName, setNewRoutineName] = useState("");
   const [newRoutineStartTime, setNewRoutineStartTime] = useState("09:00");
-  const [newRoutineDuration, setNewRoutineDuration] = useState(60);
+  const [newRoutineEndTime, setNewRoutineEndTime] = useState("10:00");
   const [newRoutineDays, setNewRoutineDays] = useState<number[]>([]);
+  const [addToCalendar, setAddToCalendar] = useState(false);
 
   // Drag & Resize State
   const [draggedRoutine, setDraggedRoutine] = useState<{
@@ -94,14 +99,40 @@ export function RoutineView({
 
   const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
 
+  // 시작 시간과 종료 시간으로부터 duration 계산
+  const calculateDuration = (startTime: string, endTime: string): number => {
+    const [startHours, startMinutes] = startTime.split(':').map(Number);
+    const [endHours, endMinutes] = endTime.split(':').map(Number);
+    const startTotalMinutes = startHours * 60 + startMinutes;
+    const endTotalMinutes = endHours * 60 + endMinutes;
+    const duration = endTotalMinutes - startTotalMinutes;
+    return duration > 0 ? duration : 60; // 최소 60분
+  };
+
   const handleEditClick = (routine: RoutineItem) => {
     setEditingRoutineId(routine.id);
     setNewRoutineName(routine.name);
     // Assuming uniform time for simple editing, else pick first slot
     const firstSlot = routine.timeSlots[0];
-    setNewRoutineStartTime(firstSlot ? firstSlot.startTime : "09:00");
-    setNewRoutineDuration(firstSlot ? firstSlot.duration : 60);
+    if (firstSlot) {
+      setNewRoutineStartTime(firstSlot.startTime);
+      // duration을 종료 시간으로 변환
+      const [startHours, startMinutes] = firstSlot.startTime.split(':').map(Number);
+      const startTotalMinutes = startHours * 60 + startMinutes;
+      const endTotalMinutes = startTotalMinutes + firstSlot.duration;
+      const endHours = Math.floor(endTotalMinutes / 60) % 24;
+      const endMins = endTotalMinutes % 60;
+      setNewRoutineEndTime(`${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}`);
+    } else {
+      setNewRoutineStartTime("09:00");
+      setNewRoutineEndTime("10:00");
+    }
     setNewRoutineDays(routine.timeSlots.map(s => s.day));
+    
+    // 해당 시간표가 이미 캘린더에 추가되어 있는지 확인
+    const isInCalendar = todos.some(t => t.id.startsWith(`routine-calendar-${routine.id}-`));
+    setAddToCalendar(isInCalendar);
+    
     setShowAddRoutine(true);
   };
 
@@ -131,6 +162,9 @@ export function RoutineView({
       "rgba(251, 146, 60, 0.6)",
     ];
 
+    // 종료 시간으로부터 duration 계산
+    const duration = calculateDuration(newRoutineStartTime, newRoutineEndTime);
+
     if (editingRoutineId) {
       // Update existing
       const existingRoutine = routines.find(r => r.id === editingRoutineId);
@@ -138,13 +172,22 @@ export function RoutineView({
         const updatedRoutine = {
           ...existingRoutine,
           name: newRoutineName,
-          timeSlots: newRoutineDays.map(day => ({
-            day,
-            startTime: newRoutineStartTime,
-            duration: newRoutineDuration
-          }))
+          timeSlots: newRoutineDays.map(day => {
+            console.log(`시간표 수정: 요일 인덱스 ${day} = ${weekDays[day]}`);
+            return {
+              day,
+              startTime: newRoutineStartTime,
+              duration: duration
+            };
+          })
         };
         onUpdateRoutine(updatedRoutine); // Use prop
+        
+        // 캘린더 추가/제거 처리
+        if (onToggleRoutineInCalendar) {
+          onToggleRoutineInCalendar(updatedRoutine, addToCalendar);
+        }
+        
         setEditingRoutineId(null);
         toast.success("시간표 항목이 수정되었습니다.");
       }
@@ -156,16 +199,26 @@ export function RoutineView({
         name: newRoutineName,
         color: colors[routines.length % colors.length],
         category: "기타",
-        timeSlots: newRoutineDays.map(day => ({ day, startTime: newRoutineStartTime, duration: newRoutineDuration })),
+        timeSlots: newRoutineDays.map(day => {
+          console.log(`시간표 저장: 요일 인덱스 ${day} = ${weekDays[day]}`);
+          return { day, startTime: newRoutineStartTime, duration: duration };
+        }),
       };
       onAddRoutine(newRoutine); // Use prop
+      
+      // 캘린더 추가/제거 처리
+      if (onToggleRoutineInCalendar) {
+        onToggleRoutineInCalendar(newRoutine, addToCalendar);
+      }
+      
       toast.success(`${newRoutineName} 항목이 추가되었습니다.`);
     }
 
     setNewRoutineName("");
     setNewRoutineStartTime("09:00");
-    setNewRoutineDuration(60);
+    setNewRoutineEndTime("10:00");
     setNewRoutineDays([]);
+    setAddToCalendar(false);
     setShowAddRoutine(false);
   };
 
@@ -315,8 +368,9 @@ export function RoutineView({
               setEditingRoutineId(null);
               setNewRoutineName("");
               setNewRoutineStartTime("09:00");
-              setNewRoutineDuration(60);
+              setNewRoutineEndTime("10:00");
               setNewRoutineDays([]);
+              setAddToCalendar(false);
               setShowAddRoutine(true);
             }}
             className="px-3 py-2 rounded-full text-sm font-medium bg-[#F3F4F6] text-[#6B7280] hover:bg-[#E5E7EB] transition-colors flex items-center gap-1"
@@ -357,14 +411,11 @@ export function RoutineView({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-[#6B7280] mb-2">지속 시간 (분)</label>
+              <label className="block text-sm font-medium text-[#6B7280] mb-2">종료 시간</label>
               <input
-                type="number"
-                min="15"
-                step="15"
-                value={newRoutineDuration}
-                onChange={(e) => setNewRoutineDuration(parseInt(e.target.value) || 15)}
-                placeholder="60"
+                type="time"
+                value={newRoutineEndTime}
+                onChange={(e) => setNewRoutineEndTime(e.target.value)}
                 className="w-full px-3 py-2 bg-[#F9FAFB] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF9B82] border border-[#E5E7EB]"
               />
             </div>
@@ -393,6 +444,21 @@ export function RoutineView({
               ))}
             </div>
           </div>
+
+          {/* 캘린더 추가 체크박스 */}
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="addToCalendar"
+              checked={addToCalendar}
+              onChange={(e) => setAddToCalendar(e.target.checked)}
+              className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-[#FF9B82] focus:ring-2"
+            />
+            <label htmlFor="addToCalendar" className="text-sm text-[#6B7280] cursor-pointer">
+              캘린더에 일정으로 추가
+            </label>
+          </div>
+
           <div className="flex gap-2 pt-2">
             {editingRoutineId && (
               <button
@@ -519,6 +585,10 @@ export function RoutineView({
                           onMouseDown={(e) =>
                             handleMouseDown(e, routine.id, dayIndex, slotIndex, slot.startTime, slot.duration)
                           }
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            handleEditClick(routine);
+                          }}
                           onMouseEnter={(e) => handleMouseEnter(e, routine, slot)}
                           onMouseLeave={handleMouseLeave}
                         >

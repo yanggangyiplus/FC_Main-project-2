@@ -20,7 +20,7 @@ interface AddTodoModalProps {
     location?: string;
     hasNotification?: boolean;
     alarmTimes?: string[];
-    repeatType?: 'none' | 'daily' | 'weekly' | 'monthly';
+    repeatType?: 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
   };
 }
 
@@ -37,7 +37,7 @@ export interface TodoFormData {
   location?: string; // 장소
   hasNotification: boolean;
   alarmTimes: string[];
-  repeatType: 'none' | 'daily' | 'weekly' | 'monthly';
+  repeatType: 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
 }
 
 export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoModalProps) {
@@ -100,6 +100,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
     { value: 'daily', label: '매일' },
     { value: 'weekly', label: '매주' },
     { value: 'monthly', label: '매월' },
+    { value: 'yearly', label: '매년' },
   ];
 
   if (!isOpen) return null;

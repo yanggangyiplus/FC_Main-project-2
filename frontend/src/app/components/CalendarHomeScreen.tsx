@@ -190,6 +190,96 @@ export function CalendarHomeScreen() {
     setRoutines(prev => [...prev, routine]);
   };
 
+  // 시간표를 캘린더 일정으로 추가/제거하는 함수
+  const handleToggleRoutineInCalendar = (routine: RoutineItem, addToCalendar: boolean) => {
+    if (addToCalendar) {
+      // 시간표의 각 요일별로 일정 생성
+      const today = new Date();
+      const currentYear = today.getFullYear();
+      const currentMonth = today.getMonth();
+      
+      let addedCount = 0;
+      routine.timeSlots.forEach(slot => {
+        console.log(`시간표 요일 처리: slot.day = ${slot.day} (${['일', '월', '화', '수', '목', '금', '토'][slot.day]})`);
+        // 이번 달의 해당 요일 찾기
+        const firstDayOfMonth = new Date(currentYear, currentMonth, 1);
+        const firstDayOfWeek = firstDayOfMonth.getDay(); // 0(일) ~ 6(토)
+        
+        // slot.day는 0(일) ~ 6(토) 순서로 저장됨
+        // 해당 요일이 이번 달에 처음 나타나는 날짜 찾기
+        // firstDayOfWeek는 1일의 요일 (0=일, 1=월, ..., 6=토)
+        // slot.day는 찾고자 하는 요일 (0=일, 1=월, ..., 6=토)
+        
+        // 1일부터 시작하여 해당 요일을 찾음
+        const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+        for (let day = 1; day <= daysInMonth; day++) {
+          const date = new Date(currentYear, currentMonth, day);
+          const actualDayOfWeek = date.getDay(); // 0(일) ~ 6(토)
+          
+          // 해당 요일인 경우에만 일정 추가
+          // slot.day는 0(일) ~ 6(토) 순서로 저장됨
+          // actualDayOfWeek도 0(일) ~ 6(토) 순서
+          if (actualDayOfWeek === slot.day) {
+            console.log(`일정 추가: ${day}일 (${['일', '월', '화', '수', '목', '금', '토'][actualDayOfWeek]}) - slot.day: ${slot.day}`);
+            const dateString = date.toISOString().split('T')[0];
+            
+            // 이 요일에 이미 일정이 있는지 확인 (중복 방지)
+            const existingTodo = todos.find(t => t.id === `routine-calendar-${routine.id}-${dateString}`);
+            if (existingTodo) continue;
+            
+            // 시작 시간과 종료 시간 계산
+            const [startHours, startMinutes] = slot.startTime.split(':').map(Number);
+            const startTotalMinutes = startHours * 60 + startMinutes;
+            const endTotalMinutes = startTotalMinutes + slot.duration;
+            const endHours = Math.floor(endTotalMinutes / 60) % 24;
+            const endMins = endTotalMinutes % 60;
+            const endTime = `${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}`;
+            
+            const newTodo: TodoItem = {
+              id: `routine-calendar-${routine.id}-${dateString}`,
+              title: routine.name,
+              time: slot.startTime,
+              duration: slot.duration,
+              completed: false,
+              category: routine.category || "기타",
+              date: dateString,
+              startTime: slot.startTime,
+              endTime: endTime,
+              isAllDay: false,
+              memo: routine.memo,
+              memberId: routine.memberId,
+              isRoutine: false, // 캘린더에 추가된 일정은 isRoutine을 false로 설정
+            };
+            
+            setTodos(prev => {
+              // 이미 존재하는지 확인
+              const exists = prev.some(t => t.id === newTodo.id);
+              if (exists) return prev;
+              addedCount++;
+              return [...prev, newTodo];
+            });
+          }
+        }
+      });
+      
+      if (addedCount > 0) {
+        toast.success(`${routine.name}이(가) 캘린더에 ${addedCount}개의 일정으로 추가되었습니다.`);
+      } else {
+        toast.info(`${routine.name}의 일정이 이미 캘린더에 존재합니다.`);
+      }
+    } else {
+      // 체크박스 해제 시 해당 시간표로 생성된 모든 일정 제거
+      setTodos(prev => {
+        const filtered = prev.filter(t => !t.id.startsWith(`routine-calendar-${routine.id}-`));
+        const removedCount = prev.length - filtered.length;
+        if (removedCount > 0) {
+          toast.success(`${routine.name}의 캘린더 일정 ${removedCount}개가 제거되었습니다.`);
+        }
+        return filtered;
+      });
+    }
+  };
+
   const handleRoutineUpdate = (updatedRoutine: RoutineItem) => {
     setRoutines(prev => prev.map(r => r.id === updatedRoutine.id ? updatedRoutine : r));
   };
@@ -214,7 +304,7 @@ export function CalendarHomeScreen() {
     location?: string;
     hasNotification?: boolean;
     alarmTimes?: string[];
-    repeatType?: "none" | "daily" | "weekly" | "monthly";
+    repeatType?: "none" | "daily" | "weekly" | "monthly" | "yearly";
     type?: "todo" | "checklist";
     checklistItems?: string[];
     postponeMinutes?: number;
@@ -442,47 +532,14 @@ export function CalendarHomeScreen() {
     }
   };
 
-  /* Helper to Merge Routines and Todos for a specific date */
+  /* Helper to get Todos for a specific date (시간표와 분리) */
   const getTodosForDate = (targetDate: Date) => {
-    const dayOfWeek = targetDate.getDay(); // 0 (Sun) - 6 (Sat)
     const dateString = targetDate.toISOString().split('T')[0];
 
-    // 1. Regular Todos for this date (or no date = daily?) 
-    const regularTodos = todos.filter(t => !t.date || t.date === dateString);
+    // Regular Todos만 반환 (시간표는 제외)
+    const regularTodos = todos.filter(t => (!t.date || t.date === dateString) && !t.isRoutine);
 
-    // 2. Routine Instances (Filtered by Selected Members)
-    const activeRoutines = routines.filter(r => selectedMembers.includes(r.memberId));
-
-    const routineTodos: any[] = []; // Use any or TodoItem interface if available
-    activeRoutines.forEach(routine => {
-      routine.timeSlots.forEach(slot => {
-        if (slot.day === dayOfWeek) {
-          const instanceId = `routine-${routine.id}-${dateString}`;
-
-          // Check if this instance is already "shadowed" by a real Todo (exception)
-          // The exception would have the SAME ID.
-          const isShadowed = regularTodos.some(t => t.id === instanceId);
-
-          if (!isShadowed) {
-            routineTodos.push({
-              id: instanceId, // Unique ID
-              title: routine.name,
-              time: slot.startTime,
-              duration: slot.duration,
-              completed: false,
-              category: routine.category || "기타",
-              date: dateString,
-              memberId: routine.memberId,
-              isRoutine: true,
-              routineId: routine.id,
-              memo: routine.memo,
-            });
-          }
-        }
-      });
-    });
-
-    return [...regularTodos, ...routineTodos].sort((a, b) => a.time.localeCompare(b.time));
+    return regularTodos.sort((a, b) => a.time.localeCompare(b.time));
   };
 
   const filteredRoutines = routines.filter(r => selectedMembers.includes(r.memberId));
@@ -715,6 +772,20 @@ export function CalendarHomeScreen() {
                 </div>
                 <ChevronRight size={18} className="text-[#9CA3AF]" />
               </button>
+
+              <button
+                onClick={() => {
+                  setShowProfileMenu(false);
+                  toast.info("사용설명서를 열었습니다.");
+                }}
+                className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <FileText size={20} className="text-[#6B7280]" />
+                  <span className="text-[#1F2937]">사용설명서</span>
+                </div>
+                <ChevronRight size={18} className="text-[#9CA3AF]" />
+              </button>
             </div>
 
             {/* Divider */}
@@ -774,7 +845,6 @@ export function CalendarHomeScreen() {
                 <>
                   <MonthCalendar
                     todos={todos}
-                    routines={filteredRoutines}
                     selectedDate={selectedDate}
                     onDateSelect={(date) => {
                       setSelectedDate(date);
@@ -841,7 +911,6 @@ export function CalendarHomeScreen() {
               {calendarView === "week" && (
                 <WeekCalendar
                   todos={todos}
-                  routines={filteredRoutines}
                   onTodoUpdate={handleTodoUpdate}
                   onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
                 />
@@ -851,7 +920,6 @@ export function CalendarHomeScreen() {
               {calendarView === "day" && (
                 <DayCalendar
                   todos={todos}
-                  routines={filteredRoutines}
                   onTodoUpdate={handleTodoUpdate}
                   onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
                 />
@@ -931,6 +999,8 @@ export function CalendarHomeScreen() {
               onAddRoutine={handleRoutineAdd}
               onUpdateRoutine={handleRoutineUpdate}
               onDeleteRoutine={handleRoutineDelete}
+              onToggleRoutineInCalendar={handleToggleRoutineInCalendar}
+              todos={todos}
             />
           )}
         </div>
@@ -1092,6 +1162,7 @@ export function CalendarHomeScreen() {
                             {todo.repeatType === 'daily' && '매일 반복'}
                             {todo.repeatType === 'weekly' && '매주 반복'}
                             {todo.repeatType === 'monthly' && '매월 반복'}
+                            {todo.repeatType === 'yearly' && '매년 반복'}
                           </span>
                         </div>
                       )}
