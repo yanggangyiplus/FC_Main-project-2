@@ -607,7 +607,7 @@ export function CalendarHomeScreen() {
 
       {/* 시간표 탭 아래에 사용자 선택 영역을 배치 (UX 개선: 탭 → 필터 순서) */}
       {activeTab === "routine" && (
-        <div className="bg-white px-4 py-3 border-b border-[#F3F4F6]">
+        <div className="bg-white px-4 pt-4 pb-5 mt-4 border-b border-[#F3F4F6]">
           <div className="flex items-center justify-between mb-3">
             <h4 className="font-semibold text-[#1F2937]">시간표</h4>
             <button
@@ -619,20 +619,20 @@ export function CalendarHomeScreen() {
             </button>
           </div>
           {/* 가로 스크롤 가능한 사용자 목록 */}
-          <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
+          <div className="flex gap-3 overflow-x-auto pt-2 pb-3 -mx-4 px-4 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
             {familyMembers.map((member) => {
               const isSelected = selectedMembers.includes(member.id);
               return (
                 <div key={member.id} className="flex-shrink-0 relative group">
                   <button
                     onClick={() => toggleMemberSelection(member.id)}
-                    className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all min-w-[80px] ${isSelected
+                    className={`flex flex-col items-center gap-1.5 p-2 rounded-xl transition-all min-w-[70px] ${isSelected
                       ? "bg-[#FF9B82] shadow-md scale-105"
                       : "bg-[#F9FAFB] hover:bg-[#F3F4F6]"
                       }`}
                   >
                     <div
-                      className={`w-10 h-10 rounded-full flex items-center justify-center text-xl transition-all relative ${isSelected
+                      className={`w-9 h-9 rounded-full flex items-center justify-center text-lg transition-all relative ${isSelected
                         ? "bg-white"
                         : "bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82]"
                         }`}
@@ -647,30 +647,31 @@ export function CalendarHomeScreen() {
                     </span>
                   </button>
                   {/* 편집 버튼 (호버 시 표시) */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingMemberId(member.id);
-                      setShowMemberAddSheet(true);
-                    }}
-                    className="absolute -top-1 -right-1 w-6 h-6 bg-[#6366F1] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-[#5558E3] z-10"
-                    title="수정"
-                  >
-                    <Edit2 size={12} />
-                  </button>
-                  {/* 삭제 버튼 (호버 시 표시, "나"는 제외) */}
+                  {/* 삭제 버튼 - 위에 배치 (호버 시 표시, "나"는 제외) */}
                   {member.id !== "1" && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         handleDeleteMember(member.id);
                       }}
-                      className="absolute -bottom-1 -right-1 w-6 h-6 bg-[#EF4444] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-[#DC2626] z-10"
+                      className="absolute -top-1 -right-1 w-6 h-6 bg-[#EF4444] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-[#DC2626] z-10"
                       title="삭제"
                     >
                       <Trash2 size={12} />
                     </button>
                   )}
+                  {/* 수정 버튼 - 아래에 배치 */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingMemberId(member.id);
+                      setShowMemberAddSheet(true);
+                    }}
+                    className="absolute -bottom-1 -right-1 w-6 h-6 bg-[#6366F1] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-[#5558E3] z-10"
+                    title="수정"
+                  >
+                    <Edit2 size={12} />
+                  </button>
                 </div>
               );
             })}
