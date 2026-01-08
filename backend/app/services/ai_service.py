@@ -186,17 +186,22 @@ class GeminiSTTService:
 
 추출해야 할 정보:
 1. title: 일정 제목 (필수)
-2. date: 날짜 (YYYY-MM-DD 형식, 언급이 없으면 오늘 날짜: {current_year}-{current_month:02d}-{current_day:02d})
-3. start_time: 시작 시간 (HH:MM 형식, 언급이 없으면 null)
-4. end_time: 종료 시간 (HH:MM 형식, 언급이 없으면 null)
-5. all_day: 하루종일 여부 (시간이 명시되지 않으면 true, 시간이 있으면 false)
-6. category: 카테고리 (언급이 없으면 내용을 바탕으로 자동 분류: 생활, 업무, 건강, 여가, 기타 중 하나)
-7. checklist: 체크리스트 항목 (일정을 토대로 2-5개의 항목을 추천, 배열로 반환)
-8. location: 장소 (언급이 있으면 추출, 없으면 빈 문자열)
-9. memo: 원본 텍스트 전체
-10. repeat_type: 반복 설정 (none, daily, weekly, monthly, yearly 중 하나, 언급이 없으면 none)
-11. has_notification: 알림 설정 (기본값 false)
-12. notification_times: 알림 시간 배열 (기본값 빈 배열)
+2. date: 시작 날짜 (YYYY-MM-DD 형식, 언급이 없으면 오늘 날짜: {current_year}-{current_month:02d}-{current_day:02d})
+3. end_date: 종료 날짜 (YYYY-MM-DD 형식, "부터 ~까지", "~일부터 ~일까지" 같은 표현이 있으면 종료 날짜 추출, 없으면 date와 동일하게 설정)
+   예시:
+   - "1월 10일부터 1월 13일까지 일본여행" → date: 2024-01-10, end_date: 2024-01-13
+   - "1월 20일에 생일파티" → date: 2024-01-20, end_date: 2024-01-20
+   - "내일 회의" → date: 오늘+1일, end_date: 오늘+1일
+4. start_time: 시작 시간 (HH:MM 형식, 언급이 없으면 null)
+5. end_time: 종료 시간 (HH:MM 형식, 언급이 없으면 null)
+6. all_day: 하루종일 여부 (시간이 명시되지 않으면 true, 시간이 있으면 false)
+7. category: 카테고리 (언급이 없으면 내용을 바탕으로 자동 분류: 생활, 업무, 건강, 여가, 기타 중 하나)
+8. checklist: 체크리스트 항목 (일정을 토대로 2-5개의 항목을 추천, 배열로 반환)
+9. location: 장소 (언급이 있으면 추출, 없으면 빈 문자열)
+10. memo: 원본 텍스트 전체
+11. repeat_type: 반복 설정 (none, daily, weekly, monthly, yearly 중 하나, 언급이 없으면 none)
+12. has_notification: 알림 설정 (기본값 false)
+13. notification_times: 알림 시간 배열 (기본값 빈 배열)
 
 텍스트: {text}
 
@@ -224,6 +229,19 @@ JSON 형식으로만 응답해주세요. 다른 설명 없이 JSON만 반환해�
                     parsed_date = datetime.strptime(result['date'], '%Y-%m-%d')
                 except:
                     result['date'] = f"{current_year}-{current_month:02d}-{current_day:02d}"
+            
+            # 종료 날짜 검증 및 기본값 설정 (없으면 시작 날짜와 동일하게)
+            if not result.get('end_date'):
+                result['end_date'] = result.get('date', f"{current_year}-{current_month:02d}-{current_day:02d}")
+            else:
+                # 종료 날짜 형식 검증
+                try:
+                    parsed_end_date = datetime.strptime(result['end_date'], '%Y-%m-%d')
+                    # 종료 날짜가 시작 날짜보다 이전이면 시작 날짜와 동일하게 설정
+                    if parsed_end_date < datetime.strptime(result['date'], '%Y-%m-%d'):
+                        result['end_date'] = result['date']
+                except:
+                    result['end_date'] = result.get('date', f"{current_year}-{current_month:02d}-{current_day:02d}")
             
             # 시간이 없으면 하루종일로 설정
             if not result.get('start_time') and not result.get('end_time'):
@@ -267,10 +285,12 @@ JSON 형식으로만 응답해주세요. 다른 설명 없이 JSON만 반환해�
         except json.JSONDecodeError as e:
             logger.error(f"JSON 파싱 오류: {e}, 응답: {response_text}")
             # 기본값 반환
+            default_date = f"{current_year}-{current_month:02d}-{current_day:02d}"
             return {
                 'success': True,
                 'title': text[:50] if text else '일정',
-                'date': f"{current_year}-{current_month:02d}-{current_day:02d}",
+                'date': default_date,
+                'end_date': default_date,  # 종료 날짜 기본값 (시작 날짜와 동일)
                 'start_time': None,
                 'end_time': None,
                 'all_day': True,

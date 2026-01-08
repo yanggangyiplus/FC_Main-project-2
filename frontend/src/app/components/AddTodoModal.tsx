@@ -9,6 +9,7 @@ interface AddTodoModalProps {
     id?: string;
     title?: string;
     date?: string;
+    endDate?: string; // 종료 날짜 (여러 날 선택 시)
     time?: string;
     startTime?: string;
     endTime?: string;

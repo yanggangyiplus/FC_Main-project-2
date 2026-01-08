@@ -263,6 +263,7 @@ async def extract_todo_info(
         return {
             "title": result.get("title", ""),
             "date": result.get("date"),
+            "end_date": result.get("end_date", result.get("date")),  # 종료 날짜 (없으면 시작 날짜와 동일)
             "start_time": result.get("start_time"),
             "end_time": result.get("end_time"),
             "all_day": result.get("all_day", False),

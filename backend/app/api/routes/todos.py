@@ -71,7 +71,8 @@ async def get_todos(
             "created_at": todo.created_at,
             "updated_at": todo.updated_at,
             "google_calendar_event_id": todo.google_calendar_event_id,  # Google Calendar 이벤트 ID 추가
-            "bulk_synced": todo.bulk_synced if hasattr(todo, 'bulk_synced') else False  # 일괄 동기화 플래그
+            "bulk_synced": todo.bulk_synced if hasattr(todo, 'bulk_synced') else False,  # 일괄 동기화 플래그
+            "todo_group_id": todo.todo_group_id if hasattr(todo, 'todo_group_id') else None  # 일정 그룹 ID
         }
         result.append(todo_dict)
     
@@ -171,7 +172,8 @@ async def get_todo(
         "created_at": todo.created_at,  # datetime 객체 그대로 사용
         "updated_at": todo.updated_at,   # datetime 객체 그대로 사용
         "google_calendar_event_id": todo.google_calendar_event_id,  # Google Calendar 이벤트 ID 추가
-        "bulk_synced": todo.bulk_synced if hasattr(todo, 'bulk_synced') else False  # 일괄 동기화 플래그
+        "bulk_synced": todo.bulk_synced if hasattr(todo, 'bulk_synced') else False,  # 일괄 동기화 플래그
+        "todo_group_id": todo.todo_group_id if hasattr(todo, 'todo_group_id') else None  # 일정 그룹 ID
     }
     
     return TodoResponse(**response_data)
@@ -226,7 +228,8 @@ async def create_todo(
         notification_times=json.dumps(todo.notification_times) if todo.notification_times else None,
         family_member_ids=json.dumps(todo.family_member_ids) if todo.family_member_ids else None,
         tags=json.dumps([]),
-        source="text"
+        source="text",
+        todo_group_id=todo.todo_group_id  # 일정 그룹 ID (여러 날짜에 걸친 일정 묶기)
     )
     
     db.add(db_todo)
@@ -345,7 +348,10 @@ async def create_todo(
         "family_member_ids": json.loads(db_todo_with_items.family_member_ids) if db_todo_with_items.family_member_ids else [],
         "checklist_items": [item.text for item in db_todo_with_items.checklist_items],  # 문자열 리스트로 변환
         "created_at": db_todo_with_items.created_at,  # datetime 객체 그대로 사용
-        "updated_at": db_todo_with_items.updated_at   # datetime 객체 그대로 사용
+        "updated_at": db_todo_with_items.updated_at,   # datetime 객체 그대로 사용
+        "google_calendar_event_id": db_todo_with_items.google_calendar_event_id if hasattr(db_todo_with_items, 'google_calendar_event_id') else None,
+        "bulk_synced": db_todo_with_items.bulk_synced if hasattr(db_todo_with_items, 'bulk_synced') else False,
+        "todo_group_id": db_todo_with_items.todo_group_id if hasattr(db_todo_with_items, 'todo_group_id') else None  # 일정 그룹 ID
     }
     
     # Pydantic 모델로 변환하여 반환 (response_model과 일치)
@@ -588,7 +594,8 @@ async def update_todo(
         "created_at": updated_todo.created_at,  # datetime 객체 그대로 사용
         "updated_at": updated_todo.updated_at,   # datetime 객체 그대로 사용
         "google_calendar_event_id": updated_todo.google_calendar_event_id,  # Google Calendar 이벤트 ID 추가
-        "bulk_synced": updated_todo.bulk_synced if hasattr(updated_todo, 'bulk_synced') else False  # 일괄 동기화 플래그
+        "bulk_synced": updated_todo.bulk_synced if hasattr(updated_todo, 'bulk_synced') else False,  # 일괄 동기화 플래그
+        "todo_group_id": updated_todo.todo_group_id if hasattr(updated_todo, 'todo_group_id') else None  # 일정 그룹 ID
     }
     
     return TodoResponse(**response_data)
@@ -600,7 +607,7 @@ async def delete_todo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Soft delete todo"""
+    """Soft delete todo - 같은 그룹의 모든 일정도 함께 삭제"""
     todo = db.query(Todo).filter(
         Todo.id == todo_id,
         Todo.user_id == current_user.id,
@@ -618,40 +625,58 @@ async def delete_todo(
         logger = logging.getLogger(__name__)
         
         # 삭제 전 상태 로깅
-        logger.info(f"[DELETE-TODO] 삭제 시작: todo_id={todo_id}, user_id={current_user.id}, 현재 deleted_at={todo.deleted_at}")
+        logger.info(f"[DELETE-TODO] 삭제 시작: todo_id={todo_id}, user_id={current_user.id}, todo_group_id={todo.todo_group_id if hasattr(todo, 'todo_group_id') else None}")
+        
+        # 같은 그룹의 모든 일정 찾기 (todo_group_id가 있는 경우)
+        todos_to_delete = []
+        if hasattr(todo, 'todo_group_id') and todo.todo_group_id:
+            # 같은 그룹의 모든 일정 조회
+            todos_to_delete = db.query(Todo).filter(
+                Todo.todo_group_id == todo.todo_group_id,
+                Todo.user_id == current_user.id,
+                Todo.deleted_at.is_(None)
+            ).all()
+            logger.info(f"[DELETE-TODO] 같은 그룹의 일정 {len(todos_to_delete)}개 발견: todo_group_id={todo.todo_group_id}")
+        else:
+            # 그룹 ID가 없으면 현재 일정만 삭제
+            todos_to_delete = [todo]
         
         # Google Calendar 자동 삭제 (연동 활성화 및 내보내기 활성화 시)
         # 사용자 정보를 다시 로드하여 최신 토글 상태 확인
         db.refresh(current_user)
         export_enabled = getattr(current_user, 'google_calendar_export_enabled', 'false')
-        logger.info(f"[DELETE_TODO] Google Calendar 삭제 체크 - enabled={current_user.google_calendar_enabled}, token_exists={bool(current_user.google_calendar_token)}, export_enabled={export_enabled}, event_id={todo.google_calendar_event_id}")
-        logger.info(f"[DELETE_TODO] 사용자 정보 - user_id={current_user.id}, email={current_user.email}")
+        logger.info(f"[DELETE_TODO] Google Calendar 삭제 체크 - enabled={current_user.google_calendar_enabled}, token_exists={bool(current_user.google_calendar_token)}, export_enabled={export_enabled}")
         
-        if current_user.google_calendar_enabled == "true" and current_user.google_calendar_token and export_enabled == "true" and todo.google_calendar_event_id:
-            try:
-                from app.services.calendar_service import GoogleCalendarService
-                
-                # Google Calendar에서 이벤트 삭제
-                deleted = await GoogleCalendarService.delete_event(
-                    token_json=current_user.google_calendar_token,
-                    event_id=todo.google_calendar_event_id
-                )
-                
-                if deleted:
-                    logger.info(f"[DELETE-TODO] Google Calendar 이벤트 삭제 성공: {todo.google_calendar_event_id}")
-                else:
-                    logger.warning(f"[DELETE-TODO] Google Calendar 이벤트 삭제 실패: {todo.google_calendar_event_id}")
-            except Exception as e:
-                # Google Calendar 삭제 실패해도 Todo 삭제는 진행
-                logger.warning(f"[DELETE-TODO] Google Calendar 삭제 중 오류 (Todo는 삭제됨): {e}")
+        # 각 일정에 대해 Google Calendar 삭제 처리
+        for todo_item in todos_to_delete:
+            if current_user.google_calendar_enabled == "true" and current_user.google_calendar_token and export_enabled == "true" and todo_item.google_calendar_event_id:
+                try:
+                    from app.services.calendar_service import GoogleCalendarService
+                    
+                    # Google Calendar에서 이벤트 삭제
+                    deleted = await GoogleCalendarService.delete_event(
+                        token_json=current_user.google_calendar_token,
+                        event_id=todo_item.google_calendar_event_id
+                    )
+                    
+                    if deleted:
+                        logger.info(f"[DELETE-TODO] Google Calendar 이벤트 삭제 성공: {todo_item.google_calendar_event_id}")
+                    else:
+                        logger.warning(f"[DELETE-TODO] Google Calendar 이벤트 삭제 실패: {todo_item.google_calendar_event_id}")
+                except Exception as e:
+                    # Google Calendar 삭제 실패해도 Todo 삭제는 진행
+                    logger.warning(f"[DELETE-TODO] Google Calendar 삭제 중 오류 (Todo는 삭제됨): {e}")
         
-        # deleted_at 설정
+        # 같은 그룹의 모든 일정 삭제 (soft delete)
         deleted_at_value = datetime.utcnow()
-        todo.deleted_at = deleted_at_value
+        for todo_item in todos_to_delete:
+            todo_item.deleted_at = deleted_at_value
         
         # 커밋
         db.commit()
-        db.refresh(todo)
+        
+        # 삭제된 일정 수 로깅
+        logger.info(f"[DELETE-TODO] 삭제 완료: {len(todos_to_delete)}개 일정 삭제됨 (todo_group_id={todo.todo_group_id if hasattr(todo, 'todo_group_id') else None})")
         
         # 삭제 확인: deleted_at이 제대로 설정되었는지 확인
         if todo.deleted_at is None:
@@ -751,7 +776,10 @@ async def update_todo_status(
         "family_member_ids": json.loads(updated_todo.family_member_ids) if updated_todo.family_member_ids else [],
         "checklist_items": [item.text for item in updated_todo.checklist_items],  # 문자열 리스트로 변환
         "created_at": updated_todo.created_at,  # datetime 객체 그대로 사용
-        "updated_at": updated_todo.updated_at   # datetime 객체 그대로 사용
+        "updated_at": updated_todo.updated_at,   # datetime 객체 그대로 사용
+        "google_calendar_event_id": updated_todo.google_calendar_event_id if hasattr(updated_todo, 'google_calendar_event_id') else None,
+        "bulk_synced": updated_todo.bulk_synced if hasattr(updated_todo, 'bulk_synced') else False,
+        "todo_group_id": updated_todo.todo_group_id if hasattr(updated_todo, 'todo_group_id') else None  # 일정 그룹 ID
     }
     
     return TodoResponse(**response_data)

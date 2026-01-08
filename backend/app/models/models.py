@@ -64,6 +64,9 @@ class Todo(BaseModel):
     google_calendar_event_id = Column(String(255), index=True)  # Google Calendar 이벤트 ID 저장
     bulk_synced = Column(Boolean, default=False)  # 일괄 동기화로 생성된 일정인지 여부 (토글 꺼도 유지)
     
+    # 일정 그룹화 (여러 날짜에 걸친 일정을 하나로 묶기)
+    todo_group_id = Column(String(255), index=True)  # 같은 그룹의 일정들은 같은 todo_group_id를 가짐 (여러 날짜에 걸친 일정 묶기)
+    
     # 관계
     user = relationship("User", back_populates="todos")
     checklist_items = relationship("ChecklistItem", back_populates="todo", cascade="all, delete-orphan")

@@ -81,7 +81,7 @@ class TodoBase(BaseModel):
 
 class TodoCreate(TodoBase):
     """할일 생성"""
-    pass
+    todo_group_id: Optional[str] = None  # 여러 날짜에 걸친 일정을 묶기 위한 그룹 ID
 
 
 class TodoUpdate(BaseModel):
@@ -111,6 +111,7 @@ class TodoResponse(TodoBase):
     id: str
     user_id: str
     created_at: datetime
+    todo_group_id: Optional[str] = None  # 일정 그룹 ID (여러 날짜에 걸친 일정 묶기)
     
     class Config:
         from_attributes = True

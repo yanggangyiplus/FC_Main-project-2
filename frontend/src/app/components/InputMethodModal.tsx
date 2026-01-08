@@ -6,6 +6,7 @@ import { toast } from "sonner";
 interface ExtractedTodoInfo {
   title?: string;
   date?: string;
+  endDate?: string; // 종료 날짜 (여러 날짜에 걸친 일정)
   startTime?: string;
   endTime?: string;
   isAllDay?: boolean;
@@ -184,6 +185,7 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
                 const extractedInfo: ExtractedTodoInfo = {
                   title: info.title || '',
                   date: info.date,
+                  endDate: info.end_date || info.date, // 종료 날짜 (없으면 시작 날짜와 동일)
                   startTime: info.start_time || undefined,
                   endTime: info.end_time || undefined,
                   isAllDay: info.all_day || false,
@@ -491,6 +493,7 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
             const extractedInfo: ExtractedTodoInfo = {
               title: info.title || '',
               date: info.date,
+              endDate: info.end_date || info.date, // 종료 날짜 (없으면 시작 날짜와 동일)
               startTime: info.start_time || undefined,
               endTime: info.end_time || undefined,
               isAllDay: info.all_day || false,

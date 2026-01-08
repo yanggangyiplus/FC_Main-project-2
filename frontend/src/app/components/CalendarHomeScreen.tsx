@@ -498,6 +498,7 @@ export function CalendarHomeScreen() {
               source: 'always_plan' as const, // 기존 일정임을 명시
               googleCalendarEventId: todo.google_calendar_event_id || undefined, // Google Calendar 이벤트 ID 추가
               bulkSynced: todo.bulk_synced || false, // 동기화 후 저장 여부 (새로고침 후에도 유지되도록)
+              todoGroupId: todo.todo_group_id || undefined, // 일정 그룹 ID (여러 날짜에 걸친 일정 묶기)
             };
           });
           baseTodos = formattedTodos;
@@ -976,6 +977,7 @@ export function CalendarHomeScreen() {
     source?: 'always_plan' | 'google_calendar';
     googleCalendarEventId?: string;
     bulkSynced?: boolean; // 동기화 후 저장 여부 (새로고침 후에도 유지되도록)
+    todoGroupId?: string; // 여러 날짜에 걸친 일정을 묶기 위한 그룹 ID
     id: string;
     title: string;
     time: string;
@@ -983,6 +985,7 @@ export function CalendarHomeScreen() {
     completed: boolean;
     category: string;
     date?: string;
+    endDate?: string; // 종료 날짜 (여러 날 선택 시)
     startTime?: string;
     endTime?: string;
     isAllDay?: boolean;
@@ -1237,6 +1240,9 @@ export function CalendarHomeScreen() {
 
         console.log(`일정 추가: ${datesToCreate.length}개 날짜에 일정 생성 (${startDate}${endDate ? ` ~ ${endDate}` : ''})`);
 
+        // 여러 날짜에 걸친 일정인 경우 같은 그룹 ID 생성
+        const todoGroupId = datesToCreate.length > 1 ? `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}` : undefined;
+
         // 각 날짜마다 Todo 생성
         const createdTodos: any[] = [];
         let successCount = 0;
@@ -1244,7 +1250,7 @@ export function CalendarHomeScreen() {
 
         for (const dateStr of datesToCreate) {
           try {
-            const todoData = {
+            const todoData: any = {
               title: formData.title,
               description: formData.memo || "",
               memo: formData.memo || "",
@@ -1260,6 +1266,11 @@ export function CalendarHomeScreen() {
               repeat_type: formData.repeatType || "none",
               checklist_items: formData.checklistItems.filter(item => item.trim() !== ''),
             };
+
+            // 여러 날짜에 걸친 일정인 경우 그룹 ID 추가
+            if (todoGroupId) {
+              todoData.todo_group_id = todoGroupId;
+            }
 
             console.log(`일정 추가 데이터 (${dateStr}):`, todoData);
 
@@ -1300,6 +1311,7 @@ export function CalendarHomeScreen() {
                 postponeToNextDay: formData.postponeToNextDay,
                 isRoutine: false,
                 source: 'always_plan' as const,
+                todoGroupId: response.data.todo_group_id || todoGroupId, // 그룹 ID 저장
               };
 
               createdTodos.push(newTodo);
@@ -1344,8 +1356,6 @@ export function CalendarHomeScreen() {
       console.error("에러 응답:", error.response);
       console.error("에러 데이터:", error.response?.data);
       toast.error(`일정 저장 실패: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -1427,14 +1437,26 @@ export function CalendarHomeScreen() {
       }
 
       // Always Plan 일정인 경우 백엔드에 삭제 요청
+      // 같은 그룹의 모든 일정 찾기
+      const todosToDelete: TodoItem[] = [];
+      if (todoToDelete.todoGroupId) {
+        // 같은 그룹의 모든 일정 찾기
+        const groupTodos = todos.filter(t => t.todoGroupId === todoToDelete.todoGroupId);
+        todosToDelete.push(...groupTodos);
+        console.log(`같은 그룹의 일정 ${groupTodos.length}개 발견: todoGroupId=${todoToDelete.todoGroupId}`);
+      } else {
+        // 그룹 ID가 없으면 현재 일정만 삭제
+        todosToDelete.push(todoToDelete);
+      }
+
       // 먼저 프론트엔드 상태에서 제거 (즉시 UI 업데이트)
       setTodos((prev) => {
-        const filtered = prev.filter((todo) => todo.id !== id);
-        console.log("프론트엔드에서 일정 제거 완료, 남은 일정 수:", filtered.length);
+        const filtered = prev.filter((todo) => !todosToDelete.some(td => td.id === todo.id));
+        console.log(`프론트엔드에서 일정 ${todosToDelete.length}개 제거 완료, 남은 일정 수:`, filtered.length);
         return filtered;
       });
 
-      // 백엔드에 삭제 요청
+      // 백엔드에 삭제 요청 (첫 번째 일정 ID로 삭제하면 백엔드에서 같은 그룹의 모든 일정 삭제)
       const response = await apiClient.deleteTodo(id);
       console.log("일정 삭제 응답:", response);
       console.log("일정 삭제 응답 상태:", response?.status);
@@ -1442,7 +1464,11 @@ export function CalendarHomeScreen() {
       // API 호출 성공 여부 확인 (204 No Content는 응답 본문이 없을 수 있음)
       if (response && (response.status === 204 || response.status === 200)) {
         console.log("백엔드 삭제 성공 확인됨");
-        toast.success("일정이 삭제되었습니다.");
+        if (todosToDelete.length > 1) {
+          toast.success(`${todosToDelete.length}개 날짜의 일정이 모두 삭제되었습니다.`);
+        } else {
+          toast.success("일정이 삭제되었습니다.");
+        }
       } else {
         console.error("일정 삭제 실패: 예상치 못한 응답", response);
         toast.error("일정 삭제에 실패했습니다. 응답을 확인할 수 없습니다.");
@@ -2731,6 +2757,7 @@ export function CalendarHomeScreen() {
                 ? {
                   title: extractedTodoInfo.title || '',
                   date: extractedTodoInfo.date || formatLocalDate(new Date()),
+                  endDate: extractedTodoInfo.endDate || extractedTodoInfo.date || formatLocalDate(new Date()), // 종료 날짜 (없으면 시작 날짜와 동일)
                   startTime: extractedTodoInfo.startTime || (extractedTodoInfo.isAllDay ? '' : '09:00'),
                   endTime: extractedTodoInfo.endTime || (extractedTodoInfo.isAllDay ? '' : '10:00'),
                   isAllDay: extractedTodoInfo.isAllDay || false,
