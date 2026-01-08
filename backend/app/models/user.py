@@ -20,6 +20,10 @@ class User(BaseModel):
     google_id = Column(String(255), unique=True, index=True)
     picture_url = Column(String(500))  # Google 프로필 이미지 URL
     
+    # Google Calendar 연동
+    google_calendar_token = Column(String(2000))  # Google Calendar OAuth 토큰 (JSON 문자열)
+    google_calendar_enabled = Column(String(10), default="false")  # "true" 또는 "false"
+    
     # 로그인 관련
     last_login = Column(DateTime)
     deleted_at = Column(DateTime, index=True)  # 소프트 삭제

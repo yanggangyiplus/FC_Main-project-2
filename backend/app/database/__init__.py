@@ -81,9 +81,30 @@ def init_db():
                         except Exception as e:
                             logger.warning(f"✗ {column_name} 컬럼 추가 실패: {e}")
             
+            # users 테이블에 Google Calendar 필드 추가
+            if 'users' in inspector.get_table_names():
+                result = conn.execute(text("PRAGMA table_info(users)"))
+                existing_columns = [row[1] for row in result.fetchall()]
+                
+                if 'google_calendar_token' not in existing_columns:
+                    try:
+                        conn.execute(text("ALTER TABLE users ADD COLUMN google_calendar_token VARCHAR(2000)"))
+                        conn.commit()
+                        logger.info("✓ users 테이블에 google_calendar_token 컬럼 추가 완료")
+                    except Exception as e:
+                        logger.warning(f"✗ google_calendar_token 컬럼 추가 실패: {e}")
+                
+                if 'google_calendar_enabled' not in existing_columns:
+                    try:
+                        conn.execute(text("ALTER TABLE users ADD COLUMN google_calendar_enabled VARCHAR(10) DEFAULT 'false'"))
+                        conn.commit()
+                        logger.info("✓ users 테이블에 google_calendar_enabled 컬럼 추가 완료")
+                    except Exception as e:
+                        logger.warning(f"✗ google_calendar_enabled 컬럼 추가 실패: {e}")
+            
             # 다른 테이블에 deleted_at 컬럼 추가
             tables = [
-                'users', 'family_members', 'checklist_items',
+                'family_members', 'checklist_items',
                 'rules', 'rule_items', 'receipts', 'notifications',
                 'memos', 'routines', 'audio_files', 'image_files'
             ]

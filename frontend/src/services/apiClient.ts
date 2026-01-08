@@ -273,6 +273,45 @@ class APIClient {
       },
     })
   }
+
+  // Google Calendar endpoints
+  async getGoogleCalendarAuthUrl() {
+    return this.client.get('/calendar/google-auth-url')
+  }
+
+  async getCalendarStatus() {
+    return this.client.get('/calendar/status')
+  }
+
+  async enableCalendarSync() {
+    return this.client.post('/calendar/enable')
+  }
+
+  async disableCalendarSync() {
+    return this.client.post('/calendar/disable')
+  }
+
+  async googleCalendarCallback(code: string, state: string) {
+    return this.client.post('/calendar/google-callback', {
+      code,
+      state,
+    })
+  }
+
+  async getGoogleCalendarEvents(timeMin?: string, timeMax?: string, maxResults: number = 100) {
+    const params: any = { max_results: maxResults }
+    if (timeMin) params.time_min = timeMin
+    if (timeMax) params.time_max = timeMax
+    return this.client.get('/calendar/events', { params })
+  }
+
+  async testGoogleCalendarConnection() {
+    return this.client.get('/calendar/test-connection')
+  }
+
+  async debugListCalendars() {
+    return this.client.get('/calendar/debug/calendars')
+  }
 }
 
 export const apiClient = new APIClient()

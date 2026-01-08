@@ -169,6 +169,51 @@ export function CalendarHomeScreen() {
     };
   }, [isDragging, hasMoved, dragStart]);
 
+  // Google Calendar OAuth 콜백 처리
+  useEffect(() => {
+    const handleGoogleCalendarCallback = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get('code');
+      const state = urlParams.get('state');
+      const source = urlParams.get('source');
+
+      // Google Calendar OAuth 콜백인지 확인
+      if (code && state && source === 'calendar') {
+        try {
+          const storedState = localStorage.getItem('google_calendar_oauth_state');
+          if (storedState !== state) {
+            console.error('[Google Calendar] State 불일치');
+            toast.error('Google Calendar 연동에 실패했습니다.');
+            // URL 정리
+            window.history.replaceState({}, document.title, window.location.pathname);
+            return;
+          }
+
+          // 백엔드로 콜백 처리 요청
+          await apiClient.googleCalendarCallback(code, state);
+          toast.success('Google Calendar 연동이 완료되었습니다.');
+
+          // localStorage 정리
+          localStorage.removeItem('google_calendar_oauth_state');
+
+          // URL 정리
+          window.history.replaceState({}, document.title, window.location.pathname);
+
+          // 페이지 새로고침하여 캘린더 데이터 로드
+          window.location.reload();
+        } catch (error: any) {
+          console.error('[Google Calendar] OAuth callback error:', error);
+          toast.error('Google Calendar 연동에 실패했습니다.');
+          // URL 정리
+          window.history.replaceState({}, document.title, window.location.pathname);
+          localStorage.removeItem('google_calendar_oauth_state');
+        }
+      }
+    };
+
+    handleGoogleCalendarCallback();
+  }, []);
+
   // 초기 데이터 로드 (프로필, 일정, 시간표, 가족 구성원)
   useEffect(() => {
     const loadInitialData = async () => {
@@ -326,9 +371,97 @@ export function CalendarHomeScreen() {
           memo: undefined,
         }]);
       }
-    };
 
-    loadInitialData();
+      // 5. Google Calendar 연동 상태 확인 및 이벤트 가져오기
+      try {
+        const calendarStatusResponse = await apiClient.getCalendarStatus();
+        const googleCalendarEnabled = calendarStatusResponse.data?.enabled || false;
+        const googleCalendarConnected = calendarStatusResponse.data?.connected || false;
+
+        if (googleCalendarEnabled && googleCalendarConnected) {
+          console.log('[Google Calendar] 연동 활성화됨, 이벤트 가져오기 시작...');
+
+          // 시간 범위 설정 (2주 전 ~ 6주 후)
+          const now = new Date();
+          const timeMin = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000); // 2주 전
+          const timeMax = new Date(now.getTime() + 42 * 24 * 60 * 60 * 1000); // 6주 후
+
+          const timeMinISO = timeMin.toISOString();
+          const timeMaxISO = timeMax.toISOString();
+
+          console.log('[Google Calendar] 이벤트 요청:', { timeMin: timeMinISO, timeMax: timeMaxISO });
+
+          try {
+            const eventsResponse = await apiClient.getGoogleCalendarEvents(timeMinISO, timeMaxISO);
+            console.log('[Google Calendar] 이벤트 응답:', eventsResponse.data);
+
+            if (eventsResponse.data?.success && eventsResponse.data?.events) {
+              const googleEvents = eventsResponse.data.events;
+              console.log(`[Google Calendar] ${googleEvents.length}개 이벤트 받음`);
+
+              // Google Calendar 이벤트를 Todo 형식으로 변환
+              const formattedGoogleEvents = googleEvents.map((event: any) => {
+                const dateStr = event.date || new Date().toISOString().split('T')[0];
+
+                // duration 계산
+                let duration = 60;
+                if (event.start_time && event.end_time) {
+                  const [startHours, startMinutes] = event.start_time.split(':').map(Number);
+                  const [endHours, endMinutes] = event.end_time.split(':').map(Number);
+                  const startTotal = startHours * 60 + startMinutes;
+                  const endTotal = endHours * 60 + endMinutes;
+                  duration = endTotal - startTotal;
+                }
+
+                return {
+                  id: event.google_calendar_event_id || `google_${event.id}`,
+                  title: event.title || '제목 없음',
+                  time: event.start_time || "09:00",
+                  duration: duration > 0 ? duration : 60,
+                  completed: false,
+                  category: "기타",
+                  date: dateStr,
+                  startTime: event.start_time,
+                  endTime: event.end_time,
+                  isAllDay: event.all_day || false,
+                  memo: event.description || "",
+                  location: event.location || "",
+                  hasNotification: false,
+                  alarmTimes: [],
+                  repeatType: "none",
+                  checklistItems: [],
+                  memberId: undefined,
+                  isRoutine: false,
+                  source: 'google_calendar',
+                  googleCalendarEventId: event.id,
+                };
+              });
+
+              // 기존 일정과 병합 (중복 제거)
+              setTodos((prevTodos) => {
+                const existingIds = new Set(prevTodos.map(t => t.id));
+                const newGoogleEvents = formattedGoogleEvents.filter(
+                  (event: any) => !existingIds.has(event.id)
+                );
+
+                console.log(`[Google Calendar] 이벤트 ${newGoogleEvents.length}개 추가됨 (전체: ${prevTodos.length + newGoogleEvents.length}개)`);
+                return [...prevTodos, ...newGoogleEvents];
+              });
+            } else {
+              console.warn('[Google Calendar] 이벤트가 없거나 실패:', eventsResponse.data);
+            }
+          } catch (error: any) {
+            console.error('[Google Calendar] 이벤트 가져오기 실패:', error);
+            console.error('[Google Calendar] 에러 상세:', error.response?.data || error.message);
+          }
+        } else {
+          console.log('[Google Calendar] 연동 비활성화됨 또는 연결 안됨');
+        }
+      } catch (error) {
+        console.error('[Google Calendar] 상태 확인 실패:', error);
+        // 에러가 발생해도 앱은 정상 동작
+      }
+    };
 
     loadInitialData();
   }, []); // 컴포넌트 마운트 시 한 번만 실행
