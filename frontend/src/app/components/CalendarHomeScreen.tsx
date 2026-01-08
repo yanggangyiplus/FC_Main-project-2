@@ -85,6 +85,7 @@ export function CalendarHomeScreen() {
   const [showAddTodoModal, setShowAddTodoModal] = useState(false);
   const [selectedTodoForDetail, setSelectedTodoForDetail] = useState<string | null>(null);
   const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
+  const [extractedText, setExtractedText] = useState<string>("");
   // 체크리스트 항목 상태 관리 (id별로 completed 상태 저장)
   const [checklistItemStates, setChecklistItemStates] = useState<Record<string, Record<string, boolean>>>({});
   // 검색 기능
@@ -1438,7 +1439,7 @@ export function CalendarHomeScreen() {
                       }`}
                   >
                     <div
-                      className={`w-10 h-10 rounded-full flex items-center justify-center text-xl transition-all relative ${isSelected
+                      className={`w-9 h-9 rounded-full flex items-center justify-center text-lg transition-all relative ${isSelected
                         ? "bg-white"
                         : "bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82]"
                         }`}
@@ -1453,30 +1454,31 @@ export function CalendarHomeScreen() {
                     </span>
                   </button>
                   {/* 편집 버튼 (호버 시 표시) */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingMemberId(member.id);
-                      setShowMemberAddSheet(true);
-                    }}
-                    className="absolute -top-1 -right-1 w-6 h-6 bg-[#6366F1] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-[#5558E3] z-10"
-                    title="수정"
-                  >
-                    <Edit2 size={12} />
-                  </button>
-                  {/* 삭제 버튼 (호버 시 표시, "나"는 제외) */}
+                  {/* 삭제 버튼 - 위에 배치 (호버 시 표시, "나"는 제외) */}
                   {member.id !== "1" && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         handleDeleteMember(member.id);
                       }}
-                      className="absolute -bottom-1 -right-1 w-6 h-6 bg-[#EF4444] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-[#DC2626] z-10"
+                      className="absolute -top-1 -right-1 w-6 h-6 bg-[#EF4444] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-[#DC2626] z-10"
                       title="삭제"
                     >
                       <Trash2 size={12} />
                     </button>
                   )}
+                  {/* 수정 버튼 - 아래에 배치 */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingMemberId(member.id);
+                      setShowMemberAddSheet(true);
+                    }}
+                    className="absolute -bottom-1 -right-1 w-6 h-6 bg-[#6366F1] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-[#5558E3] z-10"
+                    title="수정"
+                  >
+                    <Edit2 size={12} />
+                  </button>
                 </div>
               );
             })}
@@ -2244,6 +2246,7 @@ export function CalendarHomeScreen() {
           isOpen={showAddTodoModal}
           onClose={() => {
             setShowAddTodoModal(false);
+            setExtractedText(""); // 텍스트 초기화
             setEditingTodoId(null);
             setExtractedText(""); // 모달 닫을 때 추출된 텍스트 초기화
           }}

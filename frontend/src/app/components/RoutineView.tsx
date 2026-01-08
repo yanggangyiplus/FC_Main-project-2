@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, X, Clock, FileText, Tag } from "lucide-react";
+import { Plus, X, Clock, FileText, Tag, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 // 시간표 관리 컴포넌트
@@ -506,16 +506,20 @@ export function RoutineView({
             </label>
           </div>
 
-          <div className="flex gap-2 pt-2">
+          {/* 버튼 영역: 위에 삭제, 아래에 취소/수정 */}
+          <div className="pt-2 flex flex-col gap-2">
+            {/* 삭제 버튼 - 맨 위에 배치 (첫 번째) */}
             {editingRoutineId && (
               <button
                 onClick={handleDeleteRoutine}
-                className="px-4 py-2 bg-[#FECACA] text-[#EF4444] rounded-lg text-sm font-medium hover:bg-[#FCA5A5] transition-colors"
+                className="w-full px-4 py-2 bg-[#FECACA] text-[#EF4444] rounded-lg text-sm font-medium hover:bg-[#FCA5A5] transition-colors"
+                style={{ order: 1 }}
               >
                 삭제
               </button>
             )}
-            <div className="flex-1 flex gap-2 justify-end">
+            {/* 취소/수정 버튼 - 아래에 배치 (두 번째) */}
+            <div className="flex gap-2" style={{ order: 2 }}>
               <button
                 onClick={() => {
                   setShowAddRoutine(false);
@@ -658,6 +662,30 @@ export function RoutineView({
                             )}
                             {routine.name}
                           </div>
+
+                          {/* 삭제 버튼 - 위에 배치 */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteRoutine(routine.id);
+                            }}
+                            className="absolute -top-1 -right-1 w-6 h-6 bg-[#EF4444] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-[#DC2626] z-10"
+                            title="삭제"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+
+                          {/* 수정 버튼 - 아래에 배치 */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditClick(routine);
+                            }}
+                            className="absolute -bottom-1 -right-1 w-6 h-6 bg-[#6366F1] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-[#5558E3] z-10"
+                            title="수정"
+                          >
+                            <Pencil size={12} />
+                          </button>
 
                           {/* Bottom Resize Handle */}
                           <div

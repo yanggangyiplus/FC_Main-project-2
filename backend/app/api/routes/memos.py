@@ -10,7 +10,7 @@ from app.database import get_db
 from app.models.models import Memo
 from app.models.user import User
 from app.api.routes.auth import get_current_user
-from app.services.ai_service import ClaudeOCRService, TesseractOCRService
+from app.services.ai_service import GeminiOCRService, TesseractOCRService
 
 router = APIRouter(
     prefix="/memos",
@@ -18,8 +18,11 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)]
 )
 
-claude_ocr = ClaudeOCRService()
+gemini_ocr = GeminiOCRService()  # Gemini Vision API 사용
 tesseract_ocr = TesseractOCRService()
+
+# 하위 호환성을 위한 별칭
+claude_ocr = gemini_ocr
 
 UPLOAD_DIR = "uploads/memos"
 os.makedirs(UPLOAD_DIR, exist_ok=True)

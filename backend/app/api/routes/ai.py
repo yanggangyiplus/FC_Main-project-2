@@ -10,8 +10,10 @@ import logging
 
 from app.database import get_db
 from app.models.user import User
+
 from app.schemas import STTResponse, OCRResponse, OCRReceiptResponse
-from app.services.ai_service import GeminiSTTService, GeminiOCRService, ClaudeOCRService, TesseractOCRService
+from app.services.ai_service import GeminiSTTService, GeminiOCRService, TesseractOCRService
+
 from app.api.routes.auth import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -23,9 +25,11 @@ router = APIRouter(
 )
 
 gemini_stt = GeminiSTTService()
-gemini_ocr = GeminiOCRService()
-claude_ocr = ClaudeOCRService()
+gemini_ocr = GeminiOCRService()  # Gemini Vision API 사용
 tesseract_ocr = TesseractOCRService()
+
+# 하위 호환성을 위한 별칭
+claude_ocr = gemini_ocr
 
 
 @router.post("/stt/transcribe", response_model=STTResponse)
@@ -92,7 +96,6 @@ async def extract_text_from_image(
     
     Methods:
     - gemini: Google Gemini Vision (recommended, requires API key)
-    - claude: Claude Vision (requires API key)
     - tesseract: Local fallback (60-70% accuracy)
     """
     
@@ -106,8 +109,6 @@ async def extract_text_from_image(
         
         if method == "gemini":
             result = await gemini_ocr.extract_text(content, mime_type)
-        elif method == "claude":
-            result = await claude_ocr.extract_text(content)
         else:
             result = await tesseract_ocr.extract_text(content)
         
@@ -151,12 +152,12 @@ async def extract_text_from_image(
 @router.post("/ocr/extract-receipt")
 async def extract_receipt_data(
     file: UploadFile = File(...),
-    method: str = "claude",
+    method: str = "gemini",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """
-    Extract receipt data (vendor, amount, items) from image
+    Extract receipt data (vendor, amount, items) from image using Gemini Vision API
     
     Returns:
     - vendor: Store/restaurant name
@@ -169,8 +170,11 @@ async def extract_receipt_data(
     try:
         content = await file.read()
         
-        if method == "claude":
-            result = await claude_ocr.extract_receipt_data(content)
+        # MIME 타입 결정
+        mime_type = file.content_type or 'image/jpeg'
+        
+        if method == "gemini" or method == "claude":  # 하위 호환성
+            result = await gemini_ocr.extract_receipt_data(content, mime_type)
         else:
             result = await tesseract_ocr.extract_receipt_data(content)
         
@@ -198,13 +202,16 @@ async def extract_contact_data(
     current_user: User = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """
-    Extract contact information (name, phone, email) from business card or document
+    Extract contact information (name, phone, email) from business card or document using Gemini Vision API
     """
     
     try:
         content = await file.read()
         
-        result = await claude_ocr.extract_contact_data(content)
+        # MIME 타입 결정
+        mime_type = file.content_type or 'image/jpeg'
+        
+        result = await gemini_ocr.extract_contact_data(content, mime_type)
         
         return {
             "name": result.get("name"),
@@ -299,7 +306,7 @@ async def ai_health_check(
         },
         "ocr": {
             "primary": {
-                "service": "Claude Vision",
+                "service": "Gemini Vision",
                 "status": "available"
             },
             "fallback": {

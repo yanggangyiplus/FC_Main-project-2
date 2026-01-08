@@ -28,6 +28,8 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
   const [activeMethod, setActiveMethod] = useState<'voice' | 'camera' | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [text, setText] = useState<string>("");
+  const [isProcessing, setIsProcessing] = useState(false);
 
   // Audio Recording State
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -196,6 +198,31 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
     if (audioPlayerRef.current) {
       audioPlayerRef.current.pause();
       setIsPlaying(false);
+    }
+  };
+
+  // STT로 음성을 텍스트로 변환
+  const transcribeAudio = async (audioBlob: Blob) => {
+    setIsProcessing(true);
+    try {
+      const audioFile = new File([audioBlob], 'recording.wav', { type: 'audio/wav' });
+      const response = await apiClient.transcribeAudio(audioFile, 'todo');
+      
+      if (response.data && response.data.text) {
+        const transcribedText = response.data.text;
+        // 최대 1000자로 제한
+        const limitedText = transcribedText.slice(0, 1000);
+        setText(prev => {
+          const newText = prev ? prev + '\n' + limitedText : limitedText;
+          return newText.slice(0, 1000);
+        });
+        toast.success("음성이 텍스트로 변환되었습니다.");
+      }
+    } catch (error) {
+      console.error("STT error:", error);
+      toast.error("음성 변환에 실패했습니다.");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -394,6 +421,7 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
       setExtractionFailed(true);
     } finally {
       setIsUploading(false);
+      setIsProcessing(false);
     }
   };
 
@@ -410,7 +438,15 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
   };
 
   const handleTextClick = () => {
-    onSelect('text');
+    onSelect('text', text);
+  };
+
+  const handleSave = () => {
+    if (text.trim()) {
+      onSelect('text', text);
+    } else {
+      toast.error("텍스트를 입력해주세요.");
+    }
   };
 
   const handleClose = () => {
@@ -422,25 +458,27 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="w-full max-w-[375px] min-h-screen bg-[#F5F5F5] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-4 bg-white border-b border-[#E5E7EB]">
+      <div className="w-full max-w-[375px] h-screen bg-[#F5F5F5] flex flex-col relative">
+        {/* Header - 항상 상단에 고정 */}
+        <div className="flex-shrink-0 flex items-center justify-between px-4 py-4 bg-white border-b border-[#E5E7EB] z-[100]">
           <h2 className="font-semibold text-[#1F2937]">일정 추가</h2>
           <button
             onClick={handleClose}
             className="p-2 hover:bg-[#F3F4F6] rounded-lg transition-colors"
+            disabled={isProcessing}
           >
             <X size={24} className="text-[#6B7280]" />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 flex flex-col items-center justify-center px-6 py-8">
-          <div className="text-center mb-8">
-            <h3 className="text-xl font-semibold text-[#1F2937] border-b-2 border-[#D1D5DB] inline-block pb-2">
-              일정 작성
-            </h3>
-          </div>
+        {/* Content - 스크롤 가능 */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="flex flex-col items-center px-6 py-8">
+            <div className="text-center mb-8">
+              <h3 className="text-xl font-semibold text-[#1F2937] border-b-2 border-[#D1D5DB] inline-block pb-2">
+                일정 작성
+              </h3>
+            </div>
 
           {/* 텍스트 입력 영역 */}
           <div className="w-full bg-white rounded-2xl p-4 mb-4 shadow-sm">
@@ -631,15 +669,41 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
             </p>
           </div>
 
-          <div className="flex justify-center gap-6">
-            <button onClick={handleVoiceClick} className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95">
+          <div className="flex justify-center gap-6 mb-4">
+            <button 
+              onClick={handleVoiceClick} 
+              disabled={isProcessing}
+              className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
               <Mic size={32} className="text-[#FF9B82]" />
             </button>
-            <button onClick={handleCameraClick} className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95">
+            <button 
+              onClick={handleCameraClick} 
+              disabled={isProcessing}
+              className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
               <Camera size={32} className="text-[#FF9B82]" />
             </button>
-            <button onClick={handleTextClick} className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95">
+            <button 
+              onClick={handleTextClick} 
+              disabled={isProcessing}
+              className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
               <FileText size={32} className="text-[#FF9B82]" />
+            </button>
+          </div>
+
+            {/* 저장 버튼 */}
+            <button
+              onClick={handleSave}
+              disabled={!text.trim() || isProcessing}
+              className="w-full py-3 bg-[#FF9B82] text-white rounded-lg font-medium hover:bg-[#FF8A6D] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  처리 중...
+                </>
+              ) : (
+                '저장'
+              )}
             </button>
           </div>
         </div>
