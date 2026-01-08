@@ -1198,24 +1198,7 @@ export function CalendarHomeScreen() {
         }
       } else {
         console.log("일정 추가 시작:", formData);
-        // 추가 모드 - API 호출
-        const todoData = {
-          title: formData.title,
-          description: formData.memo || "",
-          memo: formData.memo || "",
-          location: formData.location || "",
-          date: formData.date,
-          start_time: formData.startTime,
-          end_time: formData.endTime,
-          all_day: formData.isAllDay,
-          category: formData.category,
-          status: 'pending',
-          has_notification: formData.hasNotification,
-          notification_times: formData.alarmTimes || [],
-          repeat_type: formData.repeatType || "none",
-          checklist_items: formData.checklistItems.filter(item => item.trim() !== ''),
-        };
-
+        
         // 날짜 형식 정규화 함수
         const normalizeDate = (date: any): string => {
           if (typeof date === 'string') {
@@ -1228,119 +1211,141 @@ export function CalendarHomeScreen() {
           }
         };
 
-        // 날짜 형식 정규화
-        const normalizedDate = normalizeDate(formData.date);
-        todoData.date = normalizedDate;
+        // 시작 날짜와 종료 날짜 정규화
+        const startDate = normalizeDate(formData.date);
+        const endDate = formData.endDate ? normalizeDate(formData.endDate) : null;
 
-        console.log("일정 추가 데이터:", todoData);
-        console.log("일정 추가 데이터 (정규화된 날짜):", normalizedDate);
-        try {
-          const response = await apiClient.createTodo(todoData);
-          console.log("일정 추가 응답:", response);
-          console.log("일정 추가 응답 데이터:", response?.data);
-          console.log("일정 추가 응답 상태:", response?.status);
+        // 날짜 범위 생성 (시작 날짜부터 종료 날짜까지)
+        const datesToCreate: string[] = [];
+        if (endDate && endDate >= startDate) {
+          // 종료 날짜가 있으면 시작 날짜부터 종료 날짜까지 모든 날짜 생성
+          const start = new Date(startDate);
+          const end = new Date(endDate);
+          const currentDate = new Date(start);
+          
+          while (currentDate <= end) {
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth() + 1;
+            const day = currentDate.getDate();
+            datesToCreate.push(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+            currentDate.setDate(currentDate.getDate() + 1);
+          }
+        } else {
+          // 종료 날짜가 없으면 시작 날짜만
+          datesToCreate.push(startDate);
+        }
 
-          if (response && response.data) {
-            // API 응답에서 날짜 형식 확인 및 변환
-            let todoDate = normalizedDate;
-            if (response.data.date) {
-              // API 응답의 날짜가 Date 객체인 경우 문자열로 변환
-              if (response.data.date instanceof Date) {
-                const year = response.data.date.getFullYear();
-                const month = response.data.date.getMonth() + 1;
-                const day = response.data.date.getDate();
-                todoDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              } else if (typeof response.data.date === 'string') {
-                todoDate = response.data.date;
-              }
-            }
+        console.log(`일정 추가: ${datesToCreate.length}개 날짜에 일정 생성 (${startDate}${endDate ? ` ~ ${endDate}` : ''})`);
 
-            const newTodo = {
-              id: response.data.id,
+        // 각 날짜마다 Todo 생성
+        const createdTodos: any[] = [];
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const dateStr of datesToCreate) {
+          try {
+            const todoData = {
               title: formData.title,
-              time: formData.startTime || "09:00",
-              duration: duration > 0 ? duration : 60,
-              completed: false,
-              category: formData.category,
-              date: todoDate, // 올바른 날짜 형식 사용
-              startTime: formData.startTime,
-              endTime: formData.endTime,
-              isAllDay: formData.isAllDay,
+              description: formData.memo || "",
               memo: formData.memo || "",
               location: formData.location || "",
-              hasNotification: formData.hasNotification,
-              alarmTimes: formData.alarmTimes,
-              repeatType: formData.repeatType,
-              checklistItems: formData.checklistItems.filter(item => item.trim() !== ''),
-              postponeToNextDay: formData.postponeToNextDay,
-              isRoutine: false,
-              source: 'always_plan' as const, // 새로 생성된 일정임을 명시
+              date: dateStr,
+              start_time: formData.startTime,
+              end_time: formData.endTime,
+              all_day: formData.isAllDay,
+              category: formData.category,
+              status: 'pending',
+              has_notification: formData.hasNotification,
+              notification_times: formData.alarmTimes || [],
+              repeat_type: formData.repeatType || "none",
+              checklist_items: formData.checklistItems.filter(item => item.trim() !== ''),
             };
 
-            console.log("일정 추가 완료:", newTodo);
-            console.log("일정 날짜:", newTodo.date);
-            console.log("일정 ID:", newTodo.id);
+            console.log(`일정 추가 데이터 (${dateStr}):`, todoData);
+            
+            const response = await apiClient.createTodo(todoData);
+            console.log(`일정 추가 응답 (${dateStr}):`, response);
 
-            // 상태 업데이트 - 기존 일정에 추가
-            setTodos((prev) => {
-              // 중복 체크 (같은 ID가 이미 있는지 확인)
-              const existingIndex = prev.findIndex(t => t.id === newTodo.id);
-              if (existingIndex >= 0) {
-                // 이미 존재하면 업데이트
-                const updated = [...prev];
-                updated[existingIndex] = newTodo;
-                return updated.sort((a, b) => {
-                  // 날짜와 시간으로 정렬
-                  if (a.date !== b.date) {
-                    return (a.date || '').localeCompare(b.date || '');
-                  }
-                  return a.time.localeCompare(b.time);
-                });
-              } else {
-                // 새로 추가
-                const updated = [...prev, newTodo].sort((a, b) => {
-                  // 날짜와 시간으로 정렬
-                  if (a.date !== b.date) {
-                    return (a.date || '').localeCompare(b.date || '');
-                  }
-                  return a.time.localeCompare(b.time);
-                });
-                console.log("업데이트된 todos:", updated);
-                console.log("해당 날짜의 일정:", updated.filter(t => t.date === newTodo.date));
-                return updated;
+            if (response && response.data) {
+              // API 응답에서 날짜 형식 확인 및 변환
+              let todoDate = dateStr;
+              if (response.data.date) {
+                if (response.data.date instanceof Date) {
+                  const year = response.data.date.getFullYear();
+                  const month = response.data.date.getMonth() + 1;
+                  const day = response.data.date.getDate();
+                  todoDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                } else if (typeof response.data.date === 'string') {
+                  todoDate = response.data.date;
+                }
               }
-            });
-            toast.success("일정이 추가되었습니다.");
-            setShowAddTodoModal(false);
-            setEditingTodoId(null);
-          } else {
-            console.error("응답 데이터 없음:", response);
-            toast.error("일정 추가에 실패했습니다. 응답 데이터가 없습니다.");
+
+              const newTodo = {
+                id: response.data.id,
+                title: formData.title,
+                time: formData.startTime || "09:00",
+                duration: duration > 0 ? duration : 60,
+                completed: false,
+                category: formData.category,
+                date: todoDate,
+                startTime: formData.startTime,
+                endTime: formData.endTime,
+                isAllDay: formData.isAllDay,
+                memo: formData.memo || "",
+                location: formData.location || "",
+                hasNotification: formData.hasNotification,
+                alarmTimes: formData.alarmTimes,
+                repeatType: formData.repeatType,
+                checklistItems: formData.checklistItems.filter(item => item.trim() !== ''),
+                postponeToNextDay: formData.postponeToNextDay,
+                isRoutine: false,
+                source: 'always_plan' as const,
+              };
+
+              createdTodos.push(newTodo);
+              successCount++;
+            } else {
+              failCount++;
+            }
+          } catch (error: any) {
+            console.error(`일정 추가 실패 (${dateStr}):`, error);
+            failCount++;
           }
-        } catch (apiError: any) {
-          console.error("일정 추가 API 에러:", apiError);
-          console.error("에러 응답:", apiError.response);
-          console.error("에러 데이터:", apiError.response?.data);
-          throw apiError; // 상위 catch로 전달
         }
+
+        // 생성된 모든 Todo를 상태에 추가
+        if (createdTodos.length > 0) {
+          setTodos((prev) => {
+            const updated = [...prev, ...createdTodos];
+            // 날짜와 시간으로 정렬
+            return updated.sort((a, b) => {
+              if (a.date !== b.date) {
+                return (a.date || '').localeCompare(b.date || '');
+              }
+              return a.time.localeCompare(b.time);
+            });
+          });
+
+          if (createdTodos.length > 1) {
+            toast.success(`${createdTodos.length}개 날짜에 일정이 생성되었습니다.`);
+          } else {
+            toast.success("일정이 추가되었습니다.");
+          }
+        } else {
+          toast.error("일정 추가에 실패했습니다.");
+        }
+
+        // 모달 닫기
+        setEditingTodoId(null);
+        setShowTodoAddSheet(false);
       }
     } catch (error: any) {
-      console.error("일정 저장 실패:", error);
-      console.error("에러 상세:", error.response?.data || error.message);
-      console.error("에러 상세 (전체):", JSON.stringify(error.response?.data, null, 2));
-      if (error.response?.data?.detail && Array.isArray(error.response.data.detail)) {
-        console.error("검증 에러 상세:");
-        error.response.data.detail.forEach((err: any, index: number) => {
-          console.error(`[${index}] 필드: ${err.loc?.join('.') || 'unknown'}, 메시지: ${err.msg || 'unknown'}, 타입: ${err.type || 'unknown'}`);
-        });
-      }
-      console.error("에러 스택:", error.stack);
-      const errorMessage = error.response?.data?.detail
-        ? (Array.isArray(error.response.data.detail)
-          ? error.response.data.detail.map((e: any) => `${e.loc?.join('.')}: ${e.msg}`).join(', ')
-          : error.response.data.detail)
-        : error.message || "알 수 없는 오류";
-      toast.error(`일정 저장에 실패했습니다: ${errorMessage}`);
+      console.error("일정 추가 API 에러:", error);
+      console.error("에러 응답:", error.response);
+      console.error("에러 데이터:", error.response?.data);
+      toast.error(`일정 저장 실패: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
+    } finally {
+      setIsLoading(false);
     }
   };
 

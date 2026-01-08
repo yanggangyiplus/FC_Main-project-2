@@ -26,7 +26,8 @@ interface AddTodoModalProps {
 
 export interface TodoFormData {
   title: string;
-  date: string;
+  date: string; // 시작 날짜
+  endDate?: string; // 종료 날짜 (여러 날 선택 시)
   startTime: string;
   endTime: string;
   isAllDay: boolean; // 하루종일 체크박스
@@ -54,9 +55,13 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
   const startTimeInitial = isAllDayInitial ? '' : (initialData?.startTime || initialData?.time || '09:00');
   const endTimeInitial = isAllDayInitial ? '' : (initialData?.endTime || '10:00');
   
+  // 시작 날짜 기본값
+  const initialStartDate = initialData?.date || formatLocalDate(new Date());
+  
   const [formData, setFormData] = useState<TodoFormData>({
     title: initialData?.title || '',
-    date: initialData?.date || formatLocalDate(new Date()),
+    date: initialStartDate,
+    endDate: initialData?.endDate || initialStartDate, // 종료 날짜 기본값을 시작 날짜와 동일하게 설정
     startTime: startTimeInitial,
     endTime: endTimeInitial,
     isAllDay: isAllDayInitial,
@@ -80,9 +85,11 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
       const startTime = isAllDay ? '' : (initialData.startTime || initialData.time || '09:00');
       const endTime = isAllDay ? '' : (initialData.endTime || '10:00');
       
+      const startDate = initialData.date || formatLocalDate(new Date());
       setFormData({
         title: initialData.title || '',
-        date: initialData.date || formatLocalDate(new Date()),
+        date: startDate,
+        endDate: initialData.endDate || startDate, // 종료 날짜 기본값을 시작 날짜와 동일하게 설정
         startTime: startTime,
         endTime: endTime,
         isAllDay: isAllDay,
@@ -99,9 +106,11 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
       });
     } else {
       // 초기화
+      const defaultDate = formatLocalDate(new Date());
       setFormData({
         title: '',
-        date: formatLocalDate(new Date()),
+        date: defaultDate,
+        endDate: defaultDate, // 종료 날짜 기본값을 시작 날짜와 동일하게 설정
         startTime: '09:00',
         endTime: '10:00',
         isAllDay: false,
@@ -236,12 +245,42 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
                 <Calendar size={18} className="text-[#FF9B82]" />
                 날짜 설정
               </label>
-              <input
-                type="date"
-                value={formData.date}
-                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
-              />
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs text-[#6B7280] mb-1">시작 날짜 *</label>
+                  <input
+                    type="date"
+                    value={formData.date}
+                    onChange={(e) => {
+                      const newDate = e.target.value;
+                      setFormData({ 
+                        ...formData, 
+                        date: newDate,
+                        // 종료 날짜가 시작 날짜보다 이전이면 종료 날짜도 시작 날짜와 동일하게 업데이트
+                        // 종료 날짜가 없거나 시작 날짜와 동일한 경우에도 시작 날짜와 동일하게 유지
+                        endDate: formData.endDate && formData.endDate < newDate ? newDate : (formData.endDate || newDate)
+                      });
+                    }}
+                    className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#6B7280] mb-1">종료 날짜 (선택사항)</label>
+                  <input
+                    type="date"
+                    value={formData.endDate || ''}
+                    min={formData.date} // 시작 날짜 이후만 선택 가능
+                    onChange={(e) => setFormData({ ...formData, endDate: e.target.value || undefined })}
+                    className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
+                    placeholder="종료 날짜를 선택하면 여러 날에 일정이 생성됩니다"
+                  />
+                  {formData.endDate && (
+                    <p className="text-xs text-[#6B7280] mt-1">
+                      {formData.date}부터 {formData.endDate}까지 일정이 생성됩니다.
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* 시작/종료 시간 */}
