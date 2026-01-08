@@ -60,6 +60,10 @@ class Todo(BaseModel):
     source = Column(String(50))  # voice, text, camera, sync
     deleted_at = Column(DateTime, index=True)
     
+    # Google Calendar 연동
+    google_calendar_event_id = Column(String(255), index=True)  # Google Calendar 이벤트 ID 저장
+    bulk_synced = Column(Boolean, default=False)  # 일괄 동기화로 생성된 일정인지 여부 (토글 꺼도 유지)
+    
     # 관계
     user = relationship("User", back_populates="todos")
     checklist_items = relationship("ChecklistItem", back_populates="todo", cascade="all, delete-orphan")

@@ -23,6 +23,403 @@ router = APIRouter(
 )
 
 
+@router.delete("/event/{event_id}")
+async def delete_google_calendar_event(
+    event_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Google Calendar 이벤트 삭제"""
+    try:
+        # 사용자의 Google Calendar 토큰 확인
+        if not current_user.google_calendar_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Google Calendar 연동이 필요합니다. 설정에서 연동해주세요."
+            )
+        
+        # Google Calendar에서 이벤트 삭제
+        deleted = await GoogleCalendarService.delete_event(
+            token_json=current_user.google_calendar_token,
+            event_id=event_id
+        )
+        
+        if not deleted:
+            raise HTTPException(
+                status_code=500,
+                detail="Google Calendar 이벤트 삭제에 실패했습니다"
+            )
+        
+        return {
+            "success": True,
+            "message": "Google Calendar 이벤트가 삭제되었습니다"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Google Calendar 이벤트 삭제 실패: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"이벤트 삭제 실패: {str(e)}"
+        )
+
+
+@router.post("/sync/all")
+async def sync_all_todos_to_google_calendar(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """모든 기존 일정을 Google Calendar에 일괄 동기화 (중복 방지)"""
+    try:
+        # 사용자의 Google Calendar 토큰 확인
+        if not current_user.google_calendar_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Google Calendar 연동이 필요합니다. 설정에서 연동해주세요."
+            )
+        
+        # 일괄 동기화는 토글 상태와 관계없이 동작 (문제 3 해결)
+        # 토글을 꺼도 일괄 동기화한 일정은 Google Calendar에 남아있어야 함
+        
+        from app.models.models import Todo
+        
+        # 1단계: Google Calendar에서 현재 이벤트 목록 가져오기 (중복 체크용)
+        logger.info("[SYNC_ALL] Google Calendar 이벤트 목록 가져오기 시작...")
+        existing_events = []
+        try:
+            # 최근 1년 전부터 1년 후까지의 이벤트 가져오기
+            time_min = datetime.utcnow() - timedelta(days=365)
+            time_max = datetime.utcnow() + timedelta(days=365)
+            existing_events = await GoogleCalendarService.list_events(
+                token_json=current_user.google_calendar_token,
+                time_min=time_min,
+                time_max=time_max,
+                max_results=1000
+            )
+            logger.info(f"[SYNC_ALL] Google Calendar에서 {len(existing_events)}개 이벤트 가져옴")
+        except Exception as e:
+            logger.warning(f"[SYNC_ALL] Google Calendar 이벤트 목록 가져오기 실패 (계속 진행): {e}")
+        
+        # 기존 이벤트를 제목+날짜+시간으로 매칭하기 위한 맵 생성
+        existing_events_map = {}
+        for event in existing_events:
+            title = event.get('summary', '').strip()
+            start = event.get('start', {})
+            
+            # 날짜/시간 추출
+            event_date = None
+            event_time = None
+            if 'date' in start:
+                # 종일 이벤트
+                event_date = start['date']
+                event_time = None
+            elif 'dateTime' in start:
+                # 시간 지정 이벤트
+                dt = datetime.fromisoformat(start['dateTime'].replace('Z', '+00:00'))
+                event_date = dt.date().isoformat()
+                event_time = dt.strftime('%H:%M')
+            
+            if event_date and title:
+                # 키: 제목_날짜_시간 (시간이 없으면 종일 이벤트)
+                key = f"{title}_{event_date}_{event_time or 'all_day'}"
+                existing_events_map[key] = event.get('id')
+        
+        logger.info(f"[SYNC_ALL] 기존 이벤트 맵 생성 완료: {len(existing_events_map)}개")
+        
+        # 2단계: Google Calendar에 동기화되지 않은 모든 일정 조회
+        todos_to_sync = db.query(Todo).filter(
+            Todo.user_id == current_user.id,
+            Todo.deleted_at.is_(None),
+            Todo.google_calendar_event_id.is_(None)  # 아직 동기화되지 않은 일정만
+        ).all()
+        
+        # 3단계: 이미 동기화되었지만 bulk_synced=False인 일정도 bulk_synced=True로 설정
+        # (토글을 꺼도 Google Calendar에 남아있도록 하기 위함)
+        already_synced_todos = db.query(Todo).filter(
+            Todo.user_id == current_user.id,
+            Todo.deleted_at.is_(None),
+            Todo.google_calendar_event_id.isnot(None),  # 이미 동기화된 일정
+            Todo.bulk_synced == False  # 아직 bulk_synced가 False인 일정
+        ).all()
+        
+        bulk_synced_count = 0
+        for todo in already_synced_todos:
+            todo.bulk_synced = True
+            bulk_synced_count += 1
+            logger.info(f"[SYNC_ALL] 이미 동기화된 일정을 bulk_synced=True로 설정: todo_id={todo.id}, event_id={todo.google_calendar_event_id}")
+        
+        if bulk_synced_count > 0:
+            db.commit()
+            logger.info(f"[SYNC_ALL] {bulk_synced_count}개 이미 동기화된 일정을 bulk_synced=True로 설정 완료")
+        
+        logger.info(f"[SYNC_ALL] 동기화할 일정: {len(todos_to_sync)}개")
+        
+        if not todos_to_sync:
+            return {
+                "success": True,
+                "synced_count": 0,
+                "matched_count": 0,
+                "failed_count": 0,
+                "message": "동기화할 일정이 없습니다"
+            }
+        
+        synced_count = 0
+        matched_count = 0  # 기존 이벤트와 매칭된 일정 수
+        failed_count = 0
+        failed_todos = []
+        
+        for todo in todos_to_sync:
+            try:
+                # 날짜가 없는 일정은 건너뜀
+                if not todo.date:
+                    continue
+                
+                # 일정 키 생성 (제목_날짜_시간)
+                todo_date_str = todo.date.isoformat() if hasattr(todo.date, 'isoformat') else str(todo.date)
+                todo_time_str = None
+                if not todo.all_day and todo.start_time:
+                    if hasattr(todo.start_time, 'strftime'):
+                        todo_time_str = todo.start_time.strftime('%H:%M')
+                    else:
+                        todo_time_str = str(todo.start_time)
+                
+                key = f"{todo.title.strip()}_{todo_date_str}_{todo_time_str or 'all_day'}"
+                
+                # 기존 이벤트와 매칭 확인
+                if key in existing_events_map:
+                    # 이미 Google Calendar에 있는 이벤트와 매칭
+                    existing_event_id = existing_events_map[key]
+                    todo.google_calendar_event_id = existing_event_id
+                    todo.bulk_synced = True  # 일괄 동기화로 매칭된 일정도 표시
+                    db.commit()  # 변경사항 저장
+                    matched_count += 1
+                    logger.info(f"[SYNC_ALL] 기존 이벤트와 매칭: todo_id={todo.id}, event_id={existing_event_id}, bulk_synced=True")
+                    continue
+                
+                # Google Calendar에 이벤트 생성
+                start_datetime = None
+                end_datetime = None
+                
+                if todo.all_day:
+                    # 종일 이벤트
+                    start_datetime = datetime.combine(todo.date, datetime.min.time())
+                    end_datetime = start_datetime + timedelta(days=1)
+                else:
+                    # 시간 지정 이벤트
+                    if todo.start_time:
+                        start_datetime = datetime.combine(todo.date, todo.start_time)
+                    else:
+                        start_datetime = datetime.combine(todo.date, datetime.min.time())
+                    
+                    if todo.end_time:
+                        end_datetime = datetime.combine(todo.date, todo.end_time)
+                    else:
+                        end_datetime = start_datetime + timedelta(hours=1)
+                
+                if not start_datetime:
+                    continue
+                
+                # Google Calendar에 이벤트 생성
+                event = await GoogleCalendarService.create_event(
+                    token_json=current_user.google_calendar_token,
+                    title=todo.title,
+                    description=todo.memo or todo.description or "",
+                    start_datetime=start_datetime,
+                    end_datetime=end_datetime,
+                    location=todo.location or "",
+                    all_day=todo.all_day
+                )
+                
+                if event and event.get('id'):
+                    # Todo에 Google Calendar 이벤트 ID 저장 및 일괄 동기화 플래그 설정
+                    todo.google_calendar_event_id = event.get('id')
+                    todo.bulk_synced = True  # 일괄 동기화로 생성된 일정 표시
+                    db.commit()  # 변경사항 저장
+                    synced_count += 1
+                    logger.info(f"[SYNC_ALL] 새 이벤트 생성: todo_id={todo.id}, event_id={event.get('id')}, bulk_synced=True")
+                else:
+                    failed_count += 1
+                    failed_todos.append(todo.id)
+            except Exception as e:
+                logger.error(f"일정 동기화 실패 (todo_id={todo.id}): {e}", exc_info=True)
+                failed_count += 1
+                failed_todos.append(todo.id)
+        
+        # 변경사항 커밋
+        db.commit()
+        
+        # 4단계: Google Calendar 이벤트를 웹앱에 Todo로 저장 (양방향 동기화)
+        logger.info("[SYNC_ALL] Google Calendar 이벤트를 웹앱에 저장 시작...")
+        imported_count = 0
+        imported_matched_count = 0
+        imported_failed_count = 0
+        
+        from datetime import time as time_obj
+        from datetime import timezone
+        
+        # 이미 저장된 Google Calendar 이벤트 ID 목록 (중복 방지)
+        existing_google_event_ids = set(
+            db.query(Todo.google_calendar_event_id).filter(
+                Todo.user_id == current_user.id,
+                Todo.deleted_at.is_(None),
+                Todo.google_calendar_event_id.isnot(None)
+            ).all()
+        )
+        existing_google_event_ids = {str(id[0]) for id in existing_google_event_ids if id[0]}
+        
+        logger.info(f"[SYNC_ALL] 이미 저장된 Google Calendar 이벤트: {len(existing_google_event_ids)}개")
+        
+        for event in existing_events:
+            try:
+                event_id = event.get('id')
+                if not event_id or event_id in existing_google_event_ids:
+                    # 이미 저장된 이벤트는 건너뜀
+                    continue
+                
+                # 이벤트 정보 파싱
+                start = event.get('start', {})
+                end = event.get('end', {})
+                
+                # 시작 시간 파싱
+                start_date = None
+                start_time_obj = None
+                end_time_obj = None
+                all_day = False
+                
+                if 'date' in start:
+                    # 종일 이벤트
+                    all_day = True
+                    start_date_str = start['date']
+                    if 'T' in start_date_str:
+                        start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00')).date()
+                    else:
+                        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                elif 'dateTime' in start:
+                    # 시간 지정 이벤트
+                    start_datetime_str = start['dateTime']
+                    
+                    # ISO 형식 파싱
+                    if start_datetime_str.endswith('Z'):
+                        start_datetime_obj = datetime.fromisoformat(start_datetime_str.replace('Z', '+00:00'))
+                    else:
+                        start_datetime_obj = datetime.fromisoformat(start_datetime_str)
+                    
+                    # 타임존이 없으면 UTC로 간주
+                    if start_datetime_obj.tzinfo is None:
+                        start_datetime_obj = start_datetime_obj.replace(tzinfo=timezone.utc)
+                    
+                    # Asia/Seoul 타임존으로 변환
+                    seoul_tz = timezone(timedelta(hours=9))
+                    start_datetime_seoul = start_datetime_obj.astimezone(seoul_tz)
+                    
+                    start_date = start_datetime_seoul.date()
+                    start_time_str = start_datetime_seoul.strftime('%H:%M')
+                    start_time_obj = time_obj(*map(int, start_time_str.split(':')))
+                    
+                    # 종료 시간 파싱
+                    if 'dateTime' in end:
+                        end_datetime_str = end['dateTime']
+                        if end_datetime_str.endswith('Z'):
+                            end_datetime_obj = datetime.fromisoformat(end_datetime_str.replace('Z', '+00:00'))
+                        else:
+                            end_datetime_obj = datetime.fromisoformat(end_datetime_str)
+                        
+                        if end_datetime_obj.tzinfo is None:
+                            end_datetime_obj = end_datetime_obj.replace(tzinfo=timezone.utc)
+                        
+                        end_datetime_seoul = end_datetime_obj.astimezone(seoul_tz)
+                        end_time_str = end_datetime_seoul.strftime('%H:%M')
+                        end_time_obj = time_obj(*map(int, end_time_str.split(':')))
+                
+                if not start_date:
+                    continue
+                
+                # Todo 생성 (동기화 후 저장으로 영구 저장)
+                new_todo = Todo(
+                    user_id=current_user.id,
+                    title=event.get('summary', '제목 없음'),
+                    description=event.get('description', ''),
+                    memo=event.get('description', ''),
+                    location=event.get('location', ''),
+                    date=start_date,
+                    start_time=start_time_obj,
+                    end_time=end_time_obj,
+                    all_day=all_day,
+                    category="기타",
+                    status="pending",
+                    priority="medium",
+                    source="sync",
+                    google_calendar_event_id=event_id,
+                    bulk_synced=True,  # 동기화 후 저장으로 영구 저장
+                    deleted_at=None  # 명시적으로 None 설정 (새로고침 후에도 유지되도록)
+                )
+                
+                db.add(new_todo)
+                db.commit()
+                db.refresh(new_todo)  # 저장 후 새로고침하여 ID 확인
+                
+                # 저장 확인
+                if new_todo.deleted_at is not None:
+                    logger.error(f"[SYNC_ALL] Todo 저장 실패: deleted_at이 None이 아님. todo_id={new_todo.id}")
+                    # 재시도
+                    new_todo.deleted_at = None
+                    db.commit()
+                    db.refresh(new_todo)
+                
+                imported_count += 1
+                logger.info(f"[SYNC_ALL] Google Calendar 이벤트를 Todo로 저장: event_id={event_id}, todo_id={new_todo.id}, title={new_todo.title}, deleted_at={new_todo.deleted_at}, bulk_synced={new_todo.bulk_synced}")
+                
+            except Exception as e:
+                logger.error(f"[SYNC_ALL] Google Calendar 이벤트 저장 실패 (event_id={event.get('id')}): {e}", exc_info=True)
+                imported_failed_count += 1
+        
+        logger.info(f"[SYNC_ALL] Google Calendar 이벤트 저장 완료: {imported_count}개 저장, {imported_failed_count}개 실패")
+        
+        logger.info(f"[SYNC_ALL] 동기화 완료: 매칭={matched_count}개, 새로 생성={synced_count}개, 실패={failed_count}개, 이미 동기화된 일정={bulk_synced_count}개, Google Calendar 이벤트 저장={imported_count}개")
+        
+        total_saved = synced_count + matched_count + bulk_synced_count
+        
+        message = ""
+        message_parts = []
+        
+        if synced_count > 0:
+            message_parts.append(f"웹앱 일정 {synced_count}개가 Google Calendar에 저장됨")
+        if matched_count > 0:
+            message_parts.append(f"웹앱 일정 {matched_count}개가 기존 Google Calendar 이벤트와 매칭됨")
+        if bulk_synced_count > 0:
+            message_parts.append(f"웹앱 일정 {bulk_synced_count}개가 영구 저장됨")
+        if imported_count > 0:
+            message_parts.append(f"Google Calendar 일정 {imported_count}개가 웹앱에 저장됨")
+        
+        if message_parts:
+            message = ", ".join(message_parts) + ". 동기화 해제해도 양쪽에 일정이 남아있습니다."
+        else:
+            message = "저장할 일정이 없습니다."
+        
+        return {
+            "success": True,
+            "synced_count": synced_count,
+            "matched_count": matched_count,
+            "bulk_synced_count": bulk_synced_count,  # 이미 동기화된 일정 중 bulk_synced=True로 설정된 수
+            "imported_count": imported_count,  # Google Calendar 이벤트를 웹앱에 저장한 수
+            "failed_count": failed_count,
+            "imported_failed_count": imported_failed_count,  # Google Calendar 이벤트 저장 실패 수
+            "total_count": len(todos_to_sync),
+            "total_saved": total_saved,  # 총 저장된 일정 수 (웹앱 → Google Calendar)
+            "failed_todo_ids": failed_todos,
+            "message": message
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"일괄 동기화 실패: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"일괄 동기화 실패: {str(e)}"
+        )
+
+
 @router.post("/sync/{todo_id}")
 async def sync_todo_to_google_calendar(
     todo_id: str,
@@ -38,7 +435,6 @@ async def sync_todo_to_google_calendar(
                 detail="Google Calendar 연동이 필요합니다. 설정에서 연동해주세요."
             )
         
-        # TODO: Todo 모델에서 일정 정보 가져오기
         from app.models.models import Todo
         todo = db.query(Todo).filter(
             Todo.id == todo_id,
@@ -51,6 +447,48 @@ async def sync_todo_to_google_calendar(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="일정을 찾을 수 없습니다"
             )
+        
+        # 이미 동기화된 일정인 경우 업데이트
+        if todo.google_calendar_event_id:
+            # 기존 이벤트 업데이트
+            start_datetime = None
+            end_datetime = None
+            
+            if todo.date:
+                if todo.all_day:
+                    start_datetime = datetime.combine(todo.date, datetime.min.time())
+                    end_datetime = start_datetime + timedelta(days=1)
+                else:
+                    if todo.start_time:
+                        start_datetime = datetime.combine(todo.date, todo.start_time)
+                    else:
+                        start_datetime = datetime.combine(todo.date, datetime.min.time())
+                    
+                    if todo.end_time:
+                        end_datetime = datetime.combine(todo.date, todo.end_time)
+                    else:
+                        end_datetime = start_datetime + timedelta(hours=1)
+            
+            if start_datetime:
+                updated_event = await GoogleCalendarService.update_event(
+                    token_json=current_user.google_calendar_token,
+                    event_id=todo.google_calendar_event_id,
+                    title=todo.title,
+                    description=todo.memo or todo.description or "",
+                    start_datetime=start_datetime,
+                    end_datetime=end_datetime,
+                    location=todo.location or "",
+                    all_day=todo.all_day
+                )
+                
+                if updated_event:
+                    db.commit()
+                    return {
+                        "success": True,
+                        "event_id": updated_event.get('id'),
+                        "event_url": updated_event.get('htmlLink'),
+                        "message": "Google Calendar 이벤트가 업데이트되었습니다"
+                    }
         
         # Google Calendar에 이벤트 생성
         start_datetime = None
@@ -96,8 +534,9 @@ async def sync_todo_to_google_calendar(
                 detail="Google Calendar 동기화에 실패했습니다"
             )
         
-        # Todo에 Google Calendar 이벤트 ID 저장 (추후 업데이트/삭제용)
-        # TODO: Todo 모델에 google_calendar_event_id 필드 추가 필요
+        # Todo에 Google Calendar 이벤트 ID 저장
+        todo.google_calendar_event_id = event.get('id')
+        db.commit()
         
         return {
             "success": True,
@@ -172,7 +611,9 @@ async def get_calendar_status(
         "enabled": current_user.google_calendar_enabled == "true",
         "connected": token_exists and token_valid,
         "token_exists": token_exists,
-        "token_valid": token_valid
+        "token_valid": token_valid,
+        "import_enabled": current_user.google_calendar_import_enabled == "true" if hasattr(current_user, 'google_calendar_import_enabled') else False,
+        "export_enabled": current_user.google_calendar_export_enabled == "true" if hasattr(current_user, 'google_calendar_export_enabled') else False
     }
 
 
@@ -189,6 +630,11 @@ async def enable_calendar_sync(
         )
     
     current_user.google_calendar_enabled = "true"
+    # 기본값으로 가져오기와 내보내기는 비활성화 (사용자가 직접 활성화해야 함)
+    if not hasattr(current_user, 'google_calendar_import_enabled') or current_user.google_calendar_import_enabled is None:
+        current_user.google_calendar_import_enabled = "false"
+    if not hasattr(current_user, 'google_calendar_export_enabled') or current_user.google_calendar_export_enabled is None:
+        current_user.google_calendar_export_enabled = "false"
     db.commit()
     
     return {
@@ -197,18 +643,367 @@ async def enable_calendar_sync(
     }
 
 
+@router.post("/toggle-import")
+async def toggle_calendar_import(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Google Calendar 가져오기 토글"""
+    if not current_user.google_calendar_token:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Calendar 토큰이 없습니다. 먼저 Google 로그인을 해주세요."
+        )
+    
+    current_import_enabled = getattr(current_user, 'google_calendar_import_enabled', 'false')
+    new_state = "false" if current_import_enabled == "true" else "true"
+    current_user.google_calendar_import_enabled = new_state
+    db.commit()
+    
+    logger.info(f"[TOGGLE_IMPORT] 토글 변경 - user_id={current_user.id}, email={current_user.email}, 현재 상태={current_import_enabled}, 새 상태={new_state}")
+    
+    message = f"Google Calendar 가져오기가 {'활성화' if new_state == 'true' else '비활성화'}되었습니다"
+    if new_state == "false":
+        message += ". Google Calendar 일정이 앱에서 제거됩니다."
+    
+    return {
+        "success": True,
+        "import_enabled": new_state == "true",
+        "message": message
+    }
+
+
+@router.post("/toggle-export")
+async def toggle_calendar_export(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Google Calendar 내보내기 토글"""
+    if not current_user.google_calendar_token:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Calendar 토큰이 없습니다. 먼저 Google 로그인을 해주세요."
+        )
+    
+    from app.models.models import Todo
+    from app.services.calendar_service import GoogleCalendarService
+    from datetime import timedelta
+    
+    current_export_enabled = getattr(current_user, 'google_calendar_export_enabled', 'false')
+    new_state = "false" if current_export_enabled == "true" else "true"
+    
+    logger.info(f"[TOGGLE_EXPORT] 토글 변경 - user_id={current_user.id}, email={current_user.email}, 현재 상태={current_export_enabled}, 새 상태={new_state}")
+    
+    if new_state == "true":
+        # 토글을 켤 때: 기존 일정들을 Google Calendar에 동기화 (sync/all과 동일한 로직)
+        logger.info("[TOGGLE_EXPORT] 토글 켜짐 - 기존 일정 동기화 시작 (sync/all 로직 사용)")
+        
+        # 1단계: Google Calendar에서 현재 이벤트 목록 가져오기 (중복 체크용)
+        existing_events = []
+        try:
+            time_min = datetime.utcnow() - timedelta(days=365)
+            time_max = datetime.utcnow() + timedelta(days=365)
+            existing_events = await GoogleCalendarService.list_events(
+                token_json=current_user.google_calendar_token,
+                time_min=time_min,
+                time_max=time_max,
+                max_results=1000
+            )
+            logger.info(f"[TOGGLE_EXPORT] Google Calendar에서 {len(existing_events)}개 이벤트 가져옴")
+        except Exception as e:
+            logger.warning(f"[TOGGLE_EXPORT] Google Calendar 이벤트 목록 가져오기 실패 (계속 진행): {e}")
+        
+        # 기존 이벤트를 제목+날짜+시간으로 매칭하기 위한 맵 생성
+        existing_events_map = {}
+        for event in existing_events:
+            title = event.get('summary', '').strip()
+            start = event.get('start', {})
+            
+            event_date = None
+            event_time = None
+            if 'date' in start:
+                event_date = start['date']
+                event_time = None
+            elif 'dateTime' in start:
+                dt = datetime.fromisoformat(start['dateTime'].replace('Z', '+00:00'))
+                event_date = dt.date().isoformat()
+                event_time = dt.strftime('%H:%M')
+            
+            if event_date and title:
+                key = f"{title}_{event_date}_{event_time or 'all_day'}"
+                existing_events_map[key] = event.get('id')
+        
+        logger.info(f"[TOGGLE_EXPORT] 기존 이벤트 맵 생성 완료: {len(existing_events_map)}개")
+        
+        # 2단계: Google Calendar에 동기화되지 않은 모든 일정 조회
+        todos_to_sync = db.query(Todo).filter(
+            Todo.user_id == current_user.id,
+            Todo.deleted_at.is_(None),
+            Todo.google_calendar_event_id.is_(None)  # 아직 동기화되지 않은 일정만
+        ).all()
+        
+        logger.info(f"[TOGGLE_EXPORT] 동기화할 일정: {len(todos_to_sync)}개")
+        
+        synced_count = 0
+        matched_count = 0
+        
+        for todo in todos_to_sync:
+            try:
+                if not todo.date:
+                    continue
+                
+                # 일정 키 생성 (제목_날짜_시간)
+                todo_date_str = todo.date.isoformat() if hasattr(todo.date, 'isoformat') else str(todo.date)
+                todo_time_str = None
+                if not todo.all_day and todo.start_time:
+                    if hasattr(todo.start_time, 'strftime'):
+                        todo_time_str = todo.start_time.strftime('%H:%M')
+                    else:
+                        todo_time_str = str(todo.start_time)
+                
+                key = f"{todo.title.strip()}_{todo_date_str}_{todo_time_str or 'all_day'}"
+                
+                # 기존 이벤트와 매칭 확인
+                if key in existing_events_map:
+                    existing_event_id = existing_events_map[key]
+                    todo.google_calendar_event_id = existing_event_id
+                    # 토글을 켤 때 동기화하는 일정은 bulk_synced=False로 설정 (토글을 끄면 삭제되도록)
+                    # "동기화 후 저장" 버튼을 누르면 bulk_synced=True로 변경됨
+                    if todo.bulk_synced is None:
+                        todo.bulk_synced = False
+                    db.commit()
+                    matched_count += 1
+                    logger.info(f"[TOGGLE_EXPORT] 기존 이벤트와 매칭: todo_id={todo.id}, event_id={existing_event_id}, bulk_synced={todo.bulk_synced}")
+                    continue
+                
+                # 날짜/시간 정보 구성
+                start_datetime = None
+                end_datetime = None
+                
+                if todo.all_day:
+                    start_datetime = datetime.combine(todo.date, datetime.min.time())
+                    end_datetime = start_datetime + timedelta(days=1)
+                else:
+                    if todo.start_time:
+                        start_datetime = datetime.combine(todo.date, todo.start_time)
+                    else:
+                        start_datetime = datetime.combine(todo.date, datetime.min.time())
+                    
+                    if todo.end_time:
+                        end_datetime = datetime.combine(todo.date, todo.end_time)
+                    else:
+                        end_datetime = start_datetime + timedelta(hours=1)
+                
+                if start_datetime:
+                    # Google Calendar에 이벤트 생성
+                    event = await GoogleCalendarService.create_event(
+                        token_json=current_user.google_calendar_token,
+                        title=todo.title,
+                        description=todo.memo or todo.description or "",
+                        start_datetime=start_datetime,
+                        end_datetime=end_datetime,
+                        location=todo.location or "",
+                        all_day=todo.all_day
+                    )
+                    
+                    if event and event.get('id'):
+                        todo.google_calendar_event_id = event.get('id')
+                        # 토글을 켤 때 동기화하는 일정은 bulk_synced=False로 설정 (토글을 끄면 삭제되도록)
+                        # "동기화 후 저장" 버튼을 누르면 bulk_synced=True로 변경됨
+                        if todo.bulk_synced is None:
+                            todo.bulk_synced = False
+                        db.commit()
+                        synced_count += 1
+                        logger.info(f"[TOGGLE_EXPORT] 일정 동기화 성공: todo_id={todo.id}, event_id={event.get('id')}, bulk_synced={todo.bulk_synced}")
+            except Exception as e:
+                logger.error(f"[TOGGLE_EXPORT] 일정 동기화 실패: todo_id={todo.id}, error={e}")
+        
+        logger.info(f"[TOGGLE_EXPORT] 총 {synced_count}개 일정 동기화, {matched_count}개 일정 매칭 완료")
+        deleted_count = 0  # 토글 켤 때는 삭제 없음
+        
+    else:
+        # 토글을 끌 때: bulk_synced가 아닌 일정들의 Google Calendar 이벤트만 삭제
+        logger.info("[TOGGLE_EXPORT] 토글 꺼짐 - Google Calendar 이벤트 삭제 시작 (일괄 동기화 제외)")
+        
+        # bulk_synced가 False인 일정들만 조회
+        todos_to_unsync = db.query(Todo).filter(
+            Todo.user_id == current_user.id,
+            Todo.deleted_at.is_(None),
+            Todo.google_calendar_event_id.isnot(None),
+            Todo.bulk_synced == False  # 일괄 동기화가 아닌 일정만
+        ).all()
+        
+        logger.info(f"[TOGGLE_EXPORT] 삭제할 일정: {len(todos_to_unsync)}개")
+        
+        deleted_count = 0
+        for todo in todos_to_unsync:
+            try:
+                # Google Calendar에서 이벤트 삭제
+                deleted = await GoogleCalendarService.delete_event(
+                    token_json=current_user.google_calendar_token,
+                    event_id=todo.google_calendar_event_id
+                )
+                
+                if deleted:
+                    todo.google_calendar_event_id = None
+                    db.commit()  # 변경사항 저장
+                    deleted_count += 1
+                    logger.info(f"[TOGGLE_EXPORT] 이벤트 삭제 성공: todo_id={todo.id}")
+            except Exception as e:
+                logger.error(f"[TOGGLE_EXPORT] 이벤트 삭제 실패: todo_id={todo.id}, error={e}")
+        
+        logger.info(f"[TOGGLE_EXPORT] 총 {deleted_count}개 이벤트 삭제 완료")
+    
+    # 토글 상태 저장 (반드시 저장되어야 함)
+    try:
+        current_user.google_calendar_export_enabled = new_state
+        db.commit()
+        db.refresh(current_user)
+        
+        # 저장 확인
+        saved_value = getattr(current_user, 'google_calendar_export_enabled', 'false')
+        logger.info(f"[TOGGLE_EXPORT] 토글 상태 저장 - user_id={current_user.id}, 저장된 값={saved_value}, 예상 값={new_state}")
+        
+        if saved_value != new_state:
+            logger.error(f"[TOGGLE_EXPORT] 저장 실패! 예상={new_state}, 실제={saved_value}")
+            # 재시도
+            current_user.google_calendar_export_enabled = new_state
+            db.commit()
+            db.refresh(current_user)
+            saved_value = getattr(current_user, 'google_calendar_export_enabled', 'false')
+            logger.info(f"[TOGGLE_EXPORT] 재시도 후 저장된 값={saved_value}")
+    except Exception as e:
+        logger.error(f"[TOGGLE_EXPORT] 토글 상태 저장 중 오류: {e}", exc_info=True)
+        # 오류가 발생해도 상태는 저장 시도
+        try:
+            db.rollback()
+            current_user.google_calendar_export_enabled = new_state
+            db.commit()
+        except:
+            pass
+    
+    message = f"Google Calendar 내보내기가 {'활성화' if new_state == 'true' else '비활성화'}되었습니다"
+    if new_state == "true":
+        if synced_count > 0 and matched_count > 0:
+            message += f" ({synced_count}개 일정 동기화, {matched_count}개 일정 매칭됨)"
+        elif synced_count > 0:
+            message += f" ({synced_count}개 일정 동기화됨)"
+        elif matched_count > 0:
+            message += f" ({matched_count}개 일정 매칭됨)"
+    elif new_state == "false" and deleted_count > 0:
+        message += f" ({deleted_count}개 이벤트 삭제됨, 동기화 후 저장한 일정은 유지됨)"
+    
+    return {
+        "success": True,
+        "export_enabled": new_state == "true",
+        "message": message,
+        "synced_count": synced_count if new_state == "true" else 0,
+        "matched_count": matched_count if new_state == "true" else 0,
+        "deleted_count": deleted_count if new_state == "false" else 0
+    }
+
+
 @router.post("/disable")
 async def disable_calendar_sync(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Google Calendar 연동 비활성화"""
+    """Google Calendar 연동 비활성화 및 모든 동기화된 이벤트 삭제"""
+    from app.models.models import Todo
+    
+    # 가져오기와 내보내기 토글도 자동으로 비활성화
+    current_user.google_calendar_import_enabled = "false"
+    current_user.google_calendar_export_enabled = "false"
+    logger.info(f"[DISABLE_SYNC] 가져오기와 내보내기 토글도 비활성화됨")
+    
+    deleted_count = 0
+    failed_count = 0
+    
+    # 비활성화 전에 bulk_synced=False인 Todo의 Google Calendar 이벤트만 삭제
+    # bulk_synced=True인 일정은 "동기화 후 저장"으로 영구 저장된 것이므로 Google Calendar에 남겨둠
+    # Always Plan의 일정은 삭제하지 않음 (양쪽에 모두 유지)
+    if current_user.google_calendar_token:
+        try:
+            # bulk_synced=False인 일정만 조회 (동기화 후 저장된 일정은 제외)
+            todos_to_delete = db.query(Todo).filter(
+                Todo.user_id == current_user.id,
+                Todo.google_calendar_event_id.isnot(None),
+                Todo.deleted_at.is_(None),
+                Todo.bulk_synced == False  # 동기화 후 저장된 일정은 제외
+            ).all()
+            
+            # bulk_synced=True인 일정 수 확인 (Always Plan과 Google Calendar 양쪽에 유지됨)
+            todos_preserved = db.query(Todo).filter(
+                Todo.user_id == current_user.id,
+                Todo.google_calendar_event_id.isnot(None),
+                Todo.deleted_at.is_(None),
+                Todo.bulk_synced == True  # 동기화 후 저장된 일정
+            ).all()
+            
+            preserved_count = len(todos_preserved)
+            
+            logger.info(f"[DISABLE] Google Calendar 이벤트 삭제 시작: {len(todos_to_delete)}개 일정 삭제, {preserved_count}개 일정 유지 (동기화 후 저장 - Always Plan과 Google Calendar 양쪽에 유지)")
+            
+            # bulk_synced=True인 일정의 google_calendar_event_id는 유지 (Google Calendar에 남아있도록)
+            for todo in todos_preserved:
+                logger.info(f"[DISABLE] 일정 유지: todo_id={todo.id}, event_id={todo.google_calendar_event_id}, bulk_synced={todo.bulk_synced}")
+            
+            for todo in todos_to_delete:
+                try:
+                    # Google Calendar에서 이벤트 삭제
+                    deleted = await GoogleCalendarService.delete_event(
+                        token_json=current_user.google_calendar_token,
+                        event_id=todo.google_calendar_event_id
+                    )
+                    
+                    if deleted:
+                        # 이벤트 ID 제거 (Always Plan의 일정은 유지, Google Calendar 이벤트만 삭제)
+                        todo.google_calendar_event_id = None
+                        deleted_count += 1
+                        logger.info(f"[DISABLE] 이벤트 삭제: todo_id={todo.id}, event_id={todo.google_calendar_event_id} (Always Plan 일정은 유지됨)")
+                    else:
+                        failed_count += 1
+                except Exception as e:
+                    logger.warning(f"Google Calendar 이벤트 삭제 실패 (todo_id={todo.id}, event_id={todo.google_calendar_event_id}): {e}")
+                    failed_count += 1
+                    # 실패해도 이벤트 ID는 제거 (동기화 상태 초기화)
+                    todo.google_calendar_event_id = None
+            
+            # 변경사항 커밋
+            if deleted_count > 0 or failed_count > 0:
+                db.commit()
+            
+            logger.info(f"[DISABLE] Google Calendar 비활성화: {deleted_count}개 이벤트 삭제 성공, {failed_count}개 실패, {preserved_count}개 일정 유지 (동기화 후 저장 - Always Plan과 Google Calendar 양쪽에 유지)")
+        except Exception as e:
+            logger.error(f"[DISABLE] Google Calendar 이벤트 삭제 중 오류: {e}", exc_info=True)
+            # 오류가 발생해도 비활성화는 진행
+    
+    # 연동 비활성화
     current_user.google_calendar_enabled = "false"
     db.commit()
     
+    logger.info(f"[DISABLE] Google Calendar 연동 비활성화 완료: 사용자={current_user.email}")
+    
+    # 유지된 일정 수 재계산 (응답용)
+    final_preserved_count = db.query(Todo).filter(
+        Todo.user_id == current_user.id,
+        Todo.google_calendar_event_id.isnot(None),
+        Todo.deleted_at.is_(None),
+        Todo.bulk_synced == True
+    ).count()
+    
+    message = f"Google Calendar 연동이 비활성화되었습니다."
+    if deleted_count > 0:
+        message += f" {deleted_count}개 이벤트가 삭제되었습니다."
+    if final_preserved_count > 0:
+        message += f" 동기화 후 저장된 {final_preserved_count}개 일정은 Always Plan과 Google Calendar 양쪽에 남아있습니다."
+    
     return {
         "success": True,
-        "message": "Google Calendar 연동이 비활성화되었습니다"
+        "deleted_count": deleted_count,
+        "failed_count": failed_count,
+        "preserved_count": final_preserved_count,  # 동기화 후 저장된 일정 수 (Always Plan과 Google Calendar 양쪽에 유지)
+        "message": message
     }
 
 
@@ -483,16 +1278,52 @@ async def get_google_calendar_events(
                     start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
             elif 'dateTime' in start:
                 # 시간 지정 이벤트
-                start_datetime_str = start['dateTime'].replace('Z', '+00:00')
-                start_datetime_obj = datetime.fromisoformat(start_datetime_str)
-                start_date = start_datetime_obj.date()
-                start_time = start_datetime_obj.strftime('%H:%M')
+                # Google Calendar API는 timeZone 정보를 포함할 수 있음
+                start_datetime_str = start['dateTime']
+                start_timezone = start.get('timeZone', 'UTC')
+                
+                # ISO 형식 파싱 (Z 또는 타임존 정보 포함)
+                if start_datetime_str.endswith('Z'):
+                    start_datetime_obj = datetime.fromisoformat(start_datetime_str.replace('Z', '+00:00'))
+                else:
+                    start_datetime_obj = datetime.fromisoformat(start_datetime_str)
+                
+                # 타임존이 없으면 UTC로 간주
+                if start_datetime_obj.tzinfo is None:
+                    start_datetime_obj = start_datetime_obj.replace(tzinfo=timezone.utc)
+                
+                # Asia/Seoul 타임존으로 변환 (앱에서 사용하는 시간대)
+                seoul_tz = timezone(timedelta(hours=9))  # UTC+9
+                start_datetime_seoul = start_datetime_obj.astimezone(seoul_tz)
+                
+                start_date = start_datetime_seoul.date()
+                start_time = start_datetime_seoul.strftime('%H:%M')
+                
+                logger.info(f"[GET_GOOGLE_EVENTS] 시간 파싱 - 원본: {start_datetime_str} ({start_timezone}), 변환 후: {start_datetime_seoul} (Asia/Seoul), 시간: {start_time}")
             
             # 종료 시간 파싱
             end_time = None
             if 'dateTime' in end:
-                end_datetime_obj = datetime.fromisoformat(end['dateTime'].replace('Z', '+00:00'))
-                end_time = end_datetime_obj.strftime('%H:%M')
+                end_datetime_str = end['dateTime']
+                end_timezone = end.get('timeZone', 'UTC')
+                
+                # ISO 형식 파싱
+                if end_datetime_str.endswith('Z'):
+                    end_datetime_obj = datetime.fromisoformat(end_datetime_str.replace('Z', '+00:00'))
+                else:
+                    end_datetime_obj = datetime.fromisoformat(end_datetime_str)
+                
+                # 타임존이 없으면 UTC로 간주
+                if end_datetime_obj.tzinfo is None:
+                    end_datetime_obj = end_datetime_obj.replace(tzinfo=timezone.utc)
+                
+                # Asia/Seoul 타임존으로 변환
+                seoul_tz = timezone(timedelta(hours=9))  # UTC+9
+                end_datetime_seoul = end_datetime_obj.astimezone(seoul_tz)
+                
+                end_time = end_datetime_seoul.strftime('%H:%M')
+                
+                logger.info(f"[GET_GOOGLE_EVENTS] 종료 시간 파싱 - 원본: {end_datetime_str} ({end_timezone}), 변환 후: {end_datetime_seoul} (Asia/Seoul), 시간: {end_time}")
             
             formatted_events.append({
                 'id': event.get('id'),

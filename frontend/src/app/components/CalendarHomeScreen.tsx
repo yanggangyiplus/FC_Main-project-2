@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Bell,
   Pencil,
@@ -214,7 +214,192 @@ export function CalendarHomeScreen() {
     handleGoogleCalendarCallback();
   }, []);
 
-  // 초기 데이터 로드 (프로필, 일정, 시간표, 가족 구성원)
+  // Google Calendar 이벤트 가져오기 함수 (재사용 가능하도록 분리)
+  const loadGoogleCalendarEvents = useCallback(async () => {
+    try {
+      const calendarStatusResponse = await apiClient.getCalendarStatus();
+      const googleCalendarEnabled = calendarStatusResponse.data?.enabled || false;
+      const googleCalendarConnected = calendarStatusResponse.data?.connected || false;
+      const googleCalendarImportEnabled = calendarStatusResponse.data?.import_enabled || false;
+
+      // 가져오기가 활성화되어 있고 연동이 되어 있을 때만 Google Calendar 이벤트 가져오기
+      if (googleCalendarEnabled && googleCalendarConnected && googleCalendarImportEnabled) {
+        console.log('[Google Calendar] 가져오기 활성화됨, 이벤트 가져오기 시작...');
+
+        // 시간 범위 설정 (2주 전 ~ 6주 후)
+        const now = new Date();
+        const timeMin = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000); // 2주 전
+        const timeMax = new Date(now.getTime() + 42 * 24 * 60 * 60 * 1000); // 6주 후
+
+        const timeMinISO = timeMin.toISOString();
+        const timeMaxISO = timeMax.toISOString();
+
+        console.log('[Google Calendar] 이벤트 요청:', { timeMin: timeMinISO, timeMax: timeMaxISO });
+
+        try {
+          const eventsResponse = await apiClient.getGoogleCalendarEvents(timeMinISO, timeMaxISO);
+          console.log('[Google Calendar] 이벤트 응답:', eventsResponse.data);
+
+          if (eventsResponse.data?.success && eventsResponse.data?.events) {
+            const googleEvents = eventsResponse.data.events;
+            console.log(`[Google Calendar] ${googleEvents.length}개 이벤트 받음`);
+
+            // Google Calendar 이벤트를 Todo 형식으로 변환
+            const formattedGoogleEvents = googleEvents.map((event: any) => {
+              const dateStr = event.date || new Date().toISOString().split('T')[0];
+
+              // duration 계산
+              let duration = 60;
+              if (event.start_time && event.end_time) {
+                const [startHours, startMinutes] = event.start_time.split(':').map(Number);
+                const [endHours, endMinutes] = event.end_time.split(':').map(Number);
+                const startTotal = startHours * 60 + startMinutes;
+                const endTotal = endHours * 60 + endMinutes;
+                duration = endTotal - startTotal;
+              }
+
+              return {
+                id: event.google_calendar_event_id || `google_${event.id}`,
+                title: event.title || '제목 없음',
+                time: event.start_time || "09:00",
+                duration: duration > 0 ? duration : 60,
+                completed: false,
+                category: "기타",
+                date: dateStr,
+                startTime: event.start_time,
+                endTime: event.end_time,
+                isAllDay: event.all_day || false,
+                memo: event.description || "",
+                location: event.location || "",
+                hasNotification: false,
+                alarmTimes: [],
+                repeatType: "none",
+                checklistItems: [],
+                memberId: undefined,
+                isRoutine: false,
+                source: 'google_calendar' as const,
+                googleCalendarEventId: event.id,
+              };
+            });
+
+            // 기존 일정과 병합 (중복 제거)
+            setTodos((prevTodos) => {
+              // Always Plan 일정만 유지 (Google Calendar 이벤트는 새로 가져온 것으로 교체)
+              // 단, bulkSynced=True인 Todo는 "동기화 후 저장"으로 영구 저장된 것이므로 항상 유지
+              const alwaysPlanTodos = prevTodos.filter(t => {
+                // bulkSynced=True인 Todo는 항상 유지
+                if (t.bulkSynced === true) {
+                  return true;
+                }
+                // source가 'always_plan'이거나 없는 경우만 유지
+                return t.source === 'always_plan' || !t.source;
+              });
+
+              // 기존 일정 ID와 Google Calendar 이벤트 ID를 모두 체크
+              const existingIds = new Set(alwaysPlanTodos.map(t => t.id));
+
+              // Always Plan 일정 중 google_calendar_event_id가 있는 것들의 이벤트 ID 수집
+              const alwaysPlanGoogleEventIds = new Set(
+                alwaysPlanTodos
+                  .filter(t => t.googleCalendarEventId)
+                  .map(t => t.googleCalendarEventId!)
+              );
+
+              // Always Plan 일정의 제목+날짜+시간 키 생성 (중복 방지)
+              const alwaysPlanKeys = new Set(
+                alwaysPlanTodos.map(t => {
+                  const dateStr = t.date || '';
+                  const timeStr = t.startTime || (t.isAllDay ? 'all_day' : '');
+                  return `${t.title}_${dateStr}_${timeStr}`.toLowerCase().trim();
+                })
+              );
+
+              // 중복되지 않는 Google Calendar 이벤트만 추가
+              const newGoogleEvents = formattedGoogleEvents.filter(
+                (event: any) => {
+                  // ID로 중복 체크
+                  if (existingIds.has(event.id)) {
+                    console.log(`[Google Calendar] 중복 제거 (ID): ${event.id}`);
+                    return false;
+                  }
+                  // Always Plan 일정과 이미 매칭된 Google Calendar 이벤트는 표시하지 않음 (중복 방지)
+                  if (event.googleCalendarEventId && alwaysPlanGoogleEventIds.has(event.googleCalendarEventId)) {
+                    console.log(`[Google Calendar] 중복 제거 (Always Plan과 매칭됨): ${event.googleCalendarEventId}`);
+                    return false;
+                  }
+                  // 제목+날짜+시간이 같은 Always Plan 일정이 있으면 중복으로 간주
+                  const eventKey = `${event.title}_${event.date || ''}_${event.startTime || (event.isAllDay ? 'all_day' : '')}`.toLowerCase().trim();
+                  if (alwaysPlanKeys.has(eventKey)) {
+                    console.log(`[Google Calendar] 중복 제거 (제목+날짜+시간 일치): ${event.title} ${event.date} ${event.startTime}`);
+                    return false;
+                  }
+                  return true;
+                }
+              );
+
+              const matchedCount = alwaysPlanGoogleEventIds.size;
+              console.log(`[Google Calendar] Always Plan 일정: ${alwaysPlanTodos.length}개 (${matchedCount}개가 Google Calendar와 매칭됨), 새 Google 이벤트: ${newGoogleEvents.length}개`);
+
+              // Always Plan 일정과 새로 가져온 Google Calendar 이벤트 병합
+              const mergedTodos = [...alwaysPlanTodos, ...newGoogleEvents];
+
+              // 최종적으로 모든 일정에서 중복 제거 (제목+날짜+시간 기준)
+              const finalUniqueTodos: any[] = [];
+              const finalSeenKeys = new Set<string>();
+
+              for (const todo of mergedTodos) {
+                const dateStr = todo.date || '';
+                const timeStr = todo.startTime || (todo.isAllDay ? 'all_day' : '');
+                const key = `${todo.title}_${dateStr}_${timeStr}`.toLowerCase().trim();
+
+                if (!finalSeenKeys.has(key)) {
+                  finalSeenKeys.add(key);
+                  finalUniqueTodos.push(todo);
+                } else {
+                  console.log(`[최종 중복 제거] ${todo.title} ${dateStr} ${timeStr}`);
+                }
+              }
+
+              console.log(`[최종] 중복 제거 전: ${mergedTodos.length}개, 제거 후: ${finalUniqueTodos.length}개`);
+
+              return finalUniqueTodos;
+            });
+          } else {
+            console.warn('[Google Calendar] 이벤트가 없거나 실패:', eventsResponse.data);
+          }
+        } catch (error: any) {
+          console.error('[Google Calendar] 이벤트 가져오기 실패:', error);
+          console.error('[Google Calendar] 에러 상세:', error.response?.data || error.message);
+        }
+      } else {
+        console.log('[Google Calendar] 연동 비활성화됨 또는 연결 안됨');
+
+        // Google Calendar 연동이 비활성화된 경우, Google Calendar 이벤트 제거
+        // 단, bulkSynced=True인 Todo는 "동기화 후 저장"으로 영구 저장된 것이므로 유지
+        setTodos((prevTodos) => {
+          const filteredTodos = prevTodos.filter(
+            (todo: any) => {
+              // bulkSynced=True인 Todo는 항상 유지 (동기화 후 저장으로 영구 저장됨)
+              if (todo.bulkSynced === true) {
+                return true;
+              }
+              // source가 'google_calendar'이거나 googleCalendarEventId가 있지만 bulkSynced가 아닌 경우만 제거
+              return todo.source !== 'google_calendar' && !todo.googleCalendarEventId;
+            }
+          );
+          const removedCount = prevTodos.length - filteredTodos.length;
+          if (removedCount > 0) {
+            console.log(`[Google Calendar] ${removedCount}개 이벤트 제거됨 (연동 비활성화, bulkSynced=True인 일정은 유지)`);
+          }
+          return filteredTodos;
+        });
+      }
+    } catch (error) {
+      console.error('[Google Calendar] 상태 확인 실패:', error);
+      // 에러가 발생해도 앱은 정상 동작
+    }
+  }, []);
+
   useEffect(() => {
     const loadInitialData = async () => {
       // 사용자 정보 변수 (모든 try-catch 블록에서 사용 가능하도록 함수 최상단에 선언)
@@ -236,7 +421,8 @@ export function CalendarHomeScreen() {
         // 에러가 발생해도 기본값 사용
       }
 
-      // 2. 일정 로드
+      // 2. 일정 로드 (Google Calendar 이벤트와 병합하기 전에 먼저 로드)
+      let baseTodos: any[] = [];
       try {
         const todosResponse = await apiClient.getTodos();
         if (todosResponse.data && Array.isArray(todosResponse.data)) {
@@ -309,9 +495,35 @@ export function CalendarHomeScreen() {
               checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
               memberId: memberId,
               isRoutine: false,
+              source: 'always_plan' as const, // 기존 일정임을 명시
+              googleCalendarEventId: todo.google_calendar_event_id || undefined, // Google Calendar 이벤트 ID 추가
+              bulkSynced: todo.bulk_synced || false, // 동기화 후 저장 여부 (새로고침 후에도 유지되도록)
             };
           });
-          setTodos(formattedTodos);
+          baseTodos = formattedTodos;
+
+          // Always Plan 일정들 사이에서도 중복 제거 (제목+날짜+시간 기준)
+          const uniqueTodos: any[] = [];
+          const seenKeys = new Set<string>();
+
+          for (const todo of formattedTodos) {
+            const dateStr = todo.date || '';
+            const timeStr = todo.startTime || (todo.isAllDay ? 'all_day' : '');
+            const key = `${todo.title}_${dateStr}_${timeStr}`.toLowerCase().trim();
+
+            if (!seenKeys.has(key)) {
+              seenKeys.add(key);
+              uniqueTodos.push(todo);
+            } else {
+              console.log(`[Always Plan] 중복 제거: ${todo.title} ${dateStr} ${timeStr}`);
+            }
+          }
+
+          console.log(`[Always Plan] 중복 제거 전: ${formattedTodos.length}개, 제거 후: ${uniqueTodos.length}개`);
+
+          // 기존 일정을 먼저 설정
+          setTodos(uniqueTodos);
+          console.log(`[Always Plan] 기존 일정 ${formattedTodos.length}개 로드 완료`);
         }
       } catch (error) {
         console.error("일정 로드 실패:", error);
@@ -373,110 +585,93 @@ export function CalendarHomeScreen() {
       }
 
       // 5. Google Calendar 연동 상태 확인 및 이벤트 가져오기
-      try {
-        const calendarStatusResponse = await apiClient.getCalendarStatus();
-        const googleCalendarEnabled = calendarStatusResponse.data?.enabled || false;
-        const googleCalendarConnected = calendarStatusResponse.data?.connected || false;
-
-        if (googleCalendarEnabled && googleCalendarConnected) {
-          console.log('[Google Calendar] 연동 활성화됨, 이벤트 가져오기 시작...');
-
-          // 시간 범위 설정 (2주 전 ~ 6주 후)
-          const now = new Date();
-          const timeMin = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000); // 2주 전
-          const timeMax = new Date(now.getTime() + 42 * 24 * 60 * 60 * 1000); // 6주 후
-
-          const timeMinISO = timeMin.toISOString();
-          const timeMaxISO = timeMax.toISOString();
-
-          console.log('[Google Calendar] 이벤트 요청:', { timeMin: timeMinISO, timeMax: timeMaxISO });
-
-          try {
-            const eventsResponse = await apiClient.getGoogleCalendarEvents(timeMinISO, timeMaxISO);
-            console.log('[Google Calendar] 이벤트 응답:', eventsResponse.data);
-
-            if (eventsResponse.data?.success && eventsResponse.data?.events) {
-              const googleEvents = eventsResponse.data.events;
-              console.log(`[Google Calendar] ${googleEvents.length}개 이벤트 받음`);
-
-              // Google Calendar 이벤트를 Todo 형식으로 변환
-              const formattedGoogleEvents = googleEvents.map((event: any) => {
-                const dateStr = event.date || new Date().toISOString().split('T')[0];
-
-                // duration 계산
-                let duration = 60;
-                if (event.start_time && event.end_time) {
-                  const [startHours, startMinutes] = event.start_time.split(':').map(Number);
-                  const [endHours, endMinutes] = event.end_time.split(':').map(Number);
-                  const startTotal = startHours * 60 + startMinutes;
-                  const endTotal = endHours * 60 + endMinutes;
-                  duration = endTotal - startTotal;
-                }
-
-                return {
-                  id: event.google_calendar_event_id || `google_${event.id}`,
-                  title: event.title || '제목 없음',
-                  time: event.start_time || "09:00",
-                  duration: duration > 0 ? duration : 60,
-                  completed: false,
-                  category: "기타",
-                  date: dateStr,
-                  startTime: event.start_time,
-                  endTime: event.end_time,
-                  isAllDay: event.all_day || false,
-                  memo: event.description || "",
-                  location: event.location || "",
-                  hasNotification: false,
-                  alarmTimes: [],
-                  repeatType: "none",
-                  checklistItems: [],
-                  memberId: undefined,
-                  isRoutine: false,
-                  source: 'google_calendar',
-                  googleCalendarEventId: event.id,
-                };
-              });
-
-              // 기존 일정과 병합 (중복 제거)
-              setTodos((prevTodos) => {
-                const existingIds = new Set(prevTodos.map(t => t.id));
-                const newGoogleEvents = formattedGoogleEvents.filter(
-                  (event: any) => !existingIds.has(event.id)
-                );
-
-                console.log(`[Google Calendar] 이벤트 ${newGoogleEvents.length}개 추가됨 (전체: ${prevTodos.length + newGoogleEvents.length}개)`);
-                return [...prevTodos, ...newGoogleEvents];
-              });
-            } else {
-              console.warn('[Google Calendar] 이벤트가 없거나 실패:', eventsResponse.data);
-            }
-          } catch (error: any) {
-            console.error('[Google Calendar] 이벤트 가져오기 실패:', error);
-            console.error('[Google Calendar] 에러 상세:', error.response?.data || error.message);
-          }
-        } else {
-          console.log('[Google Calendar] 연동 비활성화됨 또는 연결 안됨');
-
-          // Google Calendar 연동이 비활성화된 경우, Google Calendar 이벤트 제거
-          setTodos((prevTodos) => {
-            const filteredTodos = prevTodos.filter(
-              (todo: any) => todo.source !== 'google_calendar'
-            );
-            const removedCount = prevTodos.length - filteredTodos.length;
-            if (removedCount > 0) {
-              console.log(`[Google Calendar] ${removedCount}개 이벤트 제거됨 (연동 비활성화)`);
-            }
-            return filteredTodos;
-          });
-        }
-      } catch (error) {
-        console.error('[Google Calendar] 상태 확인 실패:', error);
-        // 에러가 발생해도 앱은 정상 동작
-      }
+      await loadGoogleCalendarEvents();
     };
 
     loadInitialData();
   }, []); // 컴포넌트 마운트 시 한 번만 실행
+
+  // Google Calendar 이벤트를 주기적으로 가져오기 (1분마다)
+  useEffect(() => {
+    console.log('[Google Calendar] 주기적 업데이트 설정 시작...');
+
+    // 가져오기 토글이 활성화되어 있을 때만 주기적으로 가져오기
+    const interval = setInterval(async () => {
+      console.log('[Google Calendar] 주기적 업데이트 실행 (1분마다)...');
+      try {
+        const calendarStatusResponse = await apiClient.getCalendarStatus();
+        const googleCalendarEnabled = calendarStatusResponse.data?.enabled || false;
+        const googleCalendarConnected = calendarStatusResponse.data?.connected || false;
+        const googleCalendarImportEnabled = calendarStatusResponse.data?.import_enabled || false;
+
+        console.log('[Google Calendar] 상태 확인:', {
+          enabled: googleCalendarEnabled,
+          connected: googleCalendarConnected,
+          importEnabled: googleCalendarImportEnabled
+        });
+
+        if (googleCalendarEnabled && googleCalendarConnected && googleCalendarImportEnabled) {
+          console.log('[Google Calendar] 주기적 이벤트 가져오기 시작...');
+          await loadGoogleCalendarEvents();
+        } else {
+          console.log('[Google Calendar] 주기적 업데이트 스킵 (토글 비활성화 또는 연결 안됨)');
+        }
+      } catch (error) {
+        console.error('[Google Calendar] 주기적 이벤트 가져오기 실패:', error);
+      }
+    }, 60000); // 1분마다
+
+    // 즉시 한 번 실행 (초기 로드 후)
+    const immediateCheck = async () => {
+      console.log('[Google Calendar] 즉시 상태 확인 실행...');
+      try {
+        const calendarStatusResponse = await apiClient.getCalendarStatus();
+        const googleCalendarEnabled = calendarStatusResponse.data?.enabled || false;
+        const googleCalendarConnected = calendarStatusResponse.data?.connected || false;
+        const googleCalendarImportEnabled = calendarStatusResponse.data?.import_enabled || false;
+
+        if (googleCalendarEnabled && googleCalendarConnected && googleCalendarImportEnabled) {
+          console.log('[Google Calendar] 즉시 이벤트 가져오기 시작...');
+          await loadGoogleCalendarEvents();
+        }
+      } catch (error) {
+        console.error('[Google Calendar] 즉시 이벤트 가져오기 실패:', error);
+      }
+    };
+
+    // 약간의 지연 후 실행 (초기 로드 완료 후)
+    const timeoutId = setTimeout(immediateCheck, 2000);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeoutId);
+    };
+  }, [loadGoogleCalendarEvents]);
+
+  // 화면이 포커스될 때 Google Calendar 이벤트 가져오기
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[Google Calendar] 화면 포커스 감지...');
+        try {
+          const calendarStatusResponse = await apiClient.getCalendarStatus();
+          const googleCalendarEnabled = calendarStatusResponse.data?.enabled || false;
+          const googleCalendarConnected = calendarStatusResponse.data?.connected || false;
+          const googleCalendarImportEnabled = calendarStatusResponse.data?.import_enabled || false;
+
+          if (googleCalendarEnabled && googleCalendarConnected && googleCalendarImportEnabled) {
+            console.log('[Google Calendar] 화면 포커스 시 이벤트 가져오기 시작...');
+            await loadGoogleCalendarEvents();
+          }
+        } catch (error) {
+          console.error('[Google Calendar] 화면 포커스 시 이벤트 가져오기 실패:', error);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [loadGoogleCalendarEvents]);
 
   // Routine Item Interface
   interface RoutineItem {
@@ -491,6 +686,7 @@ export function CalendarHomeScreen() {
       startTime: string;
       duration: number;
     }[];
+    addToCalendar?: boolean; // 캘린더에 일정으로 추가 여부
   }
 
   const [routines, setRoutines] = useState<RoutineItem[]>([]);
@@ -510,7 +706,7 @@ export function CalendarHomeScreen() {
           startTime: slot.startTime,
           duration: slot.duration
         })),
-        add_to_calendar: false
+        add_to_calendar: routine.addToCalendar || false // 체크박스 상태 사용
       };
 
       console.log("시간표 데이터:", routineData);
@@ -520,7 +716,8 @@ export function CalendarHomeScreen() {
       if (response && response.data) {
         const savedRoutine = {
           ...routine,
-          id: response.data.id
+          id: response.data.id,
+          addToCalendar: routine.addToCalendar || false, // 체크박스 상태 유지
         };
         setRoutines(prev => [...prev, savedRoutine]);
         toast.success("시간표가 저장되었습니다.");
@@ -713,6 +910,7 @@ export function CalendarHomeScreen() {
           startTime: slot.startTime,
           duration: slot.duration
         })),
+        add_to_calendar: updatedRoutine.addToCalendar || false, // 체크박스 상태 사용
       };
 
       console.log("시간표 수정 데이터:", routineData);
@@ -775,6 +973,9 @@ export function CalendarHomeScreen() {
 
   // Todo Item Interface
   interface TodoItem {
+    source?: 'always_plan' | 'google_calendar';
+    googleCalendarEventId?: string;
+    bulkSynced?: boolean; // 동기화 후 저장 여부 (새로고침 후에도 유지되도록)
     id: string;
     title: string;
     time: string;
@@ -886,6 +1087,13 @@ export function CalendarHomeScreen() {
         // 기존 일정 정보 가져오기
         const existingTodo = todos.find(t => t.id === editingTodoId);
 
+        // Google Calendar 이벤트는 수정할 수 없음 (DB에 저장되지 않음)
+        if (existingTodo?.source === 'google_calendar' || existingTodo?.googleCalendarEventId) {
+          toast.error("Google Calendar에서 가져온 일정은 수정할 수 없습니다. Google Calendar에서 직접 수정해주세요.");
+          setEditingTodoId(null);
+          return;
+        }
+
         // 날짜 형식 정규화 함수
         const normalizeDate = (date: any): string => {
           if (typeof date === 'string') {
@@ -933,39 +1141,60 @@ export function CalendarHomeScreen() {
 
         console.log("일정 수정 데이터:", todoData);
         console.log("일정 수정 데이터 JSON:", JSON.stringify(todoData, null, 2));
-        const response = await apiClient.updateTodo(editingTodoId, todoData);
-        console.log("일정 수정 응답:", response);
 
-        if (response && response.data) {
-          const updatedTodo = {
-            id: editingTodoId,
-            title: formData.title,
-            time: formData.startTime,
-            duration: duration > 0 ? duration : 60,
-            completed: todos.find(t => t.id === editingTodoId)?.completed || false,
-            category: formData.category,
-            date: formData.date,
-            startTime: formData.startTime,
-            endTime: formData.endTime,
-            isAllDay: formData.isAllDay,
-            memo: formData.memo || "",
-            location: formData.location || "",
-            hasNotification: formData.hasNotification,
-            alarmTimes: formData.alarmTimes,
-            repeatType: formData.repeatType,
-            checklistItems: formData.checklistItems.filter(item => item.trim() !== ''),
-            postponeToNextDay: formData.postponeToNextDay,
-          };
+        try {
+          const response = await apiClient.updateTodo(editingTodoId, todoData);
+          console.log("일정 수정 응답:", response);
 
-          setTodos((prev) =>
-            prev.map(t => t.id === editingTodoId ? updatedTodo : t)
-              .sort((a, b) => a.time.localeCompare(b.time))
-          );
-          toast.success("일정이 수정되었습니다.");
-          setEditingTodoId(null);
-        } else {
-          console.error("응답 데이터 없음:", response);
-          toast.error("일정 수정에 실패했습니다. 응답 데이터가 없습니다.");
+          if (response && response.data) {
+            // 날짜 형식 정규화
+            const normalizedDate = normalizeDate(response.data.date || formData.date);
+
+            const updatedTodo = {
+              id: editingTodoId,
+              title: formData.title,
+              time: formData.startTime || "09:00",
+              duration: duration > 0 ? duration : 60,
+              completed: response.data.status === 'completed' || todos.find(t => t.id === editingTodoId)?.completed || false,
+              category: formData.category,
+              date: normalizedDate,
+              startTime: formData.startTime,
+              endTime: formData.endTime,
+              isAllDay: formData.isAllDay,
+              memo: formData.memo || "",
+              location: formData.location || "",
+              hasNotification: formData.hasNotification,
+              alarmTimes: formData.alarmTimes,
+              repeatType: formData.repeatType,
+              checklistItems: formData.checklistItems.filter(item => item.trim() !== ''),
+              postponeToNextDay: formData.postponeToNextDay,
+              source: 'always_plan' as const, // 수정된 일정임을 명시
+            };
+
+            setTodos((prev) =>
+              prev.map(t => t.id === editingTodoId ? updatedTodo : t)
+                .sort((a, b) => {
+                  // 날짜와 시간으로 정렬
+                  if (a.date !== b.date) {
+                    return (a.date || '').localeCompare(b.date || '');
+                  }
+                  return a.time.localeCompare(b.time);
+                })
+            );
+            toast.success("일정이 수정되었습니다.");
+            setEditingTodoId(null);
+          } else {
+            console.error("응답 데이터 없음:", response);
+            toast.error("일정 수정에 실패했습니다. 응답 데이터가 없습니다.");
+          }
+        } catch (updateError: any) {
+          console.error("일정 수정 API 에러:", updateError);
+          if (updateError.response?.status === 404) {
+            toast.error("일정을 찾을 수 없습니다. 이미 삭제되었을 수 있습니다.");
+          } else {
+            toast.error(`일정 수정에 실패했습니다: ${updateError.response?.data?.detail || updateError.message}`);
+          }
+          throw updateError;
         }
       } else {
         console.log("일정 추가 시작:", formData);
@@ -987,7 +1216,24 @@ export function CalendarHomeScreen() {
           checklist_items: formData.checklistItems.filter(item => item.trim() !== ''),
         };
 
+        // 날짜 형식 정규화 함수
+        const normalizeDate = (date: any): string => {
+          if (typeof date === 'string') {
+            return date;
+          } else if (date && typeof date === 'object' && 'getFullYear' in date) {
+            const d = date as Date;
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          } else {
+            return String(date || '');
+          }
+        };
+
+        // 날짜 형식 정규화
+        const normalizedDate = normalizeDate(formData.date);
+        todoData.date = normalizedDate;
+
         console.log("일정 추가 데이터:", todoData);
+        console.log("일정 추가 데이터 (정규화된 날짜):", normalizedDate);
         try {
           const response = await apiClient.createTodo(todoData);
           console.log("일정 추가 응답:", response);
@@ -996,7 +1242,7 @@ export function CalendarHomeScreen() {
 
           if (response && response.data) {
             // API 응답에서 날짜 형식 확인 및 변환
-            let todoDate = formData.date;
+            let todoDate = normalizedDate;
             if (response.data.date) {
               // API 응답의 날짜가 Date 객체인 경우 문자열로 변환
               if (response.data.date instanceof Date) {
@@ -1004,7 +1250,7 @@ export function CalendarHomeScreen() {
                 const month = response.data.date.getMonth() + 1;
                 const day = response.data.date.getDate();
                 todoDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              } else {
+              } else if (typeof response.data.date === 'string') {
                 todoDate = response.data.date;
               }
             }
@@ -1012,7 +1258,7 @@ export function CalendarHomeScreen() {
             const newTodo = {
               id: response.data.id,
               title: formData.title,
-              time: formData.startTime,
+              time: formData.startTime || "09:00",
               duration: duration > 0 ? duration : 60,
               completed: false,
               category: formData.category,
@@ -1028,21 +1274,41 @@ export function CalendarHomeScreen() {
               checklistItems: formData.checklistItems.filter(item => item.trim() !== ''),
               postponeToNextDay: formData.postponeToNextDay,
               isRoutine: false,
+              source: 'always_plan' as const, // 새로 생성된 일정임을 명시
             };
 
             console.log("일정 추가 완료:", newTodo);
             console.log("일정 날짜:", newTodo.date);
+            console.log("일정 ID:", newTodo.id);
+
+            // 상태 업데이트 - 기존 일정에 추가
             setTodos((prev) => {
-              const updated = [...prev, newTodo].sort((a, b) => {
-                // 날짜와 시간으로 정렬
-                if (a.date !== b.date) {
-                  return (a.date || '').localeCompare(b.date || '');
-                }
-                return a.time.localeCompare(b.time);
-              });
-              console.log("업데이트된 todos:", updated);
-              console.log("해당 날짜의 일정:", updated.filter(t => t.date === newTodo.date));
-              return updated;
+              // 중복 체크 (같은 ID가 이미 있는지 확인)
+              const existingIndex = prev.findIndex(t => t.id === newTodo.id);
+              if (existingIndex >= 0) {
+                // 이미 존재하면 업데이트
+                const updated = [...prev];
+                updated[existingIndex] = newTodo;
+                return updated.sort((a, b) => {
+                  // 날짜와 시간으로 정렬
+                  if (a.date !== b.date) {
+                    return (a.date || '').localeCompare(b.date || '');
+                  }
+                  return a.time.localeCompare(b.time);
+                });
+              } else {
+                // 새로 추가
+                const updated = [...prev, newTodo].sort((a, b) => {
+                  // 날짜와 시간으로 정렬
+                  if (a.date !== b.date) {
+                    return (a.date || '').localeCompare(b.date || '');
+                  }
+                  return a.time.localeCompare(b.time);
+                });
+                console.log("업데이트된 todos:", updated);
+                console.log("해당 날짜의 일정:", updated.filter(t => t.date === newTodo.date));
+                return updated;
+              }
             });
             toast.success("일정이 추가되었습니다.");
             setShowAddTodoModal(false);
@@ -1109,6 +1375,53 @@ export function CalendarHomeScreen() {
     try {
       console.log("일정 삭제 시작:", id);
 
+      // 삭제할 일정 찾기
+      const todoToDelete = todos.find(t => t.id === id);
+      if (!todoToDelete) {
+        console.warn("삭제할 일정을 찾을 수 없습니다:", id);
+        toast.error("일정을 찾을 수 없습니다.");
+        return;
+      }
+
+      // Google Calendar 이벤트인 경우 Google Calendar에서 삭제
+      if (todoToDelete.source === 'google_calendar' || todoToDelete.googleCalendarEventId) {
+        const eventId = todoToDelete.googleCalendarEventId || todoToDelete.id;
+        console.log("Google Calendar 이벤트 삭제 시도:", eventId);
+        try {
+          // Google Calendar 이벤트 삭제를 위한 API 호출
+          const response = await apiClient.deleteGoogleCalendarEvent(eventId);
+          console.log("Google Calendar 이벤트 삭제 응답:", response);
+
+          if (response && response.data?.success) {
+            // 프론트엔드에서 제거
+            setTodos((prev) => {
+              const filtered = prev.filter((todo) => todo.id !== id);
+              console.log("프론트엔드에서 Google Calendar 이벤트 제거 완료");
+              return filtered;
+            });
+            toast.success("Google Calendar 이벤트가 삭제되었습니다.");
+          } else {
+            throw new Error("삭제 응답이 성공이 아닙니다.");
+          }
+          return;
+        } catch (error: any) {
+          console.error("Google Calendar 이벤트 삭제 실패:", error);
+          toast.error(`Google Calendar 이벤트 삭제에 실패했습니다: ${error.response?.data?.detail || error.message}`);
+          // 삭제 실패 시 프론트엔드 상태 복원
+          setTodos((prev) => {
+            const restored = [...prev, todoToDelete];
+            return restored.sort((a, b) => {
+              if (a.date !== b.date) {
+                return (a.date || '').localeCompare(b.date || '');
+              }
+              return a.time.localeCompare(b.time);
+            });
+          });
+          return;
+        }
+      }
+
+      // Always Plan 일정인 경우 백엔드에 삭제 요청
       // 먼저 프론트엔드 상태에서 제거 (즉시 UI 업데이트)
       setTodos((prev) => {
         const filtered = prev.filter((todo) => todo.id !== id);
@@ -1140,6 +1453,19 @@ export function CalendarHomeScreen() {
         setTodos((prev) => prev.filter((todo) => todo.id !== id));
         toast.success("일정이 삭제되었습니다.");
       } else {
+        // 삭제 실패 시 프론트엔드 상태 복원
+        const todoToRestore = todos.find(t => t.id === id);
+        if (todoToRestore) {
+          setTodos((prev) => {
+            const restored = [...prev, todoToRestore];
+            return restored.sort((a, b) => {
+              if (a.date !== b.date) {
+                return (a.date || '').localeCompare(b.date || '');
+              }
+              return a.time.localeCompare(b.time);
+            });
+          });
+        }
         toast.error(`일정 삭제에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
       }
     }

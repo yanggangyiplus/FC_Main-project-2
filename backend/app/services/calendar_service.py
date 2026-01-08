@@ -138,13 +138,46 @@ class GoogleCalendarService:
                 }
             else:
                 # 시간 지정 이벤트
+                # naive datetime에 타임존 정보 추가 (Asia/Seoul)
+                from datetime import timezone, timedelta
+                seoul_tz = timezone(timedelta(hours=9))  # UTC+9 (Asia/Seoul)
+                
+                # naive datetime을 Asia/Seoul 타임존으로 변환
+                # naive datetime은 로컬 시간(Asia/Seoul)으로 간주
+                if start_datetime.tzinfo is None:
+                    # naive datetime을 Asia/Seoul로 간주하고 타임존 추가
+                    # 예: 2025-01-08 09:00:00 (naive) -> 2025-01-08 09:00:00+09:00 (Asia/Seoul)
+                    start_datetime_tz = start_datetime.replace(tzinfo=seoul_tz)
+                    logger.info(f"[CREATE_EVENT] 시작 시간 변환 - 원본(naive): {start_datetime}, 변환 후(Asia/Seoul): {start_datetime_tz}, ISO: {start_datetime_tz.isoformat()}")
+                else:
+                    # 이미 타임존이 있으면 Asia/Seoul로 변환
+                    start_datetime_tz = start_datetime.astimezone(seoul_tz)
+                    logger.info(f"[CREATE_EVENT] 시작 시간 변환 - 원본: {start_datetime}, 변환 후(Asia/Seoul): {start_datetime_tz}, ISO: {start_datetime_tz.isoformat()}")
+                
+                if end_datetime.tzinfo is None:
+                    end_datetime_tz = end_datetime.replace(tzinfo=seoul_tz)
+                    logger.info(f"[CREATE_EVENT] 종료 시간 변환 - 원본(naive): {end_datetime}, 변환 후(Asia/Seoul): {end_datetime_tz}, ISO: {end_datetime_tz.isoformat()}")
+                else:
+                    end_datetime_tz = end_datetime.astimezone(seoul_tz)
+                    logger.info(f"[CREATE_EVENT] 종료 시간 변환 - 원본: {end_datetime}, 변환 후(Asia/Seoul): {end_datetime_tz}, ISO: {end_datetime_tz.isoformat()}")
+                
+                # Google Calendar API는 timeZone 필드와 함께 dateTime을 보내면
+                # dateTime의 타임존 정보를 무시하고 timeZone을 사용합니다.
+                # 따라서 dateTime은 naive datetime의 ISO 형식(타임존 없음)으로 보내야 합니다.
+                # timeZone 필드에 명시된 타임존으로 해석됩니다.
+                start_iso = start_datetime.isoformat()  # naive datetime의 ISO 형식 (타임존 없음)
+                end_iso = end_datetime.isoformat()  # naive datetime의 ISO 형식 (타임존 없음)
+                
+                logger.info(f"[CREATE_EVENT] Google Calendar API 전송 데이터 - start(naive): {start_iso}, end(naive): {end_iso}, timeZone: Asia/Seoul")
+                logger.info(f"[CREATE_EVENT] 변환된 시간 - start(Asia/Seoul): {start_datetime_tz.isoformat()}, end(Asia/Seoul): {end_datetime_tz.isoformat()}")
+                
                 event['start'] = {
-                    'dateTime': start_datetime.isoformat(),
-                    'timeZone': 'Asia/Seoul',
+                    'dateTime': start_iso,  # 타임존 없는 ISO 형식 (예: 2025-01-08T09:00:00)
+                    'timeZone': 'Asia/Seoul',  # 이 타임존으로 해석됨
                 }
                 event['end'] = {
-                    'dateTime': end_datetime.isoformat(),
-                    'timeZone': 'Asia/Seoul',
+                    'dateTime': end_iso,  # 타임존 없는 ISO 형식
+                    'timeZone': 'Asia/Seoul',  # 이 타임존으로 해석됨
                 }
             
             # 이벤트 생성
@@ -205,13 +238,41 @@ class GoogleCalendarService:
                         'timeZone': 'Asia/Seoul',
                     }
                 else:
+                    # naive datetime에 타임존 정보 추가 (Asia/Seoul)
+                    from datetime import timezone, timedelta
+                    seoul_tz = timezone(timedelta(hours=9))  # UTC+9 (Asia/Seoul)
+                    
+                    # naive datetime을 Asia/Seoul 타임존으로 변환
+                    if start_datetime.tzinfo is None:
+                        start_datetime_tz = start_datetime.replace(tzinfo=seoul_tz)
+                        logger.info(f"[UPDATE_EVENT] 시작 시간 변환 - 원본(naive): {start_datetime}, 변환 후(Asia/Seoul): {start_datetime_tz}")
+                    else:
+                        start_datetime_tz = start_datetime.astimezone(seoul_tz)
+                        logger.info(f"[UPDATE_EVENT] 시작 시간 변환 - 원본: {start_datetime}, 변환 후(Asia/Seoul): {start_datetime_tz}")
+                    
+                    if end_datetime.tzinfo is None:
+                        end_datetime_tz = end_datetime.replace(tzinfo=seoul_tz)
+                        logger.info(f"[UPDATE_EVENT] 종료 시간 변환 - 원본(naive): {end_datetime}, 변환 후(Asia/Seoul): {end_datetime_tz}")
+                    else:
+                        end_datetime_tz = end_datetime.astimezone(seoul_tz)
+                        logger.info(f"[UPDATE_EVENT] 종료 시간 변환 - 원본: {end_datetime}, 변환 후(Asia/Seoul): {end_datetime_tz}")
+                    
+                    # Google Calendar API는 timeZone 필드와 함께 dateTime을 보내면
+                    # dateTime의 타임존 정보를 무시하고 timeZone을 사용합니다.
+                    # 따라서 dateTime은 naive datetime의 ISO 형식(타임존 없음)으로 보내야 합니다.
+                    start_iso = start_datetime.isoformat()  # naive datetime의 ISO 형식 (타임존 없음)
+                    end_iso = end_datetime.isoformat()  # naive datetime의 ISO 형식 (타임존 없음)
+                    
+                    logger.info(f"[UPDATE_EVENT] Google Calendar API 전송 데이터 - start(naive): {start_iso}, end(naive): {end_iso}, timeZone: Asia/Seoul")
+                    logger.info(f"[UPDATE_EVENT] 변환된 시간 - start(Asia/Seoul): {start_datetime_tz.isoformat()}, end(Asia/Seoul): {end_datetime_tz.isoformat()}")
+                    
                     event['start'] = {
-                        'dateTime': start_datetime.isoformat(),
-                        'timeZone': 'Asia/Seoul',
+                        'dateTime': start_iso,  # 타임존 없는 ISO 형식 (예: 2025-01-08T09:00:00)
+                        'timeZone': 'Asia/Seoul',  # 이 타임존으로 해석됨
                     }
                     event['end'] = {
-                        'dateTime': end_datetime.isoformat(),
-                        'timeZone': 'Asia/Seoul',
+                        'dateTime': end_iso,  # 타임존 없는 ISO 형식
+                        'timeZone': 'Asia/Seoul',  # 이 타임존으로 해석됨
                     }
             
             # 이벤트 업데이트

@@ -19,14 +19,14 @@ class APIClient {
     this.client.interceptors.request.use(
       (config) => {
         console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`)
-        
+
         // Authorization 헤더 추가
         const token = localStorage.getItem('access_token')
         if (token && config.headers) {
           config.headers.Authorization = `Bearer ${token}`
           console.log(`[API] Added Authorization header`)
         }
-        
+
         return config
       },
       (error) => Promise.reject(error)
@@ -78,10 +78,10 @@ class APIClient {
     const response = await this.client.post('/auth/refresh', {
       refresh_token: refreshToken,
     })
-    
+
     const newAccessToken = response.data.access_token
     localStorage.setItem('access_token', newAccessToken)
-    
+
     return newAccessToken
   }
 
@@ -311,6 +311,22 @@ class APIClient {
 
   async debugListCalendars() {
     return this.client.get('/calendar/debug/calendars')
+  }
+
+  async deleteGoogleCalendarEvent(eventId: string) {
+    return this.client.delete(`/calendar/event/${eventId}`)
+  }
+
+  async syncAllTodosToGoogleCalendar() {
+    return this.client.post('/calendar/sync/all')
+  }
+
+  async toggleCalendarImport() {
+    return this.client.post('/calendar/toggle-import')
+  }
+
+  async toggleCalendarExport() {
+    return this.client.post('/calendar/toggle-export')
   }
 }
 

@@ -15,6 +15,7 @@ export interface RoutineItem {
     startTime: string;
     duration: number;
   }[];
+  addToCalendar?: boolean; // 캘린더에 일정으로 추가 여부
 }
 
 interface FamilyMember {
@@ -34,7 +35,7 @@ interface RoutineViewProps {
   onUpdateRoutine: (routine: RoutineItem) => void;
   onDeleteRoutine: (id: string) => void;
   onToggleRoutineInCalendar?: (routine: RoutineItem, addToCalendar: boolean) => void;
-  todos?: Array<{ id: string }>; // 캘린더 일정 확인용
+  todos?: Array<{ id: string; title?: string; startTime?: string; date?: string }>; // 캘린더 일정 확인용
 }
 
 export function RoutineView({
@@ -137,9 +138,19 @@ export function RoutineView({
     }
     setNewRoutineDays(routine.timeSlots.map(s => s.day));
 
-    // 해당 시간표가 이미 캘린더에 추가되어 있는지 확인
-    const isInCalendar = todos.some(t => t.id.startsWith(`routine-calendar-${routine.id}-`));
-    setAddToCalendar(isInCalendar);
+    // 체크박스 상태 복원: routine.addToCalendar 필드를 우선 사용, 없으면 캘린더에 있는지 확인
+    if (routine.addToCalendar !== undefined) {
+      // 저장된 체크박스 상태 사용
+      setAddToCalendar(routine.addToCalendar);
+    } else {
+      // 해당 시간표가 이미 캘린더에 추가되어 있는지 확인 (하위 호환성)
+      const isInCalendar = todos.some(t =>
+        t.title === routine.name &&
+        t.startTime &&
+        routine.timeSlots.some(slot => slot.startTime === t.startTime)
+      );
+      setAddToCalendar(isInCalendar);
+    }
 
     setShowAddRoutine(true);
   };
@@ -192,7 +203,8 @@ export function RoutineView({
               startTime: newRoutineStartTime,
               duration: duration
             };
-          })
+          }),
+          addToCalendar: addToCalendar, // 체크박스 상태 전달
         };
         onUpdateRoutine(updatedRoutine); // Use prop
 
@@ -217,11 +229,12 @@ export function RoutineView({
           console.log(`시간표 저장: 요일 인덱스 ${day} = ${weekDays[day]}`);
           return { day, startTime: newRoutineStartTime, duration: duration };
         }),
+        addToCalendar: addToCalendar, // 체크박스 상태 전달
       };
       onAddRoutine(newRoutine); // Use prop
 
-      // 캘린더 추가/제거 처리
-      if (onToggleRoutineInCalendar) {
+      // 캘린더 추가/제거 처리 (체크박스가 체크되어 있을 때만)
+      if (addToCalendar && onToggleRoutineInCalendar) {
         onToggleRoutineInCalendar(newRoutine, addToCalendar);
       }
 

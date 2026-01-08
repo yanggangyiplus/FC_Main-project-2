@@ -23,6 +23,8 @@ class User(BaseModel):
     # Google Calendar 연동
     google_calendar_token = Column(String(2000))  # Google Calendar OAuth 토큰 (JSON 문자열)
     google_calendar_enabled = Column(String(10), default="false")  # "true" 또는 "false"
+    google_calendar_import_enabled = Column(String(10), default="false")  # Google Calendar에서 가져오기 활성화
+    google_calendar_export_enabled = Column(String(10), default="false")  # Google Calendar로 내보내기 활성화
     
     # 로그인 관련
     last_login = Column(DateTime)

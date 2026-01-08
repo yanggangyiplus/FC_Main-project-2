@@ -69,7 +69,9 @@ async def get_todos(
             "family_member_ids": json.loads(todo.family_member_ids) if todo.family_member_ids else [],
             "checklist_items": [item.text for item in todo.checklist_items],  # 문자열 리스트로 변환
             "created_at": todo.created_at,
-            "updated_at": todo.updated_at
+            "updated_at": todo.updated_at,
+            "google_calendar_event_id": todo.google_calendar_event_id,  # Google Calendar 이벤트 ID 추가
+            "bulk_synced": todo.bulk_synced if hasattr(todo, 'bulk_synced') else False  # 일괄 동기화 플래그
         }
         result.append(todo_dict)
     
@@ -167,7 +169,9 @@ async def get_todo(
         "family_member_ids": json.loads(todo.family_member_ids) if todo.family_member_ids else [],
         "checklist_items": [item.text for item in todo.checklist_items],  # 문자열 리스트로 변환
         "created_at": todo.created_at,  # datetime 객체 그대로 사용
-        "updated_at": todo.updated_at   # datetime 객체 그대로 사용
+        "updated_at": todo.updated_at,   # datetime 객체 그대로 사용
+        "google_calendar_event_id": todo.google_calendar_event_id,  # Google Calendar 이벤트 ID 추가
+        "bulk_synced": todo.bulk_synced if hasattr(todo, 'bulk_synced') else False  # 일괄 동기화 플래그
     }
     
     return TodoResponse(**response_data)
@@ -243,6 +247,76 @@ async def create_todo(
                 db.add(checklist_item)
         db.commit()
     
+    # Google Calendar 자동 동기화 (연동 활성화 및 내보내기 활성화 시)
+    # 사용자 정보를 다시 로드하여 최신 토글 상태 확인
+    db.refresh(current_user)
+    export_enabled = getattr(current_user, 'google_calendar_export_enabled', 'false')
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"[CREATE_TODO] Google Calendar 동기화 체크 - enabled={current_user.google_calendar_enabled}, token_exists={bool(current_user.google_calendar_token)}, export_enabled={export_enabled}")
+    logger.info(f"[CREATE_TODO] 사용자 정보 - user_id={current_user.id}, email={current_user.email}")
+    
+    if current_user.google_calendar_enabled == "true" and current_user.google_calendar_token and export_enabled == "true":
+        try:
+            logger.info(f"[CREATE_TODO] Google Calendar 동기화 시작 - todo_id={db_todo.id}, title={db_todo.title}")
+            
+            from app.services.calendar_service import GoogleCalendarService
+            from datetime import timedelta
+            
+            # 날짜/시간 정보 구성
+            start_datetime = None
+            end_datetime = None
+            
+            if db_todo.date:
+                if db_todo.all_day:
+                    # 종일 이벤트
+                    start_datetime = datetime.combine(db_todo.date, datetime.min.time())
+                    end_datetime = start_datetime + timedelta(days=1)
+                else:
+                    # 시간 지정 이벤트
+                    if db_todo.start_time:
+                        start_datetime = datetime.combine(db_todo.date, db_todo.start_time)
+                    else:
+                        start_datetime = datetime.combine(db_todo.date, datetime.min.time())
+                    
+                    if db_todo.end_time:
+                        end_datetime = datetime.combine(db_todo.date, db_todo.end_time)
+                    else:
+                        end_datetime = start_datetime + timedelta(hours=1)
+            
+            if start_datetime:
+                logger.info(f"[CREATE_TODO] Google Calendar 이벤트 생성 시도 - start={start_datetime}, end={end_datetime}")
+                # Google Calendar에 이벤트 생성
+                event = await GoogleCalendarService.create_event(
+                    token_json=current_user.google_calendar_token,
+                    title=db_todo.title,
+                    description=db_todo.memo or db_todo.description or "",
+                    start_datetime=start_datetime,
+                    end_datetime=end_datetime,
+                    location=db_todo.location or "",
+                    all_day=db_todo.all_day
+                )
+                
+                if event and event.get('id'):
+                    # Google Calendar 이벤트 ID 저장
+                    db_todo.google_calendar_event_id = event.get('id')
+                    # 토글을 켤 때 실시간으로 동기화하는 일정은 bulk_synced=False로 설정 (토글을 끄면 삭제되도록)
+                    # "동기화 후 저장" 버튼을 누르면 bulk_synced=True로 변경됨
+                    if db_todo.bulk_synced is None:
+                        db_todo.bulk_synced = False
+                    db.commit()
+                    db.refresh(db_todo)
+                    logger.info(f"[CREATE_TODO] Google Calendar 동기화 성공 - todo_id={db_todo.id}, event_id={event.get('id')}, bulk_synced={db_todo.bulk_synced}")
+                else:
+                    logger.warning(f"[CREATE_TODO] Google Calendar 이벤트 생성 실패 - event가 None이거나 ID가 없음")
+            else:
+                logger.warning(f"[CREATE_TODO] Google Calendar 동기화 건너뜀 - start_datetime이 None")
+        except Exception as e:
+            # Google Calendar 동기화 실패해도 Todo 생성은 성공으로 처리
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"[CREATE_TODO] Google Calendar 동기화 실패 (Todo는 생성됨): {e}", exc_info=True)
+    
     # 체크리스트 항목을 포함하여 다시 로드
     from sqlalchemy.orm import joinedload
     db_todo_with_items = db.query(Todo).options(joinedload(Todo.checklist_items)).filter(Todo.id == db_todo.id).first()
@@ -287,7 +361,7 @@ async def update_todo(
 ):
     """Update todo"""
     import json
-    from datetime import time as time_obj, datetime, datetime
+    from datetime import time as time_obj
     
     todo = db.query(Todo).filter(
         Todo.id == todo_id,
@@ -381,6 +455,107 @@ async def update_todo(
     todo.updated_at = datetime.utcnow()
     db.commit()
     
+    # Google Calendar 자동 업데이트 (연동 활성화 및 내보내기 활성화 시)
+    # 사용자 정보를 다시 로드하여 최신 토글 상태 확인
+    db.refresh(current_user)
+    export_enabled = getattr(current_user, 'google_calendar_export_enabled', 'false')
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"[UPDATE_TODO] Google Calendar 동기화 체크 - enabled={current_user.google_calendar_enabled}, token_exists={bool(current_user.google_calendar_token)}, export_enabled={export_enabled}")
+    logger.info(f"[UPDATE_TODO] 사용자 정보 - user_id={current_user.id}, email={current_user.email}")
+    
+    if current_user.google_calendar_enabled == "true" and current_user.google_calendar_token and export_enabled == "true":
+        try:
+            from app.services.calendar_service import GoogleCalendarService
+            from datetime import timedelta
+            logger.info(f"[UPDATE_TODO] Google Calendar 동기화 시작 - todo_id={todo.id}, title={todo.title}")
+            
+            # 기존 Google Calendar 이벤트가 있는 경우 업데이트
+            if todo.google_calendar_event_id:
+                # 날짜/시간 정보 구성
+                start_datetime = None
+                end_datetime = None
+                
+                if todo.date:
+                    if todo.all_day:
+                        # 종일 이벤트
+                        start_datetime = datetime.combine(todo.date, datetime.min.time())
+                        end_datetime = start_datetime + timedelta(days=1)
+                    else:
+                        # 시간 지정 이벤트
+                        if todo.start_time:
+                            start_datetime = datetime.combine(todo.date, todo.start_time)
+                        else:
+                            start_datetime = datetime.combine(todo.date, datetime.min.time())
+                        
+                        if todo.end_time:
+                            end_datetime = datetime.combine(todo.date, todo.end_time)
+                        else:
+                            end_datetime = start_datetime + timedelta(hours=1)
+                
+                if start_datetime:
+                    # Google Calendar 이벤트 업데이트
+                    updated_event = await GoogleCalendarService.update_event(
+                        token_json=current_user.google_calendar_token,
+                        event_id=todo.google_calendar_event_id,
+                        title=todo.title,
+                        description=todo.memo or todo.description or "",
+                        start_datetime=start_datetime,
+                        end_datetime=end_datetime,
+                        location=todo.location or "",
+                        all_day=todo.all_day
+                    )
+                    
+                    if not updated_event:
+                        # 업데이트 실패 시 이벤트 ID 제거 (다음 동기화 시 재생성)
+                        todo.google_calendar_event_id = None
+                        db.commit()
+            else:
+                # Google Calendar 이벤트가 없는 경우 새로 생성
+                start_datetime = None
+                end_datetime = None
+                
+                if todo.date:
+                    if todo.all_day:
+                        start_datetime = datetime.combine(todo.date, datetime.min.time())
+                        end_datetime = start_datetime + timedelta(days=1)
+                    else:
+                        if todo.start_time:
+                            start_datetime = datetime.combine(todo.date, todo.start_time)
+                        else:
+                            start_datetime = datetime.combine(todo.date, datetime.min.time())
+                        
+                        if todo.end_time:
+                            end_datetime = datetime.combine(todo.date, todo.end_time)
+                        else:
+                            end_datetime = start_datetime + timedelta(hours=1)
+                
+                if start_datetime:
+                    event = await GoogleCalendarService.create_event(
+                        token_json=current_user.google_calendar_token,
+                        title=todo.title,
+                        description=todo.memo or todo.description or "",
+                        start_datetime=start_datetime,
+                        end_datetime=end_datetime,
+                        location=todo.location or "",
+                        all_day=todo.all_day
+                    )
+                    
+                    if event and event.get('id'):
+                        todo.google_calendar_event_id = event.get('id')
+                        # 토글을 켤 때 실시간으로 동기화하는 일정은 bulk_synced=False로 설정 (토글을 끄면 삭제되도록)
+                        # "동기화 후 저장" 버튼을 누르면 bulk_synced=True로 변경됨
+                        # 단, 이미 bulk_synced=True인 일정은 유지 (동기화 후 저장된 일정)
+                        if todo.bulk_synced is None:
+                            todo.bulk_synced = False
+                        db.commit()
+                        logger.info(f"[UPDATE_TODO] Google Calendar 이벤트 생성 성공 - todo_id={todo.id}, event_id={event.get('id')}, bulk_synced={todo.bulk_synced}")
+        except Exception as e:
+            # Google Calendar 동기화 실패해도 Todo 수정은 성공으로 처리
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Google Calendar 동기화 실패 (Todo는 수정됨): {e}")
+    
     # 체크리스트 항목 다시 로드
     from sqlalchemy.orm import joinedload
     updated_todo = db.query(Todo).options(joinedload(Todo.checklist_items)).filter(
@@ -411,7 +586,9 @@ async def update_todo(
         "family_member_ids": json.loads(updated_todo.family_member_ids) if updated_todo.family_member_ids else [],
         "checklist_items": [item.text for item in updated_todo.checklist_items],  # 문자열 리스트로 변환
         "created_at": updated_todo.created_at,  # datetime 객체 그대로 사용
-        "updated_at": updated_todo.updated_at   # datetime 객체 그대로 사용
+        "updated_at": updated_todo.updated_at,   # datetime 객체 그대로 사용
+        "google_calendar_event_id": updated_todo.google_calendar_event_id,  # Google Calendar 이벤트 ID 추가
+        "bulk_synced": updated_todo.bulk_synced if hasattr(updated_todo, 'bulk_synced') else False  # 일괄 동기화 플래그
     }
     
     return TodoResponse(**response_data)
@@ -442,6 +619,31 @@ async def delete_todo(
         
         # 삭제 전 상태 로깅
         logger.info(f"[DELETE-TODO] 삭제 시작: todo_id={todo_id}, user_id={current_user.id}, 현재 deleted_at={todo.deleted_at}")
+        
+        # Google Calendar 자동 삭제 (연동 활성화 및 내보내기 활성화 시)
+        # 사용자 정보를 다시 로드하여 최신 토글 상태 확인
+        db.refresh(current_user)
+        export_enabled = getattr(current_user, 'google_calendar_export_enabled', 'false')
+        logger.info(f"[DELETE_TODO] Google Calendar 삭제 체크 - enabled={current_user.google_calendar_enabled}, token_exists={bool(current_user.google_calendar_token)}, export_enabled={export_enabled}, event_id={todo.google_calendar_event_id}")
+        logger.info(f"[DELETE_TODO] 사용자 정보 - user_id={current_user.id}, email={current_user.email}")
+        
+        if current_user.google_calendar_enabled == "true" and current_user.google_calendar_token and export_enabled == "true" and todo.google_calendar_event_id:
+            try:
+                from app.services.calendar_service import GoogleCalendarService
+                
+                # Google Calendar에서 이벤트 삭제
+                deleted = await GoogleCalendarService.delete_event(
+                    token_json=current_user.google_calendar_token,
+                    event_id=todo.google_calendar_event_id
+                )
+                
+                if deleted:
+                    logger.info(f"[DELETE-TODO] Google Calendar 이벤트 삭제 성공: {todo.google_calendar_event_id}")
+                else:
+                    logger.warning(f"[DELETE-TODO] Google Calendar 이벤트 삭제 실패: {todo.google_calendar_event_id}")
+            except Exception as e:
+                # Google Calendar 삭제 실패해도 Todo 삭제는 진행
+                logger.warning(f"[DELETE-TODO] Google Calendar 삭제 중 오류 (Todo는 삭제됨): {e}")
         
         # deleted_at 설정
         deleted_at_value = datetime.utcnow()
