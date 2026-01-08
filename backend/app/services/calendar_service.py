@@ -23,25 +23,49 @@ class GoogleCalendarService:
     SCOPES = ['https://www.googleapis.com/auth/calendar']
     
     @staticmethod
+    def is_token_expired(credentials: Credentials) -> bool:
+        """토큰 만료 여부 안전하게 체크 (timezone 문제 방지)"""
+        try:
+            if not credentials.expiry:
+                return False  # expiry가 없으면 만료되지 않은 것으로 간주
+            
+            # expiry가 timezone-aware인 경우 naive로 변환
+            expiry = credentials.expiry
+            if expiry.tzinfo is not None:
+                expiry = expiry.replace(tzinfo=None)
+            
+            # 현재 시간과 비교 (UTC)
+            now = datetime.utcnow()
+            return now >= expiry
+        except Exception as e:
+            logger.warning(f"[IS_TOKEN_EXPIRED] 만료 체크 실패: {e}, 갱신 시도")
+            return True  # 오류 시 만료된 것으로 간주하여 갱신 시도
+    
+    @staticmethod
     def get_credentials_from_token(token_json: str) -> Optional[Credentials]:
         """저장된 토큰 JSON으로 Credentials 객체 생성"""
         try:
             token_data = json.loads(token_json)
             
-            # expiry 처리 (초 단위일 수도 있고, datetime일 수도 있음)
-            expiry = token_data.get('expiry')
-            if expiry:
-                if isinstance(expiry, (int, float)):
-                    # 초 단위인 경우 datetime으로 변환
-                    from datetime import datetime, timedelta
-                    expiry = datetime.utcnow() + timedelta(seconds=expiry)
-                elif isinstance(expiry, str):
-                    # ISO 형식 문자열인 경우
-                    from datetime import datetime
+            # expiry 처리 (ISO 형식 문자열만 지원 - 표준화)
+            # ⚠️ google.oauth2.credentials는 naive datetime을 사용하므로 timezone 제거 필요
+            expiry = None
+            expiry_str = token_data.get('expiry')
+            if expiry_str:
+                if isinstance(expiry_str, str):
+                    # ISO 형식 문자열인 경우 (권장 형식: 'YYYY-MM-DDTHH:MM:SSZ')
                     try:
-                        expiry = datetime.fromisoformat(expiry.replace('Z', '+00:00'))
-                    except:
+                        # Z를 +00:00으로 변환하여 파싱
+                        expiry_str_normalized = expiry_str.replace('Z', '+00:00')
+                        expiry_aware = datetime.fromisoformat(expiry_str_normalized)
+                        # timezone 정보 제거 (naive datetime으로 변환) - UTC 시간 유지
+                        expiry = expiry_aware.replace(tzinfo=None)
+                        logger.info(f"[GET_CREDENTIALS] expiry 파싱 성공: {expiry_str} → {expiry} (naive)")
+                    except Exception as parse_error:
+                        logger.warning(f"[GET_CREDENTIALS] expiry 파싱 실패 ({expiry_str}): {parse_error}")
                         expiry = None
+                else:
+                    logger.warning(f"[GET_CREDENTIALS] expiry 타입이 잘못됨: {type(expiry_str)} (기대값: str)")
             
             # 필수 필드 확인
             access_token = token_data.get('access_token')
@@ -56,6 +80,7 @@ class GoogleCalendarService:
                 return None
             if not refresh_token:
                 logger.error("[GET_CREDENTIALS] refresh_token이 없습니다 (토큰 갱신 불가)")
+                logger.error(f"[GET_CREDENTIALS] 토큰 데이터 필드: {list(token_data.keys())}")
                 return None
             if not client_id:
                 logger.error("[GET_CREDENTIALS] client_id가 없습니다")
@@ -76,6 +101,9 @@ class GoogleCalendarService:
             # expiry가 있으면 설정
             if expiry:
                 credentials.expiry = expiry
+                logger.info(f"[GET_CREDENTIALS] expiry 설정: {expiry}")
+            else:
+                logger.warning(f"[GET_CREDENTIALS] expiry가 없습니다 (토큰 만료 확인 불가)")
             
             logger.info(f"[GET_CREDENTIALS] Credentials 생성 성공 - token 존재: {bool(credentials.token)}, refresh_token 존재: {bool(credentials.refresh_token)}, expiry: {expiry}")
             
@@ -112,7 +140,7 @@ class GoogleCalendarService:
                 return None
             
             # 토큰 만료 시 갱신
-            if credentials.expired:
+            if GoogleCalendarService.is_token_expired(credentials):
                 credentials.refresh(Request())
             
             service = GoogleCalendarService.get_calendar_service(credentials)
@@ -209,7 +237,7 @@ class GoogleCalendarService:
             if not credentials:
                 return None
             
-            if credentials.expired:
+            if GoogleCalendarService.is_token_expired(credentials):
                 credentials.refresh(Request())
             
             service = GoogleCalendarService.get_calendar_service(credentials)
@@ -300,7 +328,7 @@ class GoogleCalendarService:
             if not credentials:
                 return False
             
-            if credentials.expired:
+            if GoogleCalendarService.is_token_expired(credentials):
                 credentials.refresh(Request())
             
             service = GoogleCalendarService.get_calendar_service(credentials)
@@ -334,9 +362,10 @@ class GoogleCalendarService:
                 logger.error("[LIST_EVENTS] Credentials 생성 실패")
                 return []
             
-            logger.info(f"[LIST_EVENTS] Credentials 생성 성공 - expired: {credentials.expired}")
+            is_expired = GoogleCalendarService.is_token_expired(credentials)
+            logger.info(f"[LIST_EVENTS] Credentials 생성 성공 - expired: {is_expired}")
             
-            if credentials.expired:
+            if is_expired:
                 logger.info("[LIST_EVENTS] 토큰 만료, 갱신 시도...")
                 try:
                     credentials.refresh(Request())

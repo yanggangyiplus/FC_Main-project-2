@@ -1198,7 +1198,7 @@ export function CalendarHomeScreen() {
         }
       } else {
         console.log("일정 추가 시작:", formData);
-        
+
         // 날짜 형식 정규화 함수
         const normalizeDate = (date: any): string => {
           if (typeof date === 'string') {
@@ -1222,7 +1222,7 @@ export function CalendarHomeScreen() {
           const start = new Date(startDate);
           const end = new Date(endDate);
           const currentDate = new Date(start);
-          
+
           while (currentDate <= end) {
             const year = currentDate.getFullYear();
             const month = currentDate.getMonth() + 1;
@@ -1262,7 +1262,7 @@ export function CalendarHomeScreen() {
             };
 
             console.log(`일정 추가 데이터 (${dateStr}):`, todoData);
-            
+
             const response = await apiClient.createTodo(todoData);
             console.log(`일정 추가 응답 (${dateStr}):`, response);
 

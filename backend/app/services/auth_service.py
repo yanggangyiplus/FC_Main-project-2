@@ -133,11 +133,16 @@ class GoogleOAuthService:
     - 인증 URL 생성 → 코드 교환 → 토큰 획득
     """
     
-    # Google SCOPES (Main_PJ2에서 적용한 패턴)
+    # 일반 로그인용 SCOPES (사용자 프로필 정보)
     SCOPES = [
         "https://www.googleapis.com/auth/userinfo.email",
         "https://www.googleapis.com/auth/userinfo.profile",
         "openid",
+    ]
+    
+    # 캘린더 전용 SCOPES (캘린더 API만)
+    CALENDAR_SCOPES = [
+        "https://www.googleapis.com/auth/calendar",
     ]
     
     @staticmethod
@@ -156,15 +161,18 @@ class GoogleOAuthService:
         }
     
     @staticmethod
-    def get_authorization_url(state: str) -> str:
+    def get_authorization_url(state: str, calendar: bool = False) -> str:
         """
         Google 인증 URL 생성 (Main_PJ2의 get_authorization_url 패턴)
+        calendar=True인 경우 캘린더 전용 SCOPES 사용
         """
+        scopes = GoogleOAuthService.CALENDAR_SCOPES if calendar else GoogleOAuthService.SCOPES
+        
         params = {
             'client_id': settings.google_client_id,
             'redirect_uri': settings.google_redirect_uri,
             'response_type': 'code',
-            'scope': ' '.join(GoogleOAuthService.SCOPES),
+            'scope': ' '.join(scopes),
             'state': state,  # CSRF 방지
             'access_type': 'offline',  # Refresh token 요청
             'include_granted_scopes': 'true',
@@ -175,9 +183,10 @@ class GoogleOAuthService:
         return f"https://accounts.google.com/o/oauth2/v2/auth?{query_string}"
     
     @staticmethod
-    async def exchange_code_for_token(code: str) -> Optional[Dict]:
+    async def exchange_code_for_token(code: str, calendar: bool = False) -> Optional[Dict]:
         """
         인증 코드 → 토큰 교환 (Main_PJ2의 exchange_code_for_token 패턴)
+        calendar=True인 경우 캘린더 전용 토큰 반환
         """
         import aiohttp
         
@@ -185,6 +194,7 @@ class GoogleOAuthService:
             logger.info(f"[TOKEN_EXCHANGE] Starting token exchange with code: {code[:20]}...")
             logger.info(f"[TOKEN_EXCHANGE] Using client_id: {settings.google_client_id[:20]}...")
             logger.info(f"[TOKEN_EXCHANGE] Using redirect_uri: {settings.google_redirect_uri}")
+            logger.info(f"[TOKEN_EXCHANGE] Calendar mode: {calendar}")
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -204,16 +214,37 @@ class GoogleOAuthService:
                     if resp.status == 200:
                         token_data = await resp.json()
                         logger.info(f"[TOKEN_EXCHANGE] Token exchange successful, got id_token: {bool(token_data.get('id_token'))}")
-                        return {
-                            "token": token_data.get('id_token'),  # ID 토큰 사용
-                            "access_token": token_data.get('access_token'),
-                            "refresh_token": token_data.get('refresh_token'),
-                            "token_uri": token_data.get('token_uri'),
-                            "client_id": settings.google_client_id,
-                            "client_secret": settings.google_client_secret,
-                            "scopes": GoogleOAuthService.SCOPES,
-                            "expiry": token_data.get('expires_in'),  # 초 단위
-                        }
+                        
+                        # expiry 계산 (초 단위 → ISO 형식 datetime 문자열)
+                        expires_in = token_data.get('expires_in', 3600)
+                        expiry_dt = datetime.utcnow() + timedelta(seconds=expires_in)
+                        expiry_iso = expiry_dt.isoformat() + 'Z'
+                        
+                        if calendar:
+                            # 캘린더 전용 토큰 반환
+                            return {
+                                "access_token": token_data.get('access_token'),
+                                "refresh_token": token_data.get('refresh_token'),
+                                "token_uri": 'https://oauth2.googleapis.com/token',
+                                "client_id": settings.google_client_id,
+                                "client_secret": settings.google_client_secret,
+                                "scopes": GoogleOAuthService.CALENDAR_SCOPES,
+                                "expiry": expiry_iso,  # ISO 형식
+                                "expires_in": expires_in,
+                            }
+                        else:
+                            # 일반 로그인 토큰 반환
+                            return {
+                                "token": token_data.get('id_token'),  # ID 토큰 사용
+                                "access_token": token_data.get('access_token'),
+                                "refresh_token": token_data.get('refresh_token'),
+                                "token_uri": token_data.get('token_uri', 'https://oauth2.googleapis.com/token'),
+                                "client_id": settings.google_client_id,
+                                "client_secret": settings.google_client_secret,
+                                "scopes": GoogleOAuthService.SCOPES,
+                                "expiry": expiry_iso,  # ISO 형식
+                                "expires_in": expires_in,
+                            }
                     else:
                         logger.error(f"[TOKEN_EXCHANGE] Token exchange failed: {resp.status}")
                         logger.error(f"[TOKEN_EXCHANGE] Error response: {response_text}")

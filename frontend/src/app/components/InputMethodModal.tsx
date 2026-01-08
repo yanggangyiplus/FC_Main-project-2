@@ -42,6 +42,7 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
   const [currentImageBlob, setCurrentImageBlob] = useState<Blob | null>(null); // 현재 이미지 Blob 저장
   const [extractionFailed, setExtractionFailed] = useState(false); // 추출 실패 여부
   // STT State
@@ -55,6 +56,67 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
   useEffect(() => {
     console.log("transcribedText 상태 변경됨:", transcribedText);
   }, [transcribedText]);
+
+  // 비디오 스트림이 설정되면 재생 시도
+  useEffect(() => {
+    if (stream && videoRef.current && activeMethod === 'camera') {
+      console.log("스트림이 설정됨, 비디오 재생 시도");
+      const video = videoRef.current;
+
+      // srcObject가 이미 설정되어 있는지 확인
+      if (video.srcObject !== stream) {
+        video.srcObject = stream;
+      }
+
+      // 비디오 재생 시도
+      const playVideo = async () => {
+        try {
+          await video.play();
+          console.log("비디오 재생 성공 (useEffect)");
+          setIsCameraReady(true);
+        } catch (err) {
+          console.error("비디오 재생 실패 (useEffect):", err);
+          // 스트림이 활성화되어 있으면 준비된 것으로 간주
+          if (stream && stream.active) {
+            console.log("스트림이 활성화되어 있음, 카메라 준비 완료로 간주");
+            setIsCameraReady(true);
+          }
+        }
+      };
+
+      // 비디오 이벤트 리스너
+      const handleCanPlay = () => {
+        console.log("비디오 재생 가능 (useEffect)");
+        setIsCameraReady(true);
+        video.play().catch(err => console.error("재생 실패:", err));
+      };
+
+      const handlePlay = () => {
+        console.log("비디오 재생 시작 (useEffect)");
+        setIsCameraReady(true);
+      };
+
+      const handleLoadedMetadata = () => {
+        console.log("비디오 메타데이터 로드 (useEffect)");
+        console.log("비디오 크기:", video.videoWidth, "x", video.videoHeight);
+        playVideo();
+      };
+
+      video.addEventListener('canplay', handleCanPlay);
+      video.addEventListener('play', handlePlay);
+      video.addEventListener('loadedmetadata', handleLoadedMetadata);
+
+      // 즉시 재생 시도
+      playVideo();
+
+      // 정리 함수
+      return () => {
+        video.removeEventListener('canplay', handleCanPlay);
+        video.removeEventListener('play', handlePlay);
+        video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      };
+    }
+  }, [stream, activeMethod]);
 
   useEffect(() => {
     return () => {
@@ -202,14 +264,54 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
   // --- Camera Logic ---
   const startCamera = async () => {
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
-      setStream(mediaStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
+      // 기존 스트림이 있으면 먼저 정리
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        setStream(null);
       }
-    } catch (error) {
+
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment', // 후면 카메라 우선
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      });
+
+      console.log("카메라 스트림 획득 성공:", mediaStream);
+      console.log("비디오 트랙:", mediaStream.getVideoTracks());
+
+      // 스트림 설정 (useEffect에서 처리)
+      setStream(mediaStream);
+      setIsCameraReady(false); // 초기화
+
+      // 스트림이 활성화되어 있으면 짧은 시간 후 준비 상태로 표시
+      if (mediaStream && mediaStream.active && mediaStream.getVideoTracks().length > 0) {
+        const videoTrack = mediaStream.getVideoTracks()[0];
+        console.log("비디오 트랙 상태:", videoTrack.readyState);
+        if (videoTrack.readyState === 'live') {
+          console.log("비디오 트랙이 live 상태");
+          // useEffect에서 비디오 재생을 처리하므로 여기서는 상태만 설정
+          setTimeout(() => {
+            // 비디오 요소가 있고 재생 중이면 준비 완료
+            if (videoRef.current && !videoRef.current.paused) {
+              setIsCameraReady(true);
+            } else if (videoRef.current && videoRef.current.readyState >= 2) {
+              // 비디오가 로드되었으면 준비 완료
+              setIsCameraReady(true);
+            }
+          }, 500);
+        }
+      }
+    } catch (error: any) {
       console.error("Camera error:", error);
-      alert("카메라 접근 권한이 필요합니다.");
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        toast.error("카메라 접근 권한이 필요합니다. 브라우저 설정에서 권한을 허용해주세요.");
+      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+        toast.error("카메라를 찾을 수 없습니다.");
+      } else {
+        toast.error(`카메라 오류: ${error.message || '알 수 없는 오류'}`);
+      }
       setActiveMethod(null);
     }
   };
@@ -219,6 +321,7 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
     setCapturedImage(null);
     setTranscribedText("");
     setExtractedTodoInfo(null);
+    setIsCameraReady(false);
     // 카메라 시작은 사용자가 선택하도록 변경
   };
 
@@ -265,41 +368,74 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
   };
 
   const handleCapture = async () => {
-    if (videoRef.current) {
+    if (!videoRef.current || !stream) {
+      toast.error("카메라가 활성화되지 않았습니다.");
+      return;
+    }
+
+    // 비디오가 준비되지 않았으면 대기
+    if (videoRef.current.readyState < 2) {
+      toast.error("카메라가 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
+      return;
+    }
+
+    try {
       const canvas = document.createElement("canvas");
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
+      const video = videoRef.current;
+
+      // 비디오 크기 확인
+      if (video.videoWidth === 0 || video.videoHeight === 0) {
+        toast.error("비디오 크기를 가져올 수 없습니다.");
+        return;
+      }
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
       const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.drawImage(videoRef.current, 0, 0);
-        const imageUrl = canvas.toDataURL("image/jpeg");
-        setCapturedImage(imageUrl);
 
-        // Convert to Blob for storage
-        canvas.toBlob(async (blob) => {
-          if (blob) {
-            setCurrentImageBlob(blob);
-            // 텍스트와 일정 정보 초기화
-            setTranscribedText("");
-            setExtractedTodoInfo(null);
-            setExtractionFailed(false);
+      if (!ctx) {
+        toast.error("캔버스 컨텍스트를 가져올 수 없습니다.");
+        return;
+      }
 
-            // 자동으로 텍스트 추출 시도
-            try {
-              await uploadImage(blob);
-            } catch (error) {
-              console.error("자동 텍스트 추출 실패:", error);
-              setExtractionFailed(true);
-            }
+      // 비디오 프레임을 캔버스에 그리기
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageUrl = canvas.toDataURL("image/jpeg", 0.95);
+
+      console.log("사진 촬영 완료, 이미지 URL 생성:", imageUrl.substring(0, 50) + "...");
+      setCapturedImage(imageUrl);
+
+      // Convert to Blob for storage
+      canvas.toBlob(async (blob) => {
+        if (blob) {
+          console.log("이미지 Blob 생성 완료, 크기:", blob.size);
+          setCurrentImageBlob(blob);
+          // 텍스트와 일정 정보 초기화
+          setTranscribedText("");
+          setExtractedTodoInfo(null);
+          setExtractionFailed(false);
+
+          // 카메라 스트림 정리
+          if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            setStream(null);
           }
-        }, 'image/jpeg');
-      }
+          setIsCameraReady(false);
 
-      // Stop stream after capture
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-        setStream(null);
-      }
+          // 자동으로 텍스트 추출 시도
+          try {
+            await uploadImage(blob);
+          } catch (error) {
+            console.error("자동 텍스트 추출 실패:", error);
+            setExtractionFailed(true);
+          }
+        } else {
+          toast.error("이미지 변환에 실패했습니다.");
+        }
+      }, 'image/jpeg', 0.95);
+    } catch (error) {
+      console.error("촬영 오류:", error);
+      toast.error("사진 촬영에 실패했습니다.");
     }
   };
 
@@ -397,9 +533,27 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
     }
   };
 
-  const handleRetake = () => {
+  const handleRetake = async () => {
     setCapturedImage(null);
-    startCamera();
+    setCurrentImageBlob(null);
+    setTranscribedText("");
+    setExtractedTodoInfo(null);
+    setExtractionFailed(false);
+    setIsCameraReady(false);
+
+    // 기존 스트림 정리
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+    }
+
+    // 비디오 요소 초기화
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+
+    // 카메라 다시 시작
+    await startCamera();
   };
 
   const handleView = () => {
@@ -531,16 +685,43 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
               <div className="flex flex-col items-center gap-4">
                 <div className="w-full aspect-video bg-[#1F2937] rounded-lg overflow-hidden flex items-center justify-center relative">
                   {capturedImage ? (
-                    <>
-                      <img src={capturedImage} alt="Captured" className="w-full h-full object-cover" />
+                    <div className="w-full h-full relative">
+                      <img
+                        src={capturedImage}
+                        alt="Captured"
+                        className="w-full h-full object-contain bg-black"
+                      />
                       {(isUploading || isExtracting) && (
-                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white">
-                          {isUploading ? '텍스트 추출 중...' : '일정 정보 추출 중...'}
+                        <div className="absolute inset-0 bg-black/70 flex items-center justify-center text-white text-sm">
+                          <div className="text-center">
+                            <div className="mb-2">{isUploading ? '텍스트 추출 중...' : '일정 정보 추출 중...'}</div>
+                            <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin mx-auto"></div>
+                          </div>
                         </div>
                       )}
-                    </>
+                    </div>
                   ) : stream ? (
-                    <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+                    <div className="w-full h-full relative">
+                      <video
+                        ref={videoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover"
+                        style={{
+                          backgroundColor: '#000',
+                          minHeight: '200px'
+                        }}
+                      />
+                      {!isCameraReady && (
+                        <div className="absolute inset-0 bg-black/70 flex items-center justify-center text-white text-sm">
+                          <div className="text-center">
+                            <div className="mb-2">카메라 로딩 중...</div>
+                            <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin mx-auto"></div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-white text-sm">
                       사진을 첨부해 주세요.
@@ -585,20 +766,24 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
                   ) : (
                     <>
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           if (!stream) {
-                            startCamera();
+                            // 첫 번째 클릭: 카메라 켜기
+                            await startCamera();
                           } else {
-                            handleCapture();
+                            // 두 번째 클릭: 사진 촬영
+                            await handleCapture();
                           }
                         }}
-                        className="flex-1 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] flex items-center justify-center gap-1"
+                        className="flex-1 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={isUploading || isExtracting}
                       >
                         <Camera size={18} /> {stream ? '촬영' : '카메라'}
                       </button>
                       <button
                         onClick={() => fileInputRef.current?.click()}
                         className="flex-1 py-2 bg-[#6366F1] text-white rounded-lg hover:bg-[#5558E3] flex items-center justify-center gap-1"
+                        disabled={isUploading || isExtracting}
                       >
                         <Upload size={18} /> 업로드
                       </button>
@@ -611,6 +796,7 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
                           setActiveMethod(null);
                         }}
                         className="flex-1 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg hover:bg-[#E5E7EB] flex items-center justify-center gap-1"
+                        disabled={isUploading || isExtracting}
                       >
                         취소
                       </button>

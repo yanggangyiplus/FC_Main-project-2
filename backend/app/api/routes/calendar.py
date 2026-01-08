@@ -567,19 +567,20 @@ async def get_google_calendar_auth_url(
     state = secrets.token_urlsafe(32)
     oauth_states[state] = {
         'created_at': datetime.utcnow().timestamp(),
+        'calendar': True,  # 캘린더 전용 플래그
     }
     
-    # 기본 OAuth URL 생성
-    auth_url = GoogleOAuthService.get_authorization_url(state)
+    # 캘린더 전용 OAuth URL 생성
+    auth_url = GoogleOAuthService.get_authorization_url(state, calendar=True)
     
-    # Calendar OAuth임을 나타내는 source 파라미터 추가
+    # Calendar OAuth임을 나타내는 source 파라미터 추가 (프론트엔드 호환성)
     # 프론트엔드에서 이를 감지하여 /calendar/google-callback으로 보내도록 함
     if '?' in auth_url:
         auth_url += '&source=calendar'
     else:
         auth_url += '?source=calendar'
     
-    logger.info(f"[GOOGLE_CALENDAR_AUTH_URL] Calendar OAuth URL 생성 - state: {state[:20]}..., source: calendar")
+    logger.info(f"[GOOGLE_CALENDAR_AUTH_URL] Calendar OAuth URL 생성 - state: {state[:20]}..., calendar_mode: true")
     
     return {
         "auth_url": auth_url,
@@ -1027,54 +1028,47 @@ async def google_calendar_callback(
                 detail="유효하지 않은 상태값(state)입니다"
             )
         
+        state_data = oauth_states[state]
         del oauth_states[state]
         
-        # 인증 코드를 토큰으로 교환
-        token_data = await GoogleOAuthService.exchange_code_for_token(code)
+        # 캘린더 전용 토큰으로 교환
+        token_data = await GoogleOAuthService.exchange_code_for_token(code, calendar=True)
         if not token_data or not token_data.get('access_token'):
             raise HTTPException(
                 status_code=401,
                 detail="토큰 교환에 실패했습니다"
             )
         
-        # Google Calendar 토큰을 JSON으로 저장
-        # refresh_token 확인 (필수 필드)
+        # refresh_token 필수 검증
         refresh_token = token_data.get('refresh_token')
         if not refresh_token:
-            logger.warning(f"[GOOGLE_CALLBACK] refresh_token이 없습니다. 재동의가 필요할 수 있습니다.")
-            # 기존 토큰에서 refresh_token 가져오기 시도
-            try:
-                existing_token = json.loads(current_user.google_calendar_token) if current_user.google_calendar_token else None
-                if existing_token and existing_token.get('refresh_token'):
-                    refresh_token = existing_token.get('refresh_token')
-                    logger.info(f"[GOOGLE_CALLBACK] 기존 refresh_token 사용")
-            except:
-                pass
+            logger.error(f"[GOOGLE_CALLBACK] refresh_token이 없습니다. OAuth 재동의 필요")
+            raise HTTPException(
+                status_code=400,
+                detail="Google 재동의가 필요합니다. 다시 시도해주세요."
+            )
         
-        # expiry 처리 (expires_in이 초 단위로 오면 datetime으로 변환)
-        expiry = token_data.get('expiry')
-        if not expiry and token_data.get('expires_in'):
-            from datetime import datetime, timedelta
-            expiry = datetime.utcnow() + timedelta(seconds=token_data.get('expires_in'))
-            logger.info(f"[GOOGLE_CALLBACK] expiry 계산: {expiry}")
-        
-        calendar_token = json.dumps({
+        # 토큰 저장 (표준화된 형식)
+        calendar_token_dict = {
             'access_token': token_data.get('access_token'),
-            'refresh_token': refresh_token,  # 필수
-            'token_uri': 'https://oauth2.googleapis.com/token',  # 고정값 사용
-            'client_id': settings.google_client_id,
-            'client_secret': settings.google_client_secret,
-            'scopes': GoogleOAuthService.SCOPES,
-            'expiry': expiry.isoformat() if expiry and hasattr(expiry, 'isoformat') else expiry,
-        })
+            'refresh_token': refresh_token,
+            'token_uri': token_data.get('token_uri', 'https://oauth2.googleapis.com/token'),
+            'client_id': token_data.get('client_id', settings.google_client_id),
+            'client_secret': token_data.get('client_secret', settings.google_client_secret),
+            'scopes': token_data.get('scopes', ['https://www.googleapis.com/auth/calendar']),
+            'expiry': token_data.get('expiry'),  # ISO 형식
+        }
+        
+        calendar_token = json.dumps(calendar_token_dict)
         
         logger.info(f"[GOOGLE_CALLBACK] 저장할 토큰 필드 확인:")
         logger.info(f"  - access_token: {bool(token_data.get('access_token'))}")
         logger.info(f"  - refresh_token: {bool(refresh_token)}")
-        logger.info(f"  - token_uri: {'https://oauth2.googleapis.com/token'}")
-        logger.info(f"  - client_id: {bool(settings.google_client_id)}")
-        logger.info(f"  - client_secret: {bool(settings.google_client_secret)}")
-        logger.info(f"  - expiry: {expiry}")
+        logger.info(f"  - token_uri: {token_data.get('token_uri', 'https://oauth2.googleapis.com/token')}")
+        logger.info(f"  - client_id: {bool(token_data.get('client_id', settings.google_client_id))}")
+        logger.info(f"  - client_secret: {bool(token_data.get('client_secret', settings.google_client_secret))}")
+        logger.info(f"  - scopes: {token_data.get('scopes', ['https://www.googleapis.com/auth/calendar'])}")
+        logger.info(f"  - expiry: {token_data.get('expiry')}")
         
         # 사용자에 토큰 저장
         current_user.google_calendar_token = calendar_token
