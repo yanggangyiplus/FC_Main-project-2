@@ -456,6 +456,18 @@ export function CalendarHomeScreen() {
           }
         } else {
           console.log('[Google Calendar] 연동 비활성화됨 또는 연결 안됨');
+
+          // Google Calendar 연동이 비활성화된 경우, Google Calendar 이벤트 제거
+          setTodos((prevTodos) => {
+            const filteredTodos = prevTodos.filter(
+              (todo: any) => todo.source !== 'google_calendar'
+            );
+            const removedCount = prevTodos.length - filteredTodos.length;
+            if (removedCount > 0) {
+              console.log(`[Google Calendar] ${removedCount}개 이벤트 제거됨 (연동 비활성화)`);
+            }
+            return filteredTodos;
+          });
         }
       } catch (error) {
         console.error('[Google Calendar] 상태 확인 실패:', error);

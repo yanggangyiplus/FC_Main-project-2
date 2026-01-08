@@ -78,6 +78,7 @@ export function SettingsScreen({ isOpen, onClose }: SettingsScreenProps) {
           await apiClient.disableCalendarSync();
           setGoogleCalendarEnabled(false);
           toast.success("Google Calendar 연동이 비활성화되었습니다.");
+          window.location.reload(); // Google Calendar 이벤트 제거를 위해 새로고침
         } else {
           await apiClient.enableCalendarSync();
           setGoogleCalendarEnabled(true);
