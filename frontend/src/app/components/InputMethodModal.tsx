@@ -1,4 +1,4 @@
-import { X, Mic, Camera, FileText, Play, Square, Pause, RotateCcw, Eye, Upload, FileSearch } from "lucide-react";
+import { X, Mic, Camera, FileText, Play, Square, Pause, RotateCcw, Upload, FileSearch } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { apiClient } from "@/services/apiClient";
 import { toast } from "sonner";

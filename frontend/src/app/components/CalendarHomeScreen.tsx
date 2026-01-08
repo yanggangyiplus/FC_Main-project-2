@@ -21,7 +21,6 @@ import {
   Trash2,
   MapPin,
 } from "lucide-react";
-import { TodoAddSheet } from "./TodoAddSheet";
 import { MemberAddSheet } from "./MemberAddSheet";
 import { WorkContactAddSheet } from "./WorkContactAddSheet";
 import { CommunityScreen } from "./CommunityScreen";
@@ -38,7 +37,6 @@ import { toast } from "sonner";
 import { apiClient } from "@/services/apiClient";
 
 export function CalendarHomeScreen() {
-  const [showTodoAddSheet, setShowTodoAddSheet] = useState(false);
   const [showMemberAddSheet, setShowMemberAddSheet] = useState(false);
   const [showWorkContactAddSheet, setShowWorkContactAddSheet] = useState(false);
   const [showCommunityScreen, setShowCommunityScreen] = useState(false);
@@ -1066,7 +1064,6 @@ export function CalendarHomeScreen() {
       [...prev, newTodo].sort((a, b) => a.time.localeCompare(b.time))
     );
     toast.success("일정이 추가되었습니다.");
-    setShowTodoAddSheet(false);
   };
 
   const handleSaveDetailedTodo = async (formData: TodoFormData) => {
@@ -1349,7 +1346,6 @@ export function CalendarHomeScreen() {
 
         // 모달 닫기
         setEditingTodoId(null);
-        setShowTodoAddSheet(false);
       }
     } catch (error: any) {
       console.error("일정 추가 API 에러:", error);
