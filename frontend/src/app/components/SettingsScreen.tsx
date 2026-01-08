@@ -137,7 +137,7 @@ export function SettingsScreen({ isOpen, onClose }: SettingsScreenProps) {
               <div className="font-medium text-[#1F2937]">Google Calendar</div>
               <div className="text-sm text-[#6B7280] mt-1">
                 {googleCalendarConnected
-                  ? "일정이 Google Calendar와 자동으로 동기화됩니다."
+                  ? "Google Calendar 자동 동기화"
                   : "구글 캘린더와 동기화하기"}
               </div>
             </div>
