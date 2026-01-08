@@ -28,6 +28,13 @@ export function LoginScreen() {
       const urlParams = new URLSearchParams(window.location.search)
       const code = urlParams.get('code')
       const state = urlParams.get('state')
+      const source = urlParams.get('source')
+
+      // Calendar OAuth 콜백인 경우 처리하지 않음 (CalendarHomeScreen에서 처리)
+      if (source === 'calendar') {
+        console.log('[LoginScreen] Calendar OAuth 콜백은 CalendarHomeScreen에서 처리됩니다.');
+        return;
+      }
 
       if (code && state) {
         try {

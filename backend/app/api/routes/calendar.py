@@ -130,7 +130,17 @@ async def get_google_calendar_auth_url(
         'created_at': datetime.utcnow().timestamp(),
     }
     
+    # 기본 OAuth URL 생성
     auth_url = GoogleOAuthService.get_authorization_url(state)
+    
+    # Calendar OAuth임을 나타내는 source 파라미터 추가
+    # 프론트엔드에서 이를 감지하여 /calendar/google-callback으로 보내도록 함
+    if '?' in auth_url:
+        auth_url += '&source=calendar'
+    else:
+        auth_url += '?source=calendar'
+    
+    logger.info(f"[GOOGLE_CALENDAR_AUTH_URL] Calendar OAuth URL 생성 - state: {state[:20]}..., source: calendar")
     
     return {
         "auth_url": auth_url,
