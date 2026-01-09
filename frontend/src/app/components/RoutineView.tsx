@@ -62,6 +62,7 @@ export function RoutineView({
   const [addToCalendar, setAddToCalendar] = useState(false);
   const [hasEndDate, setHasEndDate] = useState(false);
   const [routineEndDate, setRoutineEndDate] = useState<string>("");
+  const [selectedRoutineMemberIds, setSelectedRoutineMemberIds] = useState<string[]>([]);
 
   // Drag & Resize State
   const [draggedRoutine, setDraggedRoutine] = useState<{
@@ -117,6 +118,34 @@ export function RoutineView({
 
   const getDurationHeight = (duration: number) => {
     return (duration / (24 * 60)) * 100;
+  };
+
+  // hex 색상을 rgba로 변환하는 헬퍼 함수
+  const hexToRgba = (hex: string, alpha: number = 0.8): string => {
+    if (!hex || !hex.trim()) {
+      return `rgba(255, 155, 130, ${alpha})`; // 기본 색상
+    }
+
+    // # 제거
+    const cleanHex = hex.replace('#', '').trim();
+
+    // 3자리 hex 색상인 경우 6자리로 변환 (#RGB -> #RRGGBB)
+    const fullHex = cleanHex.length === 3
+      ? cleanHex.split('').map(char => char + char).join('')
+      : cleanHex;
+
+    // RGB 값 추출
+    const r = parseInt(fullHex.substring(0, 2), 16);
+    const g = parseInt(fullHex.substring(2, 4), 16);
+    const b = parseInt(fullHex.substring(4, 6), 16);
+
+    // 유효성 검사
+    if (isNaN(r) || isNaN(g) || isNaN(b)) {
+      console.warn(`Invalid hex color: ${hex}, using default`);
+      return `rgba(255, 155, 130, ${alpha})`; // 기본 색상
+    }
+
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   };
 
   const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
@@ -244,29 +273,55 @@ export function RoutineView({
         toast.success("시간표 항목이 수정되었습니다.");
       }
     } else {
-      // Create new
-      const newRoutine: RoutineItem = {
-        id: Date.now().toString(),
-        memberId: selectedMemberIds[0] || "1",
-        name: newRoutineName,
-        color: colors[routines.length % colors.length],
-        category: "기타",
-        timeSlots: newRoutineDays.map(day => {
-          console.log(`시간표 저장: 요일 인덱스 ${day} = ${weekDays[day]}`);
-          return { day, startTime: newRoutineStartTime, duration: duration };
-        }),
-        addToCalendar: addToCalendar, // 체크박스 상태 전달
-        hasEndDate: hasEndDate, // 종료 날짜 사용 여부
-        endDate: hasEndDate ? routineEndDate : undefined, // 종료 날짜
-      };
-      onAddRoutine(newRoutine); // Use prop
+      // Create new - 선택된 가족 구성원마다 시간표 항목 생성
+      const targetMemberIds = selectedRoutineMemberIds.length > 0
+        ? selectedRoutineMemberIds
+        : selectedMemberIds.length > 0
+          ? selectedMemberIds
+          : ["1"];
 
-      // 캘린더 추가/제거 처리 (체크박스가 체크되어 있을 때만)
-      if (addToCalendar && onToggleRoutineInCalendar) {
-        onToggleRoutineInCalendar(newRoutine, addToCalendar);
-      }
+      let addedCount = 0;
+      targetMemberIds.forEach((memberId, index) => {
+        const member = familyMembers.find(m => m.id === memberId);
+        let routineColor: string;
+        if (member?.color) {
+          // hex 색상인 경우 rgba로 변환
+          if (member.color.startsWith('#')) {
+            routineColor = hexToRgba(member.color, 0.8);
+          } else if (member.color.startsWith('rgba')) {
+            routineColor = member.color;
+          } else {
+            routineColor = member.color.includes('rgba') ? member.color : `rgba(${member.color}, 0.8)`;
+          }
+        } else {
+          routineColor = colors[(routines.length + index) % colors.length];
+        }
 
-      toast.success(`${newRoutineName} 항목이 추가되었습니다.`);
+        const newRoutine: RoutineItem = {
+          id: `${Date.now()}-${index}`,
+          memberId: memberId,
+          name: newRoutineName,
+          color: routineColor,
+          category: "기타",
+          timeSlots: newRoutineDays.map(day => {
+            console.log(`시간표 저장: 요일 인덱스 ${day} = ${weekDays[day]}`);
+            return { day, startTime: newRoutineStartTime, duration: duration };
+          }),
+          addToCalendar: addToCalendar, // 체크박스 상태 전달
+          hasEndDate: hasEndDate, // 종료 날짜 사용 여부
+          endDate: hasEndDate ? routineEndDate : undefined, // 종료 날짜
+        };
+        onAddRoutine(newRoutine); // Use prop
+
+        // 캘린더 추가/제거 처리 (체크박스가 체크되어 있을 때만)
+        if (addToCalendar && onToggleRoutineInCalendar) {
+          onToggleRoutineInCalendar(newRoutine, addToCalendar);
+        }
+
+        addedCount++;
+      });
+
+      toast.success(`${newRoutineName} 항목이 ${addedCount}개 추가되었습니다.`);
     }
 
     setNewRoutineName("");
@@ -274,6 +329,7 @@ export function RoutineView({
     setNewRoutineEndTime("10:00");
     setNewRoutineDays([]);
     setHasEndDate(false);
+    setSelectedRoutineMemberIds([]); // 가족 구성원 선택 초기화
     // 기본값: 1년 후
     const oneYearLater = new Date();
     oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
@@ -445,7 +501,21 @@ export function RoutineView({
                 key={routine.id}
                 onClick={() => handleEditClick(routine)}
                 className="px-3 py-2 rounded-full text-sm font-medium text-white shadow-sm flex items-center gap-1 hover:opacity-90 transition-opacity flex-shrink-0"
-                style={{ backgroundColor: routine.color.replace("0.6", "1") }}
+                style={{
+                  backgroundColor: (() => {
+                    const member = familyMembers.find(m => m.id === routine.memberId);
+                    if (member?.color && member.color.trim()) {
+                      if (member.color.startsWith('#')) {
+                        return hexToRgba(member.color, 1.0);
+                      } else if (member.color.startsWith('rgba')) {
+                        return member.color.replace(/,\s*[\d.]+\)$/, ', 1.0)');
+                      } else {
+                        return hexToRgba('#FF9B82', 1.0);
+                      }
+                    }
+                    return routine.color ? routine.color.replace("0.6", "1").replace("CC", "FF") : hexToRgba('#FF9B82', 1.0);
+                  })()
+                }}
               >
                 {/* Show member emoji if multiple selected? */}
                 {selectedMemberIds.length > 1 && (
@@ -464,6 +534,7 @@ export function RoutineView({
               setNewRoutineEndTime("10:00");
               setNewRoutineDays([]);
               setAddToCalendar(false);
+              setSelectedRoutineMemberIds(selectedMemberIds.length > 0 ? [...selectedMemberIds] : []); // 현재 선택된 구성원으로 초기화
               setShowAddRoutine(true);
             }}
             className="px-3 py-2 rounded-full text-sm font-medium bg-[#F3F4F6] text-[#6B7280] hover:bg-[#E5E7EB] transition-colors flex items-center gap-1 flex-shrink-0"
@@ -474,152 +545,229 @@ export function RoutineView({
         </div>
       </div>
 
-      {/* Add Routine Input */}
+      {/* Add Routine Modal */}
       {showAddRoutine && (
-        <div className="bg-white border border-[#E5E7EB] rounded-xl p-4 space-y-3">
-          <div className="text-sm font-medium text-[#6B7280]">
-            {editingRoutineId ? "항목 수정" : "새 항목 추가"}
-          </div>
-          {/* Simplified for brevity - Assume same logic as before but uses newRoutineName etc */}
-          <div>
-            <label className="block text-sm font-medium text-[#6B7280] mb-2">항목 이름</label>
-            <input
-              type="text"
-              value={newRoutineName}
-              onChange={(e) => setNewRoutineName(e.target.value)}
-              placeholder="예: 태권도, 약복용"
-              className="w-full px-3 py-2 bg-[#F9FAFB] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF9B82] border border-[#E5E7EB]"
-              autoFocus
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-[#6B7280] mb-2">시작 시간</label>
-              <input
-                type="time"
-                value={newRoutineStartTime}
-                onChange={(e) => setNewRoutineStartTime(e.target.value)}
-                className="w-full px-3 py-2 bg-[#F9FAFB] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF9B82] border border-[#E5E7EB]"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-[#6B7280] mb-2">종료 시간</label>
-              <input
-                type="time"
-                value={newRoutineEndTime}
-                onChange={(e) => setNewRoutineEndTime(e.target.value)}
-                className="w-full px-3 py-2 bg-[#F9FAFB] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF9B82] border border-[#E5E7EB]"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-[#6B7280] mb-2">요일 선택</label>
-            <div className="flex flex-wrap gap-2">
-              {weekDays.map((day, index) => (
-                <button
-                  key={index}
-                  onClick={() =>
-                    setNewRoutineDays(prev =>
-                      prev.includes(index)
-                        ? prev.filter(id => id !== index)
-                        : [...prev, index]
-                    )
-                  }
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${newRoutineDays.includes(index)
-                    ? "bg-[#FF9B82] text-white shadow-sm"
-                    : "bg-[#F3F4F6] text-[#6B7280] hover:bg-[#E5E7EB]"
-                    }`}
-                >
-                  {day}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 캘린더 추가 체크박스 */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="addToCalendar"
-                checked={addToCalendar}
-                onChange={(e) => setAddToCalendar(e.target.checked)}
-                className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-[#FF9B82] focus:ring-2"
-              />
-              <label htmlFor="addToCalendar" className="text-sm text-[#6B7280] cursor-pointer">
-                캘린더에 일정으로 추가
-              </label>
-            </div>
-
-            {/* 스케줄 종료날짜 체크박스 (캘린더 추가가 체크되어 있을 때만 표시) */}
-            {addToCalendar && (
-              <div className="pl-6 space-y-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="hasEndDate"
-                    checked={hasEndDate}
-                    onChange={(e) => {
-                      setHasEndDate(e.target.checked);
-                      if (!e.target.checked) {
-                        // 기본값: 1년 후
-                        const oneYearLater = new Date();
-                        oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
-                        setRoutineEndDate(formatLocalDate(oneYearLater));
-                      }
-                    }}
-                    className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-[#FF9B82] focus:ring-2"
-                  />
-                  <label htmlFor="hasEndDate" className="text-sm text-[#6B7280] cursor-pointer">
-                    일정 종료날짜 지정
-                  </label>
-                </div>
-
-                {hasEndDate && (
-                  <div className="pl-6">
-                    <label className="block text-xs text-[#6B7280] mb-1">종료 날짜</label>
-                    <input
-                      type="date"
-                      value={routineEndDate}
-                      onChange={(e) => setRoutineEndDate(e.target.value)}
-                      min={formatLocalDate(new Date())}
-                      className="w-full px-3 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm"
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="flex gap-2 pt-2">
-            {editingRoutineId && (
-              <button
-                onClick={handleDeleteRoutine}
-                className="px-4 py-2 bg-[#FECACA] text-[#EF4444] rounded-lg text-sm font-medium hover:bg-[#FCA5A5] transition-colors"
-              >
-                삭제
-              </button>
-            )}
-            <div className="flex-1 flex gap-2 justify-end">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 space-y-4 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-xl">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-semibold text-[#1F2937]">
+                {editingRoutineId ? "항목 수정" : "새 항목 추가"}
+              </h3>
               <button
                 onClick={() => {
                   setShowAddRoutine(false);
                   setEditingRoutineId(null);
                 }}
-                className="px-4 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg text-sm font-medium hover:bg-[#E5E7EB] transition-colors"
-                style={{ flex: editingRoutineId ? 0.5 : 0.3 }}
+                className="text-[#6B7280] hover:text-[#1F2937] transition-colors"
               >
-                취소
+                <X size={20} />
               </button>
-              <button
-                onClick={handleAddRoutine}
-                className="px-4 py-2 bg-[#FF9B82] text-white rounded-lg text-sm font-medium hover:bg-[#FF8A6D] transition-colors"
-                style={{ flex: editingRoutineId ? 0.5 : 0.7 }}
-              >
-                {editingRoutineId ? "수정" : "저장"}
-              </button>
+            </div>
+            {/* Simplified for brevity - Assume same logic as before but uses newRoutineName etc */}
+            <div>
+              <label className="block text-sm font-medium text-[#6B7280] mb-2">항목 이름</label>
+              <input
+                type="text"
+                value={newRoutineName}
+                onChange={(e) => setNewRoutineName(e.target.value)}
+                placeholder="예: 태권도, 약복용"
+                className="w-full px-3 py-2 bg-[#F9FAFB] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF9B82] border border-[#E5E7EB]"
+                autoFocus
+              />
+            </div>
+
+            {/* 가족 구성원 선택 */}
+            {familyMembers.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-[#6B7280] mb-2">선택</label>
+                <div className="flex flex-wrap gap-2">
+                  {familyMembers.map((member) => {
+                    // 시간표 보기에서 선택된 구성원인지 확인
+                    const isSelectedInView = selectedMemberIds.includes(member.id);
+                    // 팝업에서 선택된 구성원인지 확인
+                    const isSelectedInPopup = selectedRoutineMemberIds.includes(member.id);
+                    // 둘 중 하나라도 선택되어 있으면 선택된 것으로 표시
+                    const isSelected = isSelectedInPopup || (selectedRoutineMemberIds.length === 0 && isSelectedInView);
+
+                    return (
+                      <button
+                        key={member.id}
+                        onClick={() => {
+                          const newSelection = isSelectedInPopup
+                            ? selectedRoutineMemberIds.filter(id => id !== member.id)
+                            : [...selectedRoutineMemberIds, member.id];
+
+                          setSelectedRoutineMemberIds(newSelection);
+                        }}
+                        className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${isSelected
+                          ? "text-white shadow-sm"
+                          : "bg-[#F3F4F6] text-[#6B7280] hover:bg-[#E5E7EB]"
+                          }`}
+                        style={
+                          isSelected
+                            ? (() => {
+                              if (member.color && member.color.trim()) {
+                                if (member.color.startsWith('#')) {
+                                  return { backgroundColor: hexToRgba(member.color, 1.0), color: "white" };
+                                } else if (member.color.startsWith('rgba')) {
+                                  return { backgroundColor: member.color.replace(/,\s*[\d.]+\)$/, ', 1.0)'), color: "white" };
+                                } else {
+                                  return { backgroundColor: hexToRgba('#FF9B82', 1.0), color: "white" };
+                                }
+                              }
+                              return { backgroundColor: hexToRgba('#FF9B82', 1.0), color: "white" };
+                            })()
+                            : undefined
+                        }
+                      >
+                        <span className="text-base">{member.emoji}</span>
+                        <span>{member.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {(selectedRoutineMemberIds.length > 0 || selectedMemberIds.length > 0) && (
+                  <div className="mt-2 text-xs text-[#9CA3AF] flex items-center gap-1">
+                    <span>선택됨:</span>
+                    <span className="font-medium text-[#6B7280]">
+                      {(selectedRoutineMemberIds.length > 0 ? selectedRoutineMemberIds : selectedMemberIds).map(id => {
+                        const member = familyMembers.find(m => m.id === id);
+                        return member ? `${member.emoji} ${member.name}` : null;
+                      }).filter(Boolean).join(", ")}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-[#6B7280] mb-2">시작 시간</label>
+                <input
+                  type="time"
+                  value={newRoutineStartTime}
+                  onChange={(e) => setNewRoutineStartTime(e.target.value)}
+                  className="w-full px-3 py-2 bg-[#F9FAFB] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF9B82] border border-[#E5E7EB]"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[#6B7280] mb-2">종료 시간</label>
+                <input
+                  type="time"
+                  value={newRoutineEndTime}
+                  onChange={(e) => setNewRoutineEndTime(e.target.value)}
+                  className="w-full px-3 py-2 bg-[#F9FAFB] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF9B82] border border-[#E5E7EB]"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-[#6B7280] mb-2">요일 선택</label>
+              <div className="flex flex-wrap gap-2">
+                {weekDays.map((day, index) => (
+                  <button
+                    key={index}
+                    onClick={() =>
+                      setNewRoutineDays(prev =>
+                        prev.includes(index)
+                          ? prev.filter(id => id !== index)
+                          : [...prev, index]
+                      )
+                    }
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${newRoutineDays.includes(index)
+                      ? "bg-[#FF9B82] text-white shadow-sm"
+                      : "bg-[#F3F4F6] text-[#6B7280] hover:bg-[#E5E7EB]"
+                      }`}
+                  >
+                    {day}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 캘린더 추가 체크박스 */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="addToCalendar"
+                  checked={addToCalendar}
+                  onChange={(e) => setAddToCalendar(e.target.checked)}
+                  className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-[#FF9B82] focus:ring-2"
+                />
+                <label htmlFor="addToCalendar" className="text-sm text-[#6B7280] cursor-pointer">
+                  캘린더에 일정으로 추가
+                </label>
+              </div>
+
+              {/* 스케줄 종료날짜 체크박스 (캘린더 추가가 체크되어 있을 때만 표시) */}
+              {addToCalendar && (
+                <div className="pl-6 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="hasEndDate"
+                      checked={hasEndDate}
+                      onChange={(e) => {
+                        setHasEndDate(e.target.checked);
+                        if (!e.target.checked) {
+                          // 기본값: 1년 후
+                          const oneYearLater = new Date();
+                          oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
+                          setRoutineEndDate(formatLocalDate(oneYearLater));
+                        }
+                      }}
+                      className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-[#FF9B82] focus:ring-2"
+                    />
+                    <label htmlFor="hasEndDate" className="text-sm text-[#6B7280] cursor-pointer">
+                      일정 종료날짜 지정
+                    </label>
+                  </div>
+
+                  {hasEndDate && (
+                    <div className="pl-6">
+                      <label className="block text-xs text-[#6B7280] mb-1">종료 날짜</label>
+                      <input
+                        type="date"
+                        value={routineEndDate}
+                        onChange={(e) => setRoutineEndDate(e.target.value)}
+                        min={formatLocalDate(new Date())}
+                        className="w-full px-3 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              {editingRoutineId && (
+                <button
+                  onClick={handleDeleteRoutine}
+                  className="px-4 py-2 bg-[#FECACA] text-[#EF4444] rounded-lg text-sm font-medium hover:bg-[#FCA5A5] transition-colors"
+                >
+                  삭제
+                </button>
+              )}
+              <div className="flex-1 flex gap-2 justify-end">
+                <button
+                  onClick={() => {
+                    setShowAddRoutine(false);
+                    setEditingRoutineId(null);
+                  }}
+                  className="px-4 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg text-sm font-medium hover:bg-[#E5E7EB] transition-colors"
+                  style={{ flex: editingRoutineId ? 0.5 : 0.3 }}
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleAddRoutine}
+                  className="px-4 py-2 bg-[#FF9B82] text-white rounded-lg text-sm font-medium hover:bg-[#FF8A6D] transition-colors"
+                  style={{ flex: editingRoutineId ? 0.5 : 0.7 }}
+                >
+                  {editingRoutineId ? "수정" : "저장"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -711,6 +859,42 @@ export function RoutineView({
                       const top = getTimePosition(displayStartTime);
                       const height = getDurationHeight(displayDuration);
 
+                      // 각 구성원별로 다른 색상 적용 - routine.memberId로 직접 구성원 찾기
+                      let memberColor: string;
+
+                      // routine.memberId로 구성원을 직접 찾아서 색상 적용
+                      const routineMember = familyMembers.find((m) => m.id === routine.memberId);
+
+                      if (routineMember && routineMember.color && routineMember.color.trim()) {
+                        // hex 색상인 경우 rgba로 변환
+                        if (routineMember.color.startsWith('#')) {
+                          memberColor = hexToRgba(routineMember.color, 0.8);
+                        } else if (routineMember.color.startsWith('rgba')) {
+                          memberColor = routineMember.color;
+                        } else if (routineMember.color.startsWith('rgb')) {
+                          // rgb를 rgba로 변환
+                          memberColor = routineMember.color.replace('rgb', 'rgba').replace(')', ', 0.8)');
+                        } else {
+                          // 그 외의 경우 기본 색상 사용
+                          console.warn(`Unknown color format: ${routineMember.color}, using default`);
+                          memberColor = hexToRgba('#FF9B82', 0.8);
+                        }
+                      } else {
+                        // 구성원 색상이 없거나 member를 찾지 못한 경우 기본 색상 사용 (routine.color 무시)
+                        if (!routineMember) {
+                          console.warn(`Member not found for routine.memberId: ${routine.memberId}`);
+                        } else {
+                          console.warn(`Member ${routineMember.name} has no color, using default`);
+                        }
+                        memberColor = hexToRgba('#FF9B82', 0.8);
+                      }
+
+                      // 최종 색상이 비어있거나 유효하지 않으면 기본 색상 사용
+                      if (!memberColor || memberColor.trim() === '' || memberColor === 'rgba(NaN, NaN, NaN, 0.8)') {
+                        console.warn(`Invalid color for member ${routineMember?.name}, using default`);
+                        memberColor = hexToRgba('#FF9B82', 0.8);
+                      }
+
                       return (
                         <div
                           key={`${routine.id}-${slotIndex}-${memberId}`}
@@ -719,7 +903,7 @@ export function RoutineView({
                             : "z-10"
                             }`}
                           style={{
-                            backgroundColor: routine.color, // Use routine color
+                            backgroundColor: memberColor, // 가족 구성원 색상 우선 적용
                             top: `${top}%`,
                             height: `${Math.max(height, 3)}%`,
                             // Overlap adjustment? 
