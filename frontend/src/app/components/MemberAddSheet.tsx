@@ -23,7 +23,6 @@ interface MemberAddSheetProps {
 
 export function MemberAddSheet({ isOpen, onClose, onSave, initialData }: MemberAddSheetProps) {
   const [name, setName] = useState(initialData?.name || '');
-  const [phone, setPhone] = useState(initialData?.phone || '');
   const [memo, setMemo] = useState(initialData?.memo || '');
   const [emoji, setEmoji] = useState(initialData?.emoji || '🐼');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -33,7 +32,7 @@ export function MemberAddSheet({ isOpen, onClose, onSave, initialData }: MemberA
       toast.error('이름을 입력해주세요.');
       return;
     }
-    
+
     // Validate memo length (though maxlength attribute handles it mostly)
     if (memo.length > 30) {
       toast.error('소개는 30자 이내로 입력해주세요.');
@@ -41,14 +40,13 @@ export function MemberAddSheet({ isOpen, onClose, onSave, initialData }: MemberA
     }
 
     if (onSave) {
-      onSave({ name, phone, memo, emoji });
+      onSave({ name, phone: '', memo, emoji });
     } else {
       toast.success('멤버가 추가되었습니다.');
     }
-    
+
     // Reset and close
     setName('');
-    setPhone('');
     setMemo('');
     setEmoji('🐼');
     onClose();
@@ -58,12 +56,10 @@ export function MemberAddSheet({ isOpen, onClose, onSave, initialData }: MemberA
   useEffect(() => {
     if (initialData) {
       setName(initialData.name || '');
-      setPhone(initialData.phone || '');
       setMemo(initialData.memo || '');
       setEmoji(initialData.emoji || '🐼');
     } else {
       setName('');
-      setPhone('');
       setMemo('');
       setEmoji('🐼');
     }
@@ -72,9 +68,9 @@ export function MemberAddSheet({ isOpen, onClose, onSave, initialData }: MemberA
   if (!isOpen) return null;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 max-w-[375px] mx-auto bg-white rounded-t-[20px] shadow-2xl" style={{ height: '70vh' }}>
+    <div className="fixed bottom-0 left-0 right-0 z-40 max-w-[375px] mx-auto bg-white rounded-t-[20px] shadow-2xl flex flex-col" style={{ height: '70vh' }}>
       {/* Header */}
-      <div className="bg-white px-4 py-4 flex items-center justify-between border-b border-[#F3F4F6] rounded-t-[20px]">
+      <div className="bg-white px-4 py-4 flex items-center justify-between border-b border-[#F3F4F6] rounded-t-[20px] flex-shrink-0">
         <h2 className="font-bold text-[#1F2937]">멤버 추가</h2>
         <button
           onClick={onClose}
@@ -85,11 +81,7 @@ export function MemberAddSheet({ isOpen, onClose, onSave, initialData }: MemberA
       </div>
 
       {/* Content */}
-      <div className="p-6 overflow-y-auto" style={{ height: 'calc(70vh - 64px - 80px)' }}>
-        <p className="text-sm text-[#6B7280] mb-6">
-          새로운 가족 구성원이나 지인을 목록에 추가합니다.
-        </p>
-
+      <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="space-y-6">
           {/* Profile Emoji */}
           <div className="space-y-2">
@@ -137,9 +129,8 @@ export function MemberAddSheet({ isOpen, onClose, onSave, initialData }: MemberA
                         setEmoji(emojiOption);
                         setShowEmojiPicker(false);
                       }}
-                      className={`w-10 h-10 text-2xl rounded-lg hover:bg-[#F3F4F6] transition-colors flex items-center justify-center ${
-                        emoji === emojiOption ? 'bg-[#FFE8E0] ring-2 ring-[#FF9B82]' : ''
-                      }`}
+                      className={`w-10 h-10 text-2xl rounded-lg hover:bg-[#F3F4F6] transition-colors flex items-center justify-center ${emoji === emojiOption ? 'bg-[#FFE8E0] ring-2 ring-[#FF9B82]' : ''
+                        }`}
                     >
                       {emojiOption}
                     </button>
@@ -158,19 +149,6 @@ export function MemberAddSheet({ isOpen, onClose, onSave, initialData }: MemberA
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="h-12 text-lg bg-[#F9FAFB] border-[#E5E7EB]"
-            />
-          </div>
-
-          {/* Phone Input */}
-          <div className="space-y-2">
-            <Label htmlFor="phone" className="text-base font-medium">전화번호</Label>
-            <Input
-              id="phone"
-              placeholder="010-0000-0000"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className="h-12 text-lg bg-[#F9FAFB] border-[#E5E7EB]"
-              type="tel"
             />
           </div>
 
@@ -197,8 +175,8 @@ export function MemberAddSheet({ isOpen, onClose, onSave, initialData }: MemberA
       </div>
 
       {/* Footer Button */}
-      <div className="fixed bottom-0 left-0 right-0 max-w-[375px] mx-auto bg-white border-t border-[#E5E7EB] p-4">
-        <Button 
+      <div className="bg-white border-t border-[#E5E7EB] p-4 flex-shrink-0">
+        <Button
           onClick={handleSave}
           className="w-full h-14 text-lg font-bold bg-[#FF9B82] hover:bg-[#FF8A6D] text-white rounded-xl"
         >

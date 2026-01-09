@@ -65,14 +65,37 @@ export function CalendarHomeScreen() {
   // 가족 구성원 초기값은 빈 배열로 시작 (API에서 로드)
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
 
-  const [selectedMembers, setSelectedMembers] = useState<string[]>(["me"]);
+  // localStorage에서 선택된 구성원 불러오기
+  const loadSelectedMembers = (): string[] => {
+    try {
+      const saved = localStorage.getItem('selectedMembers');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) && parsed.length > 0 ? parsed : ["me"];
+      }
+    } catch (error) {
+      console.error("선택된 구성원 불러오기 실패:", error);
+    }
+    return ["me"];
+  };
+
+  const [selectedMembers, setSelectedMembers] = useState<string[]>(loadSelectedMembers());
 
   const toggleMemberSelection = (memberId: string) => {
-    setSelectedMembers((prev) =>
-      prev.includes(memberId)
+    setSelectedMembers((prev) => {
+      const newSelection = prev.includes(memberId)
         ? prev.filter((id) => id !== memberId)
-        : [...prev, memberId]
-    );
+        : [...prev, memberId];
+
+      // localStorage에 저장
+      try {
+        localStorage.setItem('selectedMembers', JSON.stringify(newSelection));
+      } catch (error) {
+        console.error("선택된 구성원 저장 실패:", error);
+      }
+
+      return newSelection;
+    });
   };
 
   // Draggable FAB state - 기본값을 우측 하단으로 설정 (우측에서 왼쪽으로 이동 가능)
@@ -671,14 +694,34 @@ export function CalendarHomeScreen() {
       try {
         const familyResponse = await apiClient.getFamilyMembers();
         if (familyResponse.data && Array.isArray(familyResponse.data)) {
-          const formattedMembers = familyResponse.data.map((member: any) => ({
-            id: member.id,
-            name: member.name,
-            emoji: member.emoji || "🐼",
-            color: member.color_code || member.color || "rgba(255, 155, 130, 0.6)",
-            phone: member.phone_number,
-            memo: member.notes,
-          }));
+          // 기본 색상 배열
+          const defaultColors = [
+            "#9B82FF", // 연한 보라색 (가족구성원 1)
+            "#9ae3a9", // 연한 초록색
+            "#FFD482", // 연한 노란색
+            "#82D4FF", // 연한 파란색
+            "#FF82D4", // 연한 분홍색
+            "#FF9B82", // 연한 주황색 (나의 색상과 구분)
+          ];
+
+          const formattedMembers = familyResponse.data.map((member: any, index: number) => {
+            // color_code가 있으면 사용, 없으면 기본 색상 배열에서 순차적으로 할당
+            let memberColor = member.color_code || member.color;
+
+            // 색상이 없거나 빈 문자열이면 기본 색상 배열에서 할당
+            if (!memberColor || memberColor.trim() === '') {
+              memberColor = defaultColors[index % defaultColors.length];
+            }
+
+            return {
+              id: member.id,
+              name: member.name,
+              emoji: member.emoji || "🐼",
+              color: memberColor,
+              phone: member.phone_number,
+              memo: member.notes,
+            };
+          });
           // "나" 항목을 항상 맨 앞에 추가 (현재 사용자 정보 기반)
           formattedMembers.unshift({
             id: "me", // 특별한 ID로 표시 (DB에 저장되지 않음)
@@ -2117,7 +2160,16 @@ export function CalendarHomeScreen() {
         console.log("가족 구성원 삭제 응답:", response);
 
         setFamilyMembers((prev) => prev.filter((m) => m.id !== memberId));
-        setSelectedMembers((prev) => prev.filter((id) => id !== memberId));
+        setSelectedMembers((prev) => {
+          const newSelection = prev.filter((id) => id !== memberId);
+          // localStorage에 저장
+          try {
+            localStorage.setItem('selectedMembers', JSON.stringify(newSelection));
+          } catch (error) {
+            console.error("선택된 구성원 저장 실패:", error);
+          }
+          return newSelection;
+        });
         toast.success(`${member.name}님이 삭제되었습니다.`);
       } catch (error: any) {
         console.error("가족 구성원 삭제 실패:", error);
@@ -2507,7 +2559,7 @@ export function CalendarHomeScreen() {
       {activeTab === "routine" && (
         <div className="bg-white px-4 pt-6 pb-3 border-b border-[#F3F4F6]">
           <div className="flex items-center justify-between mb-3">
-            <h4 className="font-semibold text-[#1F2937]">프로필 선택</h4>
+            <h4 className="font-semibold text-[#1F2937]">시간표 보기</h4>
             <button
               onClick={() => setShowMemberAddSheet(true)}
               className="px-3 py-1.5 text-sm font-medium bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] transition-colors flex items-center gap-1"
