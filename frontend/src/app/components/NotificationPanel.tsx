@@ -28,10 +28,12 @@ export function NotificationPanel({ isOpen, onClose, todos }: NotificationPanelP
 
   const getCategoryColor = (category: string) => {
     const colors: { [key: string]: string } = {
-      운동: "bg-[#E0F2FE] text-[#0EA5E9]",
-      건강: "bg-[#FFF0EB] text-[#FF9B82]",
+      공부: "bg-[#E0F2FE] text-[#0EA5E9]",
       업무: "bg-[#F3E8FF] text-[#A855F7]",
+      약속: "bg-[#FCE7F3] text-[#EC4899]",
       생활: "bg-[#D1FAE5] text-[#10B981]",
+      건강: "bg-[#FFF0EB] text-[#FF9B82]",
+      구글: "bg-[#E8F5E9] text-[#00085c]",
       기타: "bg-[#FEF3C7] text-[#F59E0B]",
     };
     return colors[category] || colors["기타"];
@@ -40,7 +42,7 @@ export function NotificationPanel({ isOpen, onClose, todos }: NotificationPanelP
   const getTimeStatus = (time: string) => {
     const now = new Date();
     const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
-    
+
     if (time < currentTime) {
       return "past";
     } else if (time === currentTime) {
@@ -57,7 +59,7 @@ export function NotificationPanel({ isOpen, onClose, todos }: NotificationPanelP
         className="fixed inset-0 bg-black/30 z-40 transition-opacity duration-200"
         onClick={onClose}
       />
-      
+
       {/* 팝업 컨테이너 */}
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
         <div
@@ -102,28 +104,26 @@ export function NotificationPanel({ isOpen, onClose, todos }: NotificationPanelP
                   return (
                     <div
                       key={todo.id}
-                      className={`flex gap-3 p-3 rounded-lg border transition-all ${
-                        todo.completed
-                          ? "bg-[#F9FAFB] border-[#E5E7EB]"
-                          : timeStatus === "now"
+                      className={`flex gap-3 p-3 rounded-lg border transition-all ${todo.completed
+                        ? "bg-[#F9FAFB] border-[#E5E7EB]"
+                        : timeStatus === "now"
                           ? "bg-[#FFF0EB] border-[#FF9B82] shadow-sm"
                           : timeStatus === "past"
-                          ? "bg-white border-[#F3F4F6]"
-                          : "bg-white border-[#E5E7EB]"
-                      }`}
+                            ? "bg-white border-[#F3F4F6]"
+                            : "bg-white border-[#E5E7EB]"
+                        }`}
                     >
                       {/* Time Indicator */}
                       <div className="flex-shrink-0 flex flex-col items-center">
                         <div
-                          className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                            todo.completed
-                              ? "bg-[#10B981] text-white"
-                              : timeStatus === "now"
+                          className={`w-8 h-8 rounded-full flex items-center justify-center ${todo.completed
+                            ? "bg-[#10B981] text-white"
+                            : timeStatus === "now"
                               ? "bg-[#FF9B82] text-white animate-pulse"
                               : timeStatus === "past"
-                              ? "bg-[#D1D5DB] text-white"
-                              : "bg-[#FFE8E0] text-[#FF9B82]"
-                          }`}
+                                ? "bg-[#D1D5DB] text-white"
+                                : "bg-[#FFE8E0] text-[#FF9B82]"
+                            }`}
                         >
                           {todo.completed ? (
                             <CheckCircle2 size={16} strokeWidth={2.5} />
@@ -137,11 +137,10 @@ export function NotificationPanel({ isOpen, onClose, todos }: NotificationPanelP
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2 mb-1">
                           <h3
-                            className={`font-medium text-sm ${
-                              todo.completed
-                                ? "line-through text-[#9CA3AF]"
-                                : "text-[#1F2937]"
-                            }`}
+                            className={`font-medium text-sm ${todo.completed
+                              ? "line-through text-[#9CA3AF]"
+                              : "text-[#1F2937]"
+                              }`}
                           >
                             {todo.title}
                           </h3>
@@ -156,13 +155,12 @@ export function NotificationPanel({ isOpen, onClose, todos }: NotificationPanelP
 
                         <div className="flex items-center gap-2 text-xs">
                           <span
-                            className={`font-medium ${
-                              todo.completed
-                                ? "text-[#9CA3AF]"
-                                : timeStatus === "now"
+                            className={`font-medium ${todo.completed
+                              ? "text-[#9CA3AF]"
+                              : timeStatus === "now"
                                 ? "text-[#FF9B82]"
                                 : "text-[#6B7280]"
-                            }`}
+                              }`}
                           >
                             {todo.time}
                           </span>

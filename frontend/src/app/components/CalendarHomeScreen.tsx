@@ -202,7 +202,7 @@ export function CalendarHomeScreen() {
       // Google Calendar OAuth 콜백인지 확인 (scope에 calendar가 포함되어 있거나 저장된 state가 있는 경우)
       const storedState = localStorage.getItem('google_calendar_oauth_state');
       const isCalendarCallback = code && state && (
-        (scope && scope.includes('calendar')) || 
+        (scope && scope.includes('calendar')) ||
         storedState === state
       );
 
@@ -217,7 +217,7 @@ export function CalendarHomeScreen() {
           }
 
           console.log('[Google Calendar] OAuth 콜백 처리 시작...');
-          
+
           // 백엔드로 콜백 처리 요청
           await apiClient.googleCalendarCallback(code, state);
           toast.success('Google Calendar 연동이 완료되었습니다.');
@@ -346,7 +346,7 @@ export function CalendarHomeScreen() {
                 time: isAllDay ? '' : (event.start_time || "09:00"), // 하루종일이면 빈 문자열
                 duration: duration > 0 ? duration : 60,
                 completed: false,
-                category: "기타",
+                category: "구글",
                 date: dateStr,
                 endDate: endDateStr, // 종료 날짜 추가
                 startTime: isAllDay ? undefined : event.start_time, // 하루종일이면 undefined
@@ -1998,10 +1998,12 @@ export function CalendarHomeScreen() {
 
   const getCategoryColor = (category: string) => {
     const colors: { [key: string]: string } = {
-      운동: "bg-[#E0F2FE] border-l-[#0EA5E9]",
-      건강: "bg-[#FFF0EB] border-l-[#FF9B82]",
+      공부: "bg-[#E0F2FE] border-l-[#0EA5E9]",
       업무: "bg-[#F3E8FF] border-l-[#A855F7]",
+      약속: "bg-[#FCE7F3] border-l-[#EC4899]",
       생활: "bg-[#D1FAE5] border-l-[#10B981]",
+      건강: "bg-[#FFF0EB] border-l-[#FF9B82]",
+      구글: "bg-[#E8F5E9] border-l-[#00085c]",
       기타: "bg-[#FEF3C7] border-l-[#F59E0B]",
     };
     return colors[category] || colors["기타"];

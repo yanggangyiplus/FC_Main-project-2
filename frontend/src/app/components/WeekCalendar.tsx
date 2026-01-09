@@ -71,24 +71,24 @@ export function WeekCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }
     // 1. Regular Todos - 기간 일정인 경우 시작일부터 종료일까지 모든 날짜에 표시
     let regularTodos = todos.filter((todo) => {
       if (!todo.date) return false;
-      
+
       // 시작일과 동일한 경우
       if (todo.date === dateStr) return true;
-      
+
       // 기간 일정인 경우: 시작일과 종료일 사이에 포함되는지 확인
       if (todo.endDate && todo.endDate !== todo.date) {
         const startDate = new Date(todo.date);
         const endDate = new Date(todo.endDate);
         const currentDate = new Date(dateStr);
-        
+
         // 날짜 비교 (시간 제외)
         startDate.setHours(0, 0, 0, 0);
         endDate.setHours(0, 0, 0, 0);
         currentDate.setHours(0, 0, 0, 0);
-        
+
         return currentDate >= startDate && currentDate <= endDate;
       }
-      
+
       return false;
     });
 
@@ -115,10 +115,12 @@ export function WeekCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }
 
   const getCategoryColor = (category: string) => {
     const colors: { [key: string]: string } = {
-      운동: "bg-[#0EA5E9] text-white",
-      건강: "bg-[#FF9B82] text-white",
+      공부: "bg-[#0EA5E9] text-white",
       업무: "bg-[#A855F7] text-white",
+      약속: "bg-[#EC4899] text-white",
       생활: "bg-[#10B981] text-white",
+      건강: "bg-[#FF9B82] text-white",
+      구글: "bg-[#00085c] text-white",
       기타: "bg-[#F59E0B] text-white",
     };
     return colors[category] || colors["기타"];

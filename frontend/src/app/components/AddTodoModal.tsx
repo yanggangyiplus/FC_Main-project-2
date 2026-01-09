@@ -281,7 +281,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
     }
   }, [isOpen, formData.memo, formData.title, hasExtracted, isExtracting]);
 
-  const categories = ['운동', '건강', '업무', '생활', '공부', '기타'];
+  const categories = ['공부', '업무', '약속', '생활', '건강', '구글', '기타'];
   const repeatOptions = [
     { value: 'none', label: '없음' },
     { value: 'daily', label: '매일' },
@@ -780,8 +780,8 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
                               });
                             }}
                             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${(formData.customRepeatDays || []).includes(day.value)
-                                ? 'bg-[#FF9B82] text-white'
-                                : 'bg-white border border-[#D1D5DB] text-[#6B7280] hover:bg-[#F9FAFB]'
+                              ? 'bg-[#FF9B82] text-white'
+                              : 'bg-white border border-[#D1D5DB] text-[#6B7280] hover:bg-[#F9FAFB]'
                               }`}
                           >
                             {day.label}
