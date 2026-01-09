@@ -35,6 +35,7 @@ import { DayCalendar } from "./DayCalendar";
 import { RoutineView } from "./RoutineView";
 import { toast } from "sonner";
 import { apiClient } from "@/services/apiClient";
+import { formatDuration } from "@/utils/formatDuration";
 
 export function CalendarHomeScreen() {
   const [showMemberAddSheet, setShowMemberAddSheet] = useState(false);
@@ -245,33 +246,90 @@ export function CalendarHomeScreen() {
             // Google Calendar 이벤트를 Todo 형식으로 변환
             const formattedGoogleEvents = googleEvents.map((event: any) => {
               const dateStr = event.date || new Date().toISOString().split('T')[0];
+              const endDateStr = event.end_date || undefined;
+              const isAllDay = event.all_day || false;
 
-              // duration 계산
+              // duration 계산 (하루종일이 아닌 경우만)
               let duration = 60;
-              if (event.start_time && event.end_time) {
+              if (!isAllDay && event.start_time && event.end_time) {
                 const [startHours, startMinutes] = event.start_time.split(':').map(Number);
                 const [endHours, endMinutes] = event.end_time.split(':').map(Number);
                 const startTotal = startHours * 60 + startMinutes;
                 const endTotal = endHours * 60 + endMinutes;
                 duration = endTotal - startTotal;
+              } else if (isAllDay && endDateStr) {
+                // 하루종일이고 여러 날짜에 걸친 경우, 날짜 차이로 duration 계산
+                const startDate = new Date(dateStr);
+                const endDate = new Date(endDateStr);
+                const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+                duration = daysDiff * 24 * 60; // 일수를 분으로 변환
+              }
+
+              // notification_reminders 파싱
+              let notificationReminders: Array<{ value: number; unit: 'minutes' | 'hours' | 'days' | 'weeks' }> = [];
+              if (event.notification_reminders) {
+                try {
+                  const parsed = Array.isArray(event.notification_reminders)
+                    ? event.notification_reminders
+                    : (typeof event.notification_reminders === 'string'
+                      ? JSON.parse(event.notification_reminders)
+                      : []);
+                  if (Array.isArray(parsed)) {
+                    notificationReminders = parsed.map((r: any) => ({
+                      value: Number(r.value) || 30,
+                      unit: r.unit || 'minutes'
+                    }));
+                  }
+                } catch (e) {
+                  console.error('Failed to parse notification_reminders:', e);
+                }
+              }
+
+              // repeat_pattern 파싱
+              let repeatPattern: any = undefined;
+              if (event.repeat_pattern) {
+                try {
+                  repeatPattern = typeof event.repeat_pattern === 'string'
+                    ? JSON.parse(event.repeat_pattern)
+                    : event.repeat_pattern;
+                } catch (e) {
+                  console.error('Failed to parse repeat_pattern:', e);
+                }
+              }
+
+              // repeat_end_date 파싱
+              let repeatEndDate: string | undefined = undefined;
+              if (event.repeat_end_date) {
+                if (typeof event.repeat_end_date === 'string') {
+                  repeatEndDate = event.repeat_end_date;
+                } else if (event.repeat_end_date instanceof Date) {
+                  const year = event.repeat_end_date.getFullYear();
+                  const month = event.repeat_end_date.getMonth() + 1;
+                  const day = event.repeat_end_date.getDate();
+                  repeatEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                }
               }
 
               return {
                 id: event.google_calendar_event_id || `google_${event.id}`,
                 title: event.title || '제목 없음',
-                time: event.start_time || "09:00",
+                time: isAllDay ? '' : (event.start_time || "09:00"), // 하루종일이면 빈 문자열
                 duration: duration > 0 ? duration : 60,
                 completed: false,
                 category: "기타",
                 date: dateStr,
-                startTime: event.start_time,
-                endTime: event.end_time,
-                isAllDay: event.all_day || false,
+                endDate: endDateStr, // 종료 날짜 추가
+                startTime: isAllDay ? undefined : event.start_time, // 하루종일이면 undefined
+                endTime: isAllDay ? undefined : event.end_time, // 하루종일이면 undefined
+                isAllDay: isAllDay,
                 memo: event.description || "",
                 location: event.location || "",
-                hasNotification: false,
+                hasNotification: notificationReminders.length > 0,
                 alarmTimes: [],
-                repeatType: "none",
+                notificationReminders: notificationReminders, // 알림 정보 추가
+                repeatType: event.repeat_type || "none", // 반복 타입 추가
+                repeatEndDate: repeatEndDate, // 반복 종료 날짜 추가
+                repeatPattern: repeatPattern, // 반복 패턴 추가
                 checklistItems: [],
                 memberId: undefined,
                 isRoutine: false,
@@ -435,7 +493,7 @@ export function CalendarHomeScreen() {
               duration = endTotal - startTotal;
             }
 
-            // notification_times 파싱
+            // notification_times 파싱 (구버전 호환)
             let alarmTimes: string[] = [];
             if (todo.notification_times) {
               try {
@@ -444,6 +502,51 @@ export function CalendarHomeScreen() {
                   : todo.notification_times;
               } catch (e) {
                 alarmTimes = [];
+              }
+            }
+
+            // notification_reminders 파싱 (새로운 형식)
+            let notificationReminders: Array<{ value: number; unit: 'minutes' | 'hours' | 'days' | 'weeks' }> = [];
+            if (todo.notification_reminders) {
+              try {
+                const parsed = typeof todo.notification_reminders === 'string'
+                  ? JSON.parse(todo.notification_reminders)
+                  : todo.notification_reminders;
+                if (Array.isArray(parsed)) {
+                  notificationReminders = parsed.map((r: any) => ({
+                    value: Number(r.value) || 30,
+                    unit: r.unit || 'minutes'
+                  }));
+                }
+              } catch (e) {
+                console.error('Failed to parse notification_reminders:', e);
+                notificationReminders = [];
+              }
+            }
+
+            // repeat_end_date 파싱
+            let repeatEndDate: string | undefined = undefined;
+            if (todo.repeat_end_date) {
+              if (todo.repeat_end_date instanceof Date) {
+                const year = todo.repeat_end_date.getFullYear();
+                const month = todo.repeat_end_date.getMonth() + 1;
+                const day = todo.repeat_end_date.getDate();
+                repeatEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              } else if (typeof todo.repeat_end_date === 'string') {
+                repeatEndDate = todo.repeat_end_date;
+              }
+            }
+
+            // repeat_pattern 파싱
+            let repeatPattern: any = undefined;
+            if (todo.repeat_pattern) {
+              try {
+                repeatPattern = typeof todo.repeat_pattern === 'string'
+                  ? JSON.parse(todo.repeat_pattern)
+                  : todo.repeat_pattern;
+              } catch (e) {
+                console.error('Failed to parse repeat_pattern:', e);
+                repeatPattern = undefined;
               }
             }
 
@@ -474,6 +577,19 @@ export function CalendarHomeScreen() {
               }
             }
 
+            // 종료 날짜 형식 변환 (기간 일정인 경우)
+            let todoEndDate: string | undefined = undefined;
+            if (todo.end_date) {
+              if (todo.end_date instanceof Date) {
+                const year = todo.end_date.getFullYear();
+                const month = todo.end_date.getMonth() + 1;
+                const day = todo.end_date.getDate();
+                todoEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              } else if (typeof todo.end_date === 'string') {
+                todoEndDate = todo.end_date;
+              }
+            }
+
             return {
               id: todo.id,
               title: todo.title,
@@ -482,14 +598,18 @@ export function CalendarHomeScreen() {
               completed: todo.status === 'completed',
               category: todo.category || "기타",
               date: todoDate,
+              endDate: todoEndDate,  // 종료 날짜 추가
               startTime: todo.start_time,
               endTime: todo.end_time,
               isAllDay: todo.all_day || false,
               memo: todo.memo || todo.description || "",
               location: todo.location || "",
               hasNotification: todo.has_notification || false,
-              alarmTimes: alarmTimes,
+              alarmTimes: alarmTimes, // 구버전 호환
+              notificationReminders: notificationReminders, // 새로운 알림 형식
               repeatType: todo.repeat_type || "none",
+              repeatEndDate: repeatEndDate, // 반복 종료 날짜
+              repeatPattern: repeatPattern, // 반복 패턴
               checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
               memberId: memberId,
               isRoutine: false,
@@ -686,6 +806,8 @@ export function CalendarHomeScreen() {
       duration: number;
     }[];
     addToCalendar?: boolean; // 캘린더에 일정으로 추가 여부
+    endDate?: string; // 스케줄 종료 날짜 (선택사항)
+    hasEndDate?: boolean; // 종료 날짜 사용 여부
   }
 
   const [routines, setRoutines] = useState<RoutineItem[]>([]);
@@ -736,8 +858,19 @@ export function CalendarHomeScreen() {
     if (addToCalendar) {
       // 시간표의 각 요일별로 일정 생성
       const today = new Date();
-      const currentYear = today.getFullYear();
-      const currentMonth = today.getMonth();
+      today.setHours(0, 0, 0, 0); // 오늘 날짜의 시작 (00:00:00)
+
+      // 종료 날짜 설정 (hasEndDate가 true이고 endDate가 있으면 사용, 없으면 1년 후)
+      let endDate: Date;
+      if (routine.hasEndDate && routine.endDate) {
+        endDate = new Date(routine.endDate);
+        endDate.setHours(23, 59, 59, 999); // 종료 날짜의 끝 (23:59:59)
+      } else {
+        // 기본값: 1년 후
+        endDate = new Date(today);
+        endDate.setFullYear(endDate.getFullYear() + 1);
+        endDate.setHours(23, 59, 59, 999);
+      }
 
       let addedCount = 0;
       let failedCount = 0;
@@ -745,28 +878,21 @@ export function CalendarHomeScreen() {
       // 각 요일별로 일정 생성
       for (const slot of routine.timeSlots) {
         console.log(`시간표 요일 처리: slot.day = ${slot.day} (${['일', '월', '화', '수', '목', '금', '토'][slot.day]})`);
-        // 이번 달의 해당 요일 찾기
-        const firstDayOfMonth = new Date(currentYear, currentMonth, 1);
-        const firstDayOfWeek = firstDayOfMonth.getDay(); // 0(일) ~ 6(토)
 
-        // slot.day는 0(일) ~ 6(토) 순서로 저장됨
-        // 해당 요일이 이번 달에 처음 나타나는 날짜 찾기
-        // firstDayOfWeek는 1일의 요일 (0=일, 1=월, ..., 6=토)
-        // slot.day는 찾고자 하는 요일 (0=일, 1=월, ..., 6=토)
+        // 오늘부터 종료 날짜까지 모든 해당 요일에 일정 생성
+        let currentDate = new Date(today);
 
-        // 1일부터 시작하여 해당 요일을 찾음
-        const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-        for (let day = 1; day <= daysInMonth; day++) {
-          const date = new Date(currentYear, currentMonth, day);
-          const actualDayOfWeek = date.getDay(); // 0(일) ~ 6(토)
+        // 오늘 이후의 첫 번째 해당 요일 찾기
+        while (currentDate <= endDate) {
+          const dayOfWeek = currentDate.getDay(); // 0(일) ~ 6(토)
 
           // 해당 요일인 경우에만 일정 추가
-          // slot.day는 0(일) ~ 6(토) 순서로 저장됨
-          // actualDayOfWeek도 0(일) ~ 6(토) 순서
-          if (actualDayOfWeek === slot.day) {
-            console.log(`일정 추가: ${day}일 (${['일', '월', '화', '수', '목', '금', '토'][actualDayOfWeek]}) - slot.day: ${slot.day}`);
+          if (dayOfWeek === slot.day) {
             // 로컬 날짜를 직접 포맷팅 (UTC 변환으로 인한 날짜 밀림 방지)
-            const dateString = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth() + 1;
+            const day = currentDate.getDate();
+            const dateString = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
             // 이 요일에 이미 일정이 있는지 확인 (중복 방지)
             const existingTodo = todos.find(t =>
@@ -774,7 +900,11 @@ export function CalendarHomeScreen() {
               t.date === dateString &&
               t.startTime === slot.startTime
             );
-            if (existingTodo) continue;
+            if (existingTodo) {
+              // 다음 주로 이동
+              currentDate.setDate(currentDate.getDate() + 7);
+              continue;
+            }
 
             // 시작 시간과 종료 시간 계산
             const [startHours, startMinutes] = slot.startTime.split(':').map(Number);
@@ -840,6 +970,12 @@ export function CalendarHomeScreen() {
               console.error("시간표 일정 추가 실패:", error);
               failedCount++;
             }
+
+            // 다음 주로 이동
+            currentDate.setDate(currentDate.getDate() + 7);
+          } else {
+            // 다음 날로 이동
+            currentDate.setDate(currentDate.getDate() + 1);
           }
         }
       }
@@ -990,8 +1126,11 @@ export function CalendarHomeScreen() {
     memo?: string;
     location?: string;
     hasNotification?: boolean;
-    alarmTimes?: string[];
-    repeatType?: "none" | "daily" | "weekly" | "monthly" | "yearly";
+    alarmTimes?: string[]; // 구버전 호환
+    notificationReminders?: Array<{ value: number; unit: 'minutes' | 'hours' | 'days' | 'weeks' }>; // 새로운 알림 형식
+    repeatType?: "none" | "daily" | "weekly" | "monthly" | "yearly" | "weekdays" | "weekends" | "custom";
+    repeatEndDate?: string; // 반복 종료 날짜
+    repeatPattern?: any; // 반복 패턴 JSON
     type?: "todo" | "checklist";
     checklistItems?: string[];
     postponeMinutes?: number;
@@ -1108,6 +1247,9 @@ export function CalendarHomeScreen() {
 
         // 날짜 형식 정규화
         const newDateStr = normalizeDate(formData.date);
+        const newEndDateStr = formData.endDate && formData.endDate !== formData.date
+          ? normalizeDate(formData.endDate)
+          : null;
 
         // all_day가 true일 때는 start_time과 end_time을 null로 설정
         const todoData: any = {
@@ -1115,13 +1257,29 @@ export function CalendarHomeScreen() {
           description: formData.memo || "",
           memo: formData.memo || "",
           location: formData.location || "",
-          date: newDateStr, // 날짜는 항상 전송 (사용자가 변경할 수 있도록)
+          date: newDateStr, // 시작 날짜는 항상 전송 (사용자가 변경할 수 있도록)
+          end_date: newEndDateStr || undefined, // 종료 날짜 (기간 수정 가능)
           all_day: formData.isAllDay,
           category: formData.category,
           status: existingTodo?.completed ? 'completed' : 'pending',
           has_notification: formData.hasNotification,
-          notification_times: formData.alarmTimes || [],
+          notification_times: formData.alarmTimes || [], // 구버전 호환
+          notification_reminders: formData.notificationReminders && formData.notificationReminders.length > 0
+            ? formData.notificationReminders.map(r => ({ value: r.value, unit: r.unit }))
+            : [],
           repeat_type: formData.repeatType || "none",
+          repeat_end_date: formData.repeatType === 'custom'
+            ? (formData.customRepeatEndType === 'date' ? formData.customRepeatEndDate :
+              (formData.customRepeatEndType === 'count' ? undefined : formData.repeatEndDate || undefined))
+            : (formData.repeatEndDate || undefined),
+          repeat_pattern: formData.repeatType === 'custom' ? {
+            freq: formData.customRepeatUnit || 'days',
+            interval: formData.customRepeatInterval || 1,
+            days: formData.customRepeatDays || [],
+            endType: formData.customRepeatEndType || 'never',
+            endDate: formData.customRepeatEndType === 'date' ? formData.customRepeatEndDate : undefined,
+            count: formData.customRepeatEndType === 'count' ? formData.customRepeatCount : undefined,
+          } : (formData.repeatPattern || undefined),
           checklist_items: formData.checklistItems.filter(item => item.trim() !== ''),
         };
 
@@ -1150,6 +1308,19 @@ export function CalendarHomeScreen() {
             // 날짜 형식 정규화
             const normalizedDate = normalizeDate(response.data.date || formData.date);
 
+            // 응답에서 종료 날짜 가져오기
+            let normalizedEndDate = newEndDateStr;
+            if (response.data.end_date) {
+              if (response.data.end_date instanceof Date) {
+                const year = response.data.end_date.getFullYear();
+                const month = response.data.end_date.getMonth() + 1;
+                const day = response.data.end_date.getDate();
+                normalizedEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              } else if (typeof response.data.end_date === 'string') {
+                normalizedEndDate = response.data.end_date;
+              }
+            }
+
             const updatedTodo = {
               id: editingTodoId,
               title: formData.title,
@@ -1158,6 +1329,7 @@ export function CalendarHomeScreen() {
               completed: response.data.status === 'completed' || todos.find(t => t.id === editingTodoId)?.completed || false,
               category: formData.category,
               date: normalizedDate,
+              endDate: normalizedEndDate || undefined,  // 종료 날짜 추가
               startTime: formData.startTime,
               endTime: formData.endTime,
               isAllDay: formData.isAllDay,
@@ -1171,17 +1343,154 @@ export function CalendarHomeScreen() {
               source: 'always_plan' as const, // 수정된 일정임을 명시
             };
 
-            setTodos((prev) =>
-              prev.map(t => t.id === editingTodoId ? updatedTodo : t)
-                .sort((a, b) => {
-                  // 날짜와 시간으로 정렬
-                  if (a.date !== b.date) {
-                    return (a.date || '').localeCompare(b.date || '');
+            // 반복 설정이 변경된 경우, 모든 일정을 다시 로드
+            const oldRepeatType = existingTodo?.repeatType || "none";
+            const newRepeatType = formData.repeatType || "none";
+
+            if (oldRepeatType !== newRepeatType || (formData.repeatType && formData.repeatType !== 'none')) {
+              console.log('[일정 수정] 반복 설정 변경됨:', oldRepeatType, '->', newRepeatType, ', 모든 일정 다시 로드');
+              // 잠시 후 todos를 다시 로드 (백엔드에서 반복 일정 생성 완료 후)
+              setTimeout(async () => {
+                try {
+                  const todosResponse = await apiClient.getTodos();
+                  if (todosResponse.data && Array.isArray(todosResponse.data)) {
+                    const formattedTodos = todosResponse.data.map((todo: any) => {
+                      // duration 계산
+                      let duration = 60;
+                      if (todo.start_time && todo.end_time) {
+                        const [startHours, startMinutes] = todo.start_time.split(':').map(Number);
+                        const [endHours, endMinutes] = todo.end_time.split(':').map(Number);
+                        const startTotal = startHours * 60 + startMinutes;
+                        const endTotal = endHours * 60 + endMinutes;
+                        duration = endTotal - startTotal;
+                      }
+
+                      // end_date 파싱
+                      let endDate: string | undefined = undefined;
+                      if (todo.end_date) {
+                        if (todo.end_date instanceof Date) {
+                          const year = todo.end_date.getFullYear();
+                          const month = todo.end_date.getMonth() + 1;
+                          const day = todo.end_date.getDate();
+                          endDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        } else if (typeof todo.end_date === 'string') {
+                          endDate = todo.end_date;
+                        }
+                      }
+
+                      // notification_reminders 파싱
+                      let notificationReminders: Array<{ value: number; unit: 'minutes' | 'hours' | 'days' | 'weeks' }> = [];
+                      if (todo.notification_reminders) {
+                        try {
+                          const parsed = typeof todo.notification_reminders === 'string'
+                            ? JSON.parse(todo.notification_reminders)
+                            : todo.notification_reminders;
+                          if (Array.isArray(parsed)) {
+                            notificationReminders = parsed.map((r: any) => ({
+                              value: Number(r.value) || 30,
+                              unit: r.unit || 'minutes'
+                            }));
+                          }
+                        } catch (e) {
+                          console.error('Failed to parse notification_reminders:', e);
+                        }
+                      }
+
+                      // repeat_end_date 파싱
+                      let repeatEndDate: string | undefined = undefined;
+                      if (todo.repeat_end_date) {
+                        if (todo.repeat_end_date instanceof Date) {
+                          const year = todo.repeat_end_date.getFullYear();
+                          const month = todo.repeat_end_date.getMonth() + 1;
+                          const day = todo.repeat_end_date.getDate();
+                          repeatEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        } else if (typeof todo.repeat_end_date === 'string') {
+                          repeatEndDate = todo.repeat_end_date;
+                        }
+                      }
+
+                      // repeat_pattern 파싱
+                      let repeatPattern: any = undefined;
+                      if (todo.repeat_pattern) {
+                        try {
+                          repeatPattern = typeof todo.repeat_pattern === 'string'
+                            ? JSON.parse(todo.repeat_pattern)
+                            : todo.repeat_pattern;
+                        } catch (e) {
+                          console.error('Failed to parse repeat_pattern:', e);
+                        }
+                      }
+
+                      // family_member_ids 파싱
+                      let memberId: string | undefined;
+                      if (todo.family_member_ids) {
+                        try {
+                          const memberIds = typeof todo.family_member_ids === 'string'
+                            ? JSON.parse(todo.family_member_ids)
+                            : todo.family_member_ids;
+                          if (Array.isArray(memberIds) && memberIds.length > 0) {
+                            memberId = memberIds[0];
+                          }
+                        } catch (e) {
+                          console.error('Failed to parse family_member_ids:', e);
+                        }
+                      }
+
+                      return {
+                        id: todo.id,
+                        title: todo.title || '',
+                        time: todo.start_time || "09:00",
+                        duration: duration > 0 ? duration : 60,
+                        completed: todo.status === 'completed',
+                        category: todo.category || "기타",
+                        date: todo.date ? (typeof todo.date === 'string' ? todo.date : todo.date.split('T')[0]) : undefined,
+                        endDate: endDate,
+                        startTime: todo.start_time,
+                        endTime: todo.end_time,
+                        isAllDay: todo.all_day || false,
+                        memo: todo.memo || "",
+                        location: todo.location || "",
+                        hasNotification: todo.has_notification || false,
+                        alarmTimes: todo.notification_times ? (typeof todo.notification_times === 'string' ? JSON.parse(todo.notification_times) : todo.notification_times) : [],
+                        notificationReminders: notificationReminders,
+                        repeatType: todo.repeat_type || "none",
+                        repeatEndDate: repeatEndDate,
+                        repeatPattern: repeatPattern,
+                        checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
+                        memberId: memberId,
+                        isRoutine: false,
+                        source: 'always_plan' as const,
+                        googleCalendarEventId: todo.google_calendar_event_id || undefined,
+                        bulkSynced: todo.bulk_synced || false,
+                        todoGroupId: todo.todo_group_id || undefined,
+                      };
+                    });
+                    setTodos(formattedTodos);
+                    console.log('[일정 수정] 반복 일정 포함 모든 일정 로드 완료:', formattedTodos.length, '개');
                   }
-                  return a.time.localeCompare(b.time);
-                })
-            );
-            toast.success("일정이 수정되었습니다.");
+                } catch (error) {
+                  console.error('[일정 수정] 반복 일정 로드 실패:', error);
+                }
+              }, 500); // 0.5초 후 다시 로드 (백엔드에서 반복 일정 생성 완료 대기)
+
+              if (formData.repeatType && formData.repeatType !== 'none') {
+                toast.success("일정이 수정되었습니다. 반복 일정이 생성되었습니다.");
+              } else {
+                toast.success("일정이 수정되었습니다.");
+              }
+            } else {
+              setTodos((prev) =>
+                prev.map(t => t.id === editingTodoId ? updatedTodo : t)
+                  .sort((a, b) => {
+                    // 날짜와 시간으로 정렬
+                    if (a.date !== b.date) {
+                      return (a.date || '').localeCompare(b.date || '');
+                    }
+                    return a.time.localeCompare(b.time);
+                  })
+              );
+              toast.success("일정이 수정되었습니다.");
+            }
             setEditingTodoId(null);
           } else {
             console.error("응답 데이터 없음:", response);
@@ -1213,135 +1522,319 @@ export function CalendarHomeScreen() {
 
         // 시작 날짜와 종료 날짜 정규화
         const startDate = normalizeDate(formData.date);
-        const endDate = formData.endDate ? normalizeDate(formData.endDate) : null;
+        const endDate = formData.endDate && formData.endDate !== startDate ? normalizeDate(formData.endDate) : null;
 
-        // 날짜 범위 생성 (시작 날짜부터 종료 날짜까지)
-        const datesToCreate: string[] = [];
-        if (endDate && endDate >= startDate) {
-          // 종료 날짜가 있으면 시작 날짜부터 종료 날짜까지 모든 날짜 생성
-          const start = new Date(startDate);
-          const end = new Date(endDate);
-          const currentDate = new Date(start);
+        // 기간 일정을 하나의 일정으로 생성 (시작날짜/시간에서 종료날짜/시간까지)
+        const todoData: any = {
+          title: formData.title,
+          description: formData.memo || "",
+          memo: formData.memo || "",
+          location: formData.location || "",
+          date: startDate,  // 시작 날짜
+          end_date: endDate,  // 종료 날짜 (기간 일정인 경우)
+          start_time: formData.startTime || null,
+          end_time: formData.endTime || null,
+          all_day: formData.isAllDay,
+          category: formData.category,
+          status: 'pending',
+          has_notification: formData.hasNotification,
+          notification_times: formData.alarmTimes || [], // 구버전 호환
+          notification_reminders: formData.notificationReminders && formData.notificationReminders.length > 0
+            ? formData.notificationReminders.map(r => ({ value: r.value, unit: r.unit }))
+            : [],
+          repeat_type: formData.repeatType || "none",
+          repeat_end_date: formData.repeatType === 'custom'
+            ? (formData.customRepeatEndType === 'date' ? formData.customRepeatEndDate :
+              (formData.customRepeatEndType === 'count' ? undefined : formData.repeatEndDate || null))
+            : (formData.repeatEndDate || null),
+          repeat_pattern: formData.repeatType === 'custom' ? {
+            freq: formData.customRepeatUnit || 'days',
+            interval: formData.customRepeatInterval || 1,
+            days: formData.customRepeatDays || [],
+            endType: formData.customRepeatEndType || 'never',
+            endDate: formData.customRepeatEndType === 'date' ? formData.customRepeatEndDate : undefined,
+            count: formData.customRepeatEndType === 'count' ? formData.customRepeatCount : undefined,
+          } : (formData.repeatPattern || null),
+          checklist_items: formData.checklistItems.filter(item => item.trim() !== ''),
+        };
 
-          while (currentDate <= end) {
-            const year = currentDate.getFullYear();
-            const month = currentDate.getMonth() + 1;
-            const day = currentDate.getDate();
-            datesToCreate.push(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
-            currentDate.setDate(currentDate.getDate() + 1);
-          }
-        } else {
-          // 종료 날짜가 없으면 시작 날짜만
-          datesToCreate.push(startDate);
-        }
+        console.log(`일정 추가: ${startDate}${endDate ? ` ~ ${endDate}` : ''} (하나의 일정으로 생성)`);
+        console.log("일정 추가 데이터:", todoData);
 
-        console.log(`일정 추가: ${datesToCreate.length}개 날짜에 일정 생성 (${startDate}${endDate ? ` ~ ${endDate}` : ''})`);
+        try {
+          const response = await apiClient.createTodo(todoData);
+          console.log("일정 추가 응답:", response);
 
-        // 여러 날짜에 걸친 일정인 경우 같은 그룹 ID 생성
-        const todoGroupId = datesToCreate.length > 1 ? `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}` : undefined;
+          if (response && response.data) {
+            // API 응답에서 날짜 형식 확인 및 변환
+            let todoDate = startDate;
+            if (response.data.date) {
+              if (response.data.date instanceof Date) {
+                const year = response.data.date.getFullYear();
+                const month = response.data.date.getMonth() + 1;
+                const day = response.data.date.getDate();
+                todoDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              } else if (typeof response.data.date === 'string') {
+                todoDate = response.data.date;
+              }
+            }
 
-        // 각 날짜마다 Todo 생성
-        const createdTodos: any[] = [];
-        let successCount = 0;
-        let failCount = 0;
+            let todoEndDate: string | undefined = endDate || undefined;
+            if (response.data.end_date) {
+              if (response.data.end_date instanceof Date) {
+                const year = response.data.end_date.getFullYear();
+                const month = response.data.end_date.getMonth() + 1;
+                const day = response.data.end_date.getDate();
+                todoEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              } else if (typeof response.data.end_date === 'string') {
+                todoEndDate = response.data.end_date;
+              }
+            } else {
+              // API 응답에 end_date가 없으면 null로 설정
+              todoEndDate = undefined;
+            }
 
-        for (const dateStr of datesToCreate) {
-          try {
-            const todoData: any = {
+            // notification_reminders 파싱 (API 응답에서 받은 데이터 사용)
+            let notificationReminders: Array<{ value: number; unit: 'minutes' | 'hours' | 'days' | 'weeks' }> = [];
+            if (response.data.notification_reminders) {
+              try {
+                const parsed = typeof response.data.notification_reminders === 'string'
+                  ? JSON.parse(response.data.notification_reminders)
+                  : response.data.notification_reminders;
+                if (Array.isArray(parsed)) {
+                  notificationReminders = parsed.map((r: any) => ({
+                    value: Number(r.value) || 30,
+                    unit: r.unit || 'minutes'
+                  }));
+                }
+              } catch (e) {
+                console.error('Failed to parse notification_reminders:', e);
+                // 폼 데이터에서 가져오기
+                notificationReminders = formData.notificationReminders || [];
+              }
+            } else {
+              // API 응답에 없으면 폼 데이터에서 가져오기
+              notificationReminders = formData.notificationReminders || [];
+            }
+
+            // repeat_end_date 파싱
+            let repeatEndDate: string | undefined = undefined;
+            if (response.data.repeat_end_date) {
+              if (response.data.repeat_end_date instanceof Date) {
+                const year = response.data.repeat_end_date.getFullYear();
+                const month = response.data.repeat_end_date.getMonth() + 1;
+                const day = response.data.repeat_end_date.getDate();
+                repeatEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              } else if (typeof response.data.repeat_end_date === 'string') {
+                repeatEndDate = response.data.repeat_end_date;
+              }
+            } else {
+              repeatEndDate = formData.repeatEndDate;
+            }
+
+            // repeat_pattern 파싱
+            let repeatPattern: any = undefined;
+            if (response.data.repeat_pattern) {
+              try {
+                repeatPattern = typeof response.data.repeat_pattern === 'string'
+                  ? JSON.parse(response.data.repeat_pattern)
+                  : response.data.repeat_pattern;
+              } catch (e) {
+                console.error('Failed to parse repeat_pattern:', e);
+                repeatPattern = formData.repeatPattern;
+              }
+            } else {
+              repeatPattern = formData.repeatPattern;
+            }
+
+            const newTodo = {
+              id: response.data.id,
               title: formData.title,
-              description: formData.memo || "",
+              time: formData.startTime || "09:00",
+              duration: duration > 0 ? duration : 60,
+              completed: false,
+              category: formData.category,
+              date: todoDate,
+              endDate: todoEndDate,  // 종료 날짜 추가
+              startTime: formData.startTime,
+              endTime: formData.endTime,
+              isAllDay: formData.isAllDay,
               memo: formData.memo || "",
               location: formData.location || "",
-              date: dateStr,
-              start_time: formData.startTime,
-              end_time: formData.endTime,
-              all_day: formData.isAllDay,
-              category: formData.category,
-              status: 'pending',
-              has_notification: formData.hasNotification,
-              notification_times: formData.alarmTimes || [],
-              repeat_type: formData.repeatType || "none",
-              checklist_items: formData.checklistItems.filter(item => item.trim() !== ''),
+              hasNotification: formData.hasNotification,
+              alarmTimes: formData.alarmTimes,
+              notificationReminders: notificationReminders, // 새로운 알림 형식
+              repeatType: formData.repeatType,
+              repeatEndDate: repeatEndDate, // 반복 종료 날짜
+              repeatPattern: repeatPattern, // 반복 패턴
+              checklistItems: formData.checklistItems.filter(item => item.trim() !== ''),
+              postponeToNextDay: formData.postponeToNextDay,
+              isRoutine: false,
+              source: 'always_plan' as const,
+              todoGroupId: response.data.todo_group_id, // 그룹 ID 저장
             };
 
-            // 여러 날짜에 걸친 일정인 경우 그룹 ID 추가
-            if (todoGroupId) {
-              todoData.todo_group_id = todoGroupId;
-            }
-
-            console.log(`일정 추가 데이터 (${dateStr}):`, todoData);
-
-            const response = await apiClient.createTodo(todoData);
-            console.log(`일정 추가 응답 (${dateStr}):`, response);
-
-            if (response && response.data) {
-              // API 응답에서 날짜 형식 확인 및 변환
-              let todoDate = dateStr;
-              if (response.data.date) {
-                if (response.data.date instanceof Date) {
-                  const year = response.data.date.getFullYear();
-                  const month = response.data.date.getMonth() + 1;
-                  const day = response.data.date.getDate();
-                  todoDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                } else if (typeof response.data.date === 'string') {
-                  todoDate = response.data.date;
+            // 생성된 Todo를 상태에 추가
+            console.log('[일정 추가] newTodo 객체:', newTodo);
+            setTodos((prev) => {
+              const updated = [...prev, newTodo];
+              // 날짜와 시간으로 정렬
+              const sorted = updated.sort((a, b) => {
+                if (a.date !== b.date) {
+                  return (a.date || '').localeCompare(b.date || '');
                 }
-              }
-
-              const newTodo = {
-                id: response.data.id,
-                title: formData.title,
-                time: formData.startTime || "09:00",
-                duration: duration > 0 ? duration : 60,
-                completed: false,
-                category: formData.category,
-                date: todoDate,
-                startTime: formData.startTime,
-                endTime: formData.endTime,
-                isAllDay: formData.isAllDay,
-                memo: formData.memo || "",
-                location: formData.location || "",
-                hasNotification: formData.hasNotification,
-                alarmTimes: formData.alarmTimes,
-                repeatType: formData.repeatType,
-                checklistItems: formData.checklistItems.filter(item => item.trim() !== ''),
-                postponeToNextDay: formData.postponeToNextDay,
-                isRoutine: false,
-                source: 'always_plan' as const,
-                todoGroupId: response.data.todo_group_id || todoGroupId, // 그룹 ID 저장
-              };
-
-              createdTodos.push(newTodo);
-              successCount++;
-            } else {
-              failCount++;
-            }
-          } catch (error: any) {
-            console.error(`일정 추가 실패 (${dateStr}):`, error);
-            failCount++;
-          }
-        }
-
-        // 생성된 모든 Todo를 상태에 추가
-        if (createdTodos.length > 0) {
-          setTodos((prev) => {
-            const updated = [...prev, ...createdTodos];
-            // 날짜와 시간으로 정렬
-            return updated.sort((a, b) => {
-              if (a.date !== b.date) {
-                return (a.date || '').localeCompare(b.date || '');
-              }
-              return a.time.localeCompare(b.time);
+                return a.time.localeCompare(b.time);
+              });
+              console.log('[일정 추가] 상태 업데이트 후 todos 개수:', sorted.length);
+              console.log('[일정 추가] 새로 추가된 일정:', sorted.find(t => t.id === newTodo.id));
+              return sorted;
             });
-          });
 
-          if (createdTodos.length > 1) {
-            toast.success(`${createdTodos.length}개 날짜에 일정이 생성되었습니다.`);
+            // 반복 일정이 생성된 경우, 모든 일정을 다시 로드
+            if (formData.repeatType && formData.repeatType !== 'none') {
+              console.log('[일정 추가] 반복 일정이 생성되었으므로 모든 일정을 다시 로드합니다.');
+              // 잠시 후 todos를 다시 로드 (백엔드에서 반복 일정 생성 완료 후)
+              setTimeout(async () => {
+                try {
+                  const todosResponse = await apiClient.getTodos();
+                  if (todosResponse.data && Array.isArray(todosResponse.data)) {
+                    const formattedTodos = todosResponse.data.map((todo: any) => {
+                      // duration 계산
+                      let duration = 60;
+                      if (todo.start_time && todo.end_time) {
+                        const [startHours, startMinutes] = todo.start_time.split(':').map(Number);
+                        const [endHours, endMinutes] = todo.end_time.split(':').map(Number);
+                        const startTotal = startHours * 60 + startMinutes;
+                        const endTotal = endHours * 60 + endMinutes;
+                        duration = endTotal - startTotal;
+                      }
+
+                      // end_date 파싱
+                      let endDate: string | undefined = undefined;
+                      if (todo.end_date) {
+                        if (todo.end_date instanceof Date) {
+                          const year = todo.end_date.getFullYear();
+                          const month = todo.end_date.getMonth() + 1;
+                          const day = todo.end_date.getDate();
+                          endDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        } else if (typeof todo.end_date === 'string') {
+                          endDate = todo.end_date;
+                        }
+                      }
+
+                      // notification_reminders 파싱
+                      let notificationReminders: Array<{ value: number; unit: 'minutes' | 'hours' | 'days' | 'weeks' }> = [];
+                      if (todo.notification_reminders) {
+                        try {
+                          const parsed = typeof todo.notification_reminders === 'string'
+                            ? JSON.parse(todo.notification_reminders)
+                            : todo.notification_reminders;
+                          if (Array.isArray(parsed)) {
+                            notificationReminders = parsed.map((r: any) => ({
+                              value: Number(r.value) || 30,
+                              unit: r.unit || 'minutes'
+                            }));
+                          }
+                        } catch (e) {
+                          console.error('Failed to parse notification_reminders:', e);
+                        }
+                      }
+
+                      // repeat_end_date 파싱
+                      let repeatEndDate: string | undefined = undefined;
+                      if (todo.repeat_end_date) {
+                        if (todo.repeat_end_date instanceof Date) {
+                          const year = todo.repeat_end_date.getFullYear();
+                          const month = todo.repeat_end_date.getMonth() + 1;
+                          const day = todo.repeat_end_date.getDate();
+                          repeatEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        } else if (typeof todo.repeat_end_date === 'string') {
+                          repeatEndDate = todo.repeat_end_date;
+                        }
+                      }
+
+                      // repeat_pattern 파싱
+                      let repeatPattern: any = undefined;
+                      if (todo.repeat_pattern) {
+                        try {
+                          repeatPattern = typeof todo.repeat_pattern === 'string'
+                            ? JSON.parse(todo.repeat_pattern)
+                            : todo.repeat_pattern;
+                        } catch (e) {
+                          console.error('Failed to parse repeat_pattern:', e);
+                        }
+                      }
+
+                      // family_member_ids 파싱
+                      let memberId: string | undefined;
+                      if (todo.family_member_ids) {
+                        try {
+                          const memberIds = typeof todo.family_member_ids === 'string'
+                            ? JSON.parse(todo.family_member_ids)
+                            : todo.family_member_ids;
+                          if (Array.isArray(memberIds) && memberIds.length > 0) {
+                            memberId = memberIds[0];
+                          }
+                        } catch (e) {
+                          console.error('Failed to parse family_member_ids:', e);
+                        }
+                      }
+
+                      return {
+                        id: todo.id,
+                        title: todo.title || '',
+                        time: todo.start_time || "09:00",
+                        duration: duration > 0 ? duration : 60,
+                        completed: todo.status === 'completed',
+                        category: todo.category || "기타",
+                        date: todo.date ? (typeof todo.date === 'string' ? todo.date : todo.date.split('T')[0]) : undefined,
+                        endDate: endDate,
+                        startTime: todo.start_time,
+                        endTime: todo.end_time,
+                        isAllDay: todo.all_day || false,
+                        memo: todo.memo || "",
+                        location: todo.location || "",
+                        hasNotification: todo.has_notification || false,
+                        alarmTimes: todo.notification_times ? (typeof todo.notification_times === 'string' ? JSON.parse(todo.notification_times) : todo.notification_times) : [],
+                        notificationReminders: notificationReminders,
+                        repeatType: todo.repeat_type || "none",
+                        repeatEndDate: repeatEndDate,
+                        repeatPattern: repeatPattern,
+                        checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
+                        memberId: memberId,
+                        isRoutine: false,
+                        source: 'always_plan' as const,
+                        googleCalendarEventId: todo.google_calendar_event_id || undefined,
+                        bulkSynced: todo.bulk_synced || false,
+                        todoGroupId: todo.todo_group_id || undefined,
+                      };
+                    });
+                    setTodos(formattedTodos);
+                    console.log('[일정 추가] 반복 일정 포함 모든 일정 로드 완료:', formattedTodos.length, '개');
+                  }
+                } catch (error) {
+                  console.error('[일정 추가] 반복 일정 로드 실패:', error);
+                }
+              }, 500); // 0.5초 후 다시 로드 (백엔드에서 반복 일정 생성 완료 대기)
+
+              if (endDate) {
+                toast.success(`일정이 생성되었습니다. (${startDate} ~ ${endDate})`);
+              } else {
+                toast.success("일정이 추가되었습니다. 반복 일정이 생성되었습니다.");
+              }
+            } else {
+              if (endDate) {
+                toast.success(`일정이 생성되었습니다. (${startDate} ~ ${endDate})`);
+              } else {
+                toast.success("일정이 추가되었습니다.");
+              }
+            }
           } else {
-            toast.success("일정이 추가되었습니다.");
+            toast.error("일정 추가에 실패했습니다.");
           }
-        } else {
-          toast.error("일정 추가에 실패했습니다.");
+        } catch (error: any) {
+          console.error("일정 추가 실패:", error);
+          toast.error(`일정 추가에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
         }
 
         // 모달 닫기
@@ -1386,7 +1879,7 @@ export function CalendarHomeScreen() {
     try {
       console.log("일정 삭제 시작:", id);
 
-      // 삭제할 일정 찾기
+      // 삭제할 일정 찾기 (최신 상태에서 찾기)
       const todoToDelete = todos.find(t => t.id === id);
       if (!todoToDelete) {
         console.warn("삭제할 일정을 찾을 수 없습니다:", id);
@@ -1398,6 +1891,7 @@ export function CalendarHomeScreen() {
       if (todoToDelete.source === 'google_calendar' || todoToDelete.googleCalendarEventId) {
         const eventId = todoToDelete.googleCalendarEventId || todoToDelete.id;
         console.log("Google Calendar 이벤트 삭제 시도:", eventId);
+
         try {
           // Google Calendar 이벤트 삭제를 위한 API 호출
           const response = await apiClient.deleteGoogleCalendarEvent(eventId);
@@ -1405,11 +1899,7 @@ export function CalendarHomeScreen() {
 
           if (response && response.data?.success) {
             // 프론트엔드에서 제거
-            setTodos((prev) => {
-              const filtered = prev.filter((todo) => todo.id !== id);
-              console.log("프론트엔드에서 Google Calendar 이벤트 제거 완료");
-              return filtered;
-            });
+            setTodos((prev) => prev.filter((todo) => todo.id !== id));
             toast.success("Google Calendar 이벤트가 삭제되었습니다.");
           } else {
             throw new Error("삭제 응답이 성공이 아닙니다.");
@@ -1418,16 +1908,6 @@ export function CalendarHomeScreen() {
         } catch (error: any) {
           console.error("Google Calendar 이벤트 삭제 실패:", error);
           toast.error(`Google Calendar 이벤트 삭제에 실패했습니다: ${error.response?.data?.detail || error.message}`);
-          // 삭제 실패 시 프론트엔드 상태 복원
-          setTodos((prev) => {
-            const restored = [...prev, todoToDelete];
-            return restored.sort((a, b) => {
-              if (a.date !== b.date) {
-                return (a.date || '').localeCompare(b.date || '');
-              }
-              return a.time.localeCompare(b.time);
-            });
-          });
           return;
         }
       }
@@ -1445,56 +1925,48 @@ export function CalendarHomeScreen() {
         todosToDelete.push(todoToDelete);
       }
 
-      // 먼저 프론트엔드 상태에서 제거 (즉시 UI 업데이트)
-      setTodos((prev) => {
-        const filtered = prev.filter((todo) => !todosToDelete.some(td => td.id === todo.id));
-        console.log(`프론트엔드에서 일정 ${todosToDelete.length}개 제거 완료, 남은 일정 수:`, filtered.length);
-        return filtered;
-      });
-
       // 백엔드에 삭제 요청 (첫 번째 일정 ID로 삭제하면 백엔드에서 같은 그룹의 모든 일정 삭제)
-      const response = await apiClient.deleteTodo(id);
-      console.log("일정 삭제 응답:", response);
-      console.log("일정 삭제 응답 상태:", response?.status);
+      try {
+        const response = await apiClient.deleteTodo(id);
+        console.log("일정 삭제 응답:", response);
+        console.log("일정 삭제 응답 상태:", response?.status);
 
-      // API 호출 성공 여부 확인 (204 No Content는 응답 본문이 없을 수 있음)
-      if (response && (response.status === 204 || response.status === 200)) {
-        console.log("백엔드 삭제 성공 확인됨");
-        if (todosToDelete.length > 1) {
-          toast.success(`${todosToDelete.length}개 날짜의 일정이 모두 삭제되었습니다.`);
+        // API 호출 성공 여부 확인 (204 No Content는 응답 본문이 없을 수 있음)
+        if (response && (response.status === 204 || response.status === 200)) {
+          // 프론트엔드 상태에서 제거 (성공 후에만 제거)
+          setTodos((prev) => {
+            const filtered = prev.filter((todo) => !todosToDelete.some(td => td.id === todo.id));
+            console.log(`프론트엔드에서 일정 ${todosToDelete.length}개 제거 완료, 남은 일정 수:`, filtered.length);
+            return filtered;
+          });
+
+          console.log("백엔드 삭제 성공 확인됨");
+          if (todosToDelete.length > 1) {
+            toast.success(`${todosToDelete.length}개 날짜의 일정이 모두 삭제되었습니다.`);
+          } else {
+            toast.success("일정이 삭제되었습니다.");
+          }
         } else {
-          toast.success("일정이 삭제되었습니다.");
+          console.error("일정 삭제 실패: 예상치 못한 응답", response);
+          toast.error("일정 삭제에 실패했습니다. 응답을 확인할 수 없습니다.");
         }
-      } else {
-        console.error("일정 삭제 실패: 예상치 못한 응답", response);
-        toast.error("일정 삭제에 실패했습니다. 응답을 확인할 수 없습니다.");
+      } catch (error: any) {
+        console.error("일정 삭제 실패:", error);
+        console.error("에러 상세:", error.response?.data || error.message);
+        console.error("에러 상태:", error.response?.status);
+
+        // 404 에러는 이미 삭제된 것으로 간주하고 프론트엔드에서 제거
+        if (error.response?.status === 404) {
+          console.log("일정이 이미 삭제되었거나 존재하지 않음. 프론트엔드에서 제거합니다.");
+          setTodos((prev) => prev.filter((todo) => !todosToDelete.some(td => td.id === todo.id)));
+          toast.success("일정이 삭제되었습니다.");
+        } else {
+          toast.error(`일정 삭제에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
+        }
       }
     } catch (error: any) {
-      console.error("일정 삭제 실패:", error);
-      console.error("에러 상세:", error.response?.data || error.message);
-      console.error("에러 상태:", error.response?.status);
-
-      // 404 에러는 이미 삭제된 것으로 간주하고 프론트엔드에서 제거
-      if (error.response?.status === 404) {
-        console.log("일정이 이미 삭제되었거나 존재하지 않음. 프론트엔드에서 제거합니다.");
-        setTodos((prev) => prev.filter((todo) => todo.id !== id));
-        toast.success("일정이 삭제되었습니다.");
-      } else {
-        // 삭제 실패 시 프론트엔드 상태 복원
-        const todoToRestore = todos.find(t => t.id === id);
-        if (todoToRestore) {
-          setTodos((prev) => {
-            const restored = [...prev, todoToRestore];
-            return restored.sort((a, b) => {
-              if (a.date !== b.date) {
-                return (a.date || '').localeCompare(b.date || '');
-              }
-              return a.time.localeCompare(b.time);
-            });
-          });
-        }
-        toast.error(`일정 삭제에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
-      }
+      console.error("일정 삭제 처리 중 오류:", error);
+      toast.error(`일정 삭제 중 오류가 발생했습니다: ${error.message || "알 수 없는 오류"}`);
     }
   };
 
@@ -1660,48 +2132,153 @@ export function CalendarHomeScreen() {
     console.log("New Work Contact:", contact);
   };
 
-  const handleTodoUpdate = (id: string, updates: { time: string; duration: number }) => {
+  const handleTodoUpdate = async (id: string, updates: { time: string; duration: number }) => {
+    // duration으로부터 endTime 계산
+    const [startHours, startMinutes] = updates.time.split(":").map(Number);
+    const startTotalMinutes = startHours * 60 + startMinutes;
+    const endTotalMinutes = startTotalMinutes + updates.duration;
+    const endHours = Math.floor(endTotalMinutes / 60) % 24;
+    const endMins = endTotalMinutes % 60;
+    const endTime = `${String(endHours).padStart(2, "0")}:${String(endMins).padStart(2, "0")}`;
+
+    // 먼저 Todo를 찾아서 업데이트 가능한지 확인
+    const updatedTodo = todos.find(t => t.id === id);
+    if (!updatedTodo) {
+      console.warn('업데이트할 일정을 찾을 수 없습니다:', id);
+      return;
+    }
+
+    // 프론트엔드 상태 먼저 업데이트 (즉시 반영)
     setTodos((prev) => {
-      // 1. Check if it's an existing Todo
-      const existingIndex = prev.findIndex(t => t.id === id);
-      if (existingIndex !== -1) {
-        return prev.map((todo) =>
-          todo.id === id ? { ...todo, ...updates } : todo
-        );
-      }
+      return prev.map((todo) =>
+        todo.id === id
+          ? {
+            ...todo,
+            time: updates.time,
+            startTime: updates.time,
+            endTime: endTime,
+            duration: updates.duration
+          }
+          : todo
+      );
+    });
 
-      // 2. If not found, check if it's a Routine Instance
-      if (id.startsWith('routine-')) {
-        const parts = id.split('-');
-        // Format: routine-{id}-{yyyy}-{mm}-{dd}
-        const routineId = parts[1];
-        const dateStr = parts.slice(2).join('-');
+    // 백엔드에 저장 - Google Calendar 이벤트나 Routine 인스턴스는 제외
+    if (
+      updatedTodo.id &&
+      !updatedTodo.id.startsWith('routine-') &&
+      updatedTodo.source !== 'google_calendar' &&
+      !updatedTodo.googleCalendarEventId
+    ) {
+      // UUID 형식인지 확인 (36자 문자열: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(updatedTodo.id);
 
-        const routine = routines.find(r => r.id === routineId);
+      if (isUUID) {
+        // 실제 DB의 Todo ID인 경우에만 백엔드 업데이트
+        try {
+          console.log('[일정 시간 업데이트] 백엔드에 저장:', {
+            id: updatedTodo.id,
+            start_time: updates.time,
+            end_time: endTime
+          });
 
-        if (routine) {
-          // Create a new "Exception" Todo
-          const newExceptionTodo: TodoItem = {
-            id: id, // Maintain the same ID to shadow the routine instance
-            title: routine.name,
-            time: updates.time, // New time
-            duration: updates.duration, // New duration
-            completed: false,
-            category: routine.category || "기타",
-            date: dateStr,
-            memberId: routine.memberId,
-            isRoutine: true, // Mark as detached routine
-            routineId: routine.id,
-            memo: routine.memo,
+          const updateData = {
+            start_time: updates.time,
+            end_time: endTime,
+            // duration은 계산된 값이므로 별도로 전달하지 않음
           };
 
-          return [...prev, newExceptionTodo];
-        }
-      }
+          console.log('[일정 시간 업데이트] 백엔드 API 호출:', {
+            id: updatedTodo.id,
+            data: updateData
+          });
 
-      return prev;
-    });
-    toast.success("일정 시간이 변경되었습니다.");
+          const response = await apiClient.updateTodo(updatedTodo.id, updateData);
+
+          console.log('[일정 시간 업데이트] 백엔드 응답:', response.data);
+
+          console.log('[일정 시간 업데이트] 백엔드 저장 성공');
+          toast.success("일정 시간이 변경되었습니다.");
+        } catch (error: any) {
+          console.error('일정 시간 업데이트 실패:', error);
+
+          // 에러 발생 시 프론트엔드 상태를 원래대로 되돌림
+          setTodos((prev) => {
+            return prev.map((todo) =>
+              todo.id === id
+                ? {
+                  ...todo,
+                  time: updatedTodo.time || updatedTodo.startTime || "09:00",
+                  startTime: updatedTodo.startTime,
+                  endTime: updatedTodo.endTime,
+                  duration: updatedTodo.duration || 60
+                }
+                : todo
+            );
+          });
+
+          // 404 에러는 Google Calendar 이벤트 등 실제 DB에 없는 경우이므로 조용히 처리
+          if (error.response?.status !== 404) {
+            toast.error('일정 시간 업데이트에 실패했습니다.');
+          }
+        }
+      } else {
+        // UUID가 아닌 경우 (예: routine-, google_ 등) 프론트엔드 상태만 업데이트
+        console.log('[일정 시간 업데이트] 프론트엔드만 업데이트 (UUID 아님):', updatedTodo.id);
+        toast.success("일정 시간이 변경되었습니다.");
+      }
+    } else {
+      // Google Calendar 이벤트나 Routine 인스턴스는 프론트엔드 상태만 업데이트
+      console.log('[일정 시간 업데이트] 프론트엔드만 업데이트 (Google Calendar/Routine):', id);
+      toast.success("일정 시간이 변경되었습니다.");
+    }
+
+    // Routine 인스턴스 처리
+    if (id.startsWith('routine-')) {
+      const parts = id.split('-');
+      // Format: routine-{id}-{yyyy}-{mm}-{dd}
+      const routineId = parts[1];
+      const dateStr = parts.slice(2).join('-');
+
+      const routine = routines.find(r => r.id === routineId);
+
+      if (routine) {
+        // Create a new "Exception" Todo
+        setTodos((prev) => {
+          const existingException = prev.find(t => t.id === id);
+          if (existingException) {
+            return prev.map((todo) =>
+              todo.id === id
+                ? {
+                  ...todo,
+                  time: updates.time,
+                  startTime: updates.time,
+                  endTime: endTime,
+                  duration: updates.duration
+                }
+                : todo
+            );
+          } else {
+            const newExceptionTodo: TodoItem = {
+              id: id, // Maintain the same ID to shadow the routine instance
+              title: routine.name,
+              time: updates.time, // New time
+              startTime: updates.time,
+              endTime: endTime,
+              duration: updates.duration, // New duration
+              completed: false,
+              category: routine.category || "기타",
+              date: dateStr,
+              memberId: routine.memberId,
+              isRoutine: true, // Mark as detached routine
+              routineId: routine.id,
+              memo: routine.memo,
+            };
+            return [...prev, newExceptionTodo];
+          }
+        });
+      }
+    }
   };
 
   // STT/OCR로 추출된 텍스트 및 일정 정보 상태
@@ -1743,14 +2320,31 @@ export function CalendarHomeScreen() {
     const month = targetDate.getMonth() + 1;
     const day = targetDate.getDate();
     const dateString = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const currentDateObj = new Date(dateString);
+    currentDateObj.setHours(0, 0, 0, 0);
 
     // Regular Todos만 반환 (시간표는 제외)
-    // date 필드가 정확히 일치하는 것만 반환
+    // 기간 일정인 경우 시작일부터 종료일까지 모든 날짜에 표시
     const regularTodos = todos.filter(t => {
       if (t.isRoutine) return false;
-      // date가 정확히 일치하는 경우
-      const matches = t.date === dateString;
-      return matches;
+      if (!t.date) return false;
+
+      // 시작일과 동일한 경우
+      if (t.date === dateString) return true;
+
+      // 기간 일정인 경우: 시작일과 종료일 사이에 포함되는지 확인
+      if (t.endDate && t.endDate !== t.date) {
+        const startDate = new Date(t.date);
+        const endDate = new Date(t.endDate);
+
+        // 날짜 비교 (시간 제외)
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(0, 0, 0, 0);
+
+        return currentDateObj >= startDate && currentDateObj <= endDate;
+      }
+
+      return false;
     });
 
     return regularTodos.sort((a, b) => a.time.localeCompare(b.time));
@@ -2192,7 +2786,31 @@ export function CalendarHomeScreen() {
                       일정
                     </h3>
                     <div className="space-y-2">
-                      {(selectedDate ? todos.filter(t => t.date === selectedDate) : displayTodos).map((todo) => (
+                      {(selectedDate ? (() => {
+                        // 선택된 날짜의 일정 필터링 (기간 일정 포함)
+                        const selectedDateObj = new Date(selectedDate);
+                        selectedDateObj.setHours(0, 0, 0, 0);
+
+                        return todos.filter(t => {
+                          if (t.isRoutine || !t.date) return false;
+
+                          // 시작일과 동일한 경우
+                          if (t.date === selectedDate) return true;
+
+                          // 기간 일정인 경우: 시작일과 종료일 사이에 포함되는지 확인
+                          if (t.endDate && t.endDate !== t.date) {
+                            const startDate = new Date(t.date);
+                            const endDate = new Date(t.endDate);
+
+                            startDate.setHours(0, 0, 0, 0);
+                            endDate.setHours(0, 0, 0, 0);
+
+                            return selectedDateObj >= startDate && selectedDateObj <= endDate;
+                          }
+
+                          return false;
+                        }).sort((a, b) => a.time.localeCompare(b.time));
+                      })() : displayTodos).map((todo) => (
                         <div
                           key={todo.id}
                           className={`${getCategoryColor(todo.category)} border-l-4 rounded-lg p-3 cursor-pointer hover:shadow-sm transition-all`}
@@ -2226,7 +2844,13 @@ export function CalendarHomeScreen() {
                               </div>
                               <div className="flex items-center gap-2 mt-1 ml-6">
                                 <span className="text-xs text-[#6B7280]">
-                                  {todo.time} • {todo.duration}분
+                                  {todo.endDate && todo.endDate !== todo.date
+                                    ? `${todo.date} ~ ${todo.endDate}`
+                                    : todo.startTime && todo.endTime
+                                      ? `${todo.startTime} ~ ${todo.endTime}`
+                                      : todo.time
+                                        ? `${todo.time} • ${formatDuration(todo.duration || 0)}`
+                                        : ''}
                                 </span>
                                 <span className="text-xs text-[#9CA3AF] bg-white px-2 py-0.5 rounded-full">
                                   {todo.category}
@@ -2312,7 +2936,13 @@ export function CalendarHomeScreen() {
                           </div>
                           <div className="flex items-center gap-2 mt-2 ml-7">
                             <span className="text-xs text-[#6B7280]">
-                              {todo.time} • {todo.duration}분
+                              {todo.endDate && todo.endDate !== todo.date
+                                ? `${todo.date} ~ ${todo.endDate}`
+                                : todo.startTime && todo.endTime
+                                  ? `${todo.startTime} ~ ${todo.endTime}`
+                                  : todo.time
+                                    ? `${todo.time} • ${formatDuration(todo.duration || 0)}`
+                                    : ''}
                             </span>
                             <span className="text-xs text-[#9CA3AF] bg-white px-2 py-0.5 rounded-full">
                               {todo.category}
@@ -2393,11 +3023,15 @@ export function CalendarHomeScreen() {
                     <h4 className="font-medium text-[#1F2937] mb-4 text-lg">{todo.title}</h4>
 
                     <div className="space-y-3">
-                      {/* 날짜 */}
+                      {/* 날짜 - 기간 표시 */}
                       {todo.date && (
                         <div className="flex items-center gap-3 text-sm text-[#6B7280]">
                           <Calendar size={18} className="text-[#9CA3AF]" />
-                          <span>{new Date(todo.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}</span>
+                          <span>
+                            {todo.endDate && todo.endDate !== todo.date
+                              ? `${new Date(todo.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })} ~ ${new Date(todo.endDate).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })}`
+                              : new Date(todo.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}
+                          </span>
                         </div>
                       )}
 
@@ -2412,7 +3046,7 @@ export function CalendarHomeScreen() {
                               <span>
                                 {todo.startTime || todo.time} ~ {todo.endTime || (todo.duration ? `${Math.floor(todo.duration / 60)}:${String(todo.duration % 60).padStart(2, '0')}` : '')}
                               </span>
-                              {todo.duration && <span className="text-xs text-[#9CA3AF]">({todo.duration}분)</span>}
+                              {todo.duration && <span className="text-xs text-[#9CA3AF]">({formatDuration(todo.duration)})</span>}
                             </>
                           )}
                         </div>

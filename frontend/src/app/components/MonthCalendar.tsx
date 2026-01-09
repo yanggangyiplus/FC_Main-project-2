@@ -11,6 +11,7 @@ interface MonthCalendarProps {
     completed: boolean;
     category: string;
     date?: string;
+    endDate?: string; // 종료 날짜 (기간 일정)
   }>;
   routines?: RoutineItem[]; // Added routines prop
   selectedDate?: string | null; // 선택된 날짜
@@ -51,10 +52,31 @@ export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect
     const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     const dateObj = new Date(year, month, day);
     const dayOfWeek = dateObj.getDay();
+    const currentDateObj = new Date(dateStr);
 
-    // 1. Todos
+    // 1. Todos - 기간 일정인 경우 시작일부터 종료일까지 모든 날짜에 표시
     const dayTodos = todos
-      .filter((todo) => todo.date === dateStr)
+      .filter((todo) => {
+        if (!todo.date) return false;
+        
+        // 시작일과 동일한 경우
+        if (todo.date === dateStr) return true;
+        
+        // 기간 일정인 경우: 시작일과 종료일 사이에 포함되는지 확인
+        if (todo.endDate && todo.endDate !== todo.date) {
+          const startDate = new Date(todo.date);
+          const endDate = new Date(todo.endDate);
+          
+          // 날짜 비교 (시간 제외)
+          startDate.setHours(0, 0, 0, 0);
+          endDate.setHours(0, 0, 0, 0);
+          currentDateObj.setHours(0, 0, 0, 0);
+          
+          return currentDateObj >= startDate && currentDateObj <= endDate;
+        }
+        
+        return false;
+      })
       .map(t => ({ title: t.title, type: 'todo' })); // You might want color from category here if available
 
     // 시간표는 캘린더에 표시하지 않음 (체크박스로 선택했을 때만 일정으로 추가됨)

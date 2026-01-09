@@ -1,4 +1,5 @@
 import { X, Clock, CheckCircle2 } from "lucide-react";
+import { formatDuration } from "@/utils/formatDuration";
 
 interface NotificationPanelProps {
   isOpen: boolean;
@@ -166,7 +167,7 @@ export function NotificationPanel({ isOpen, onClose, todos }: NotificationPanelP
                             {todo.time}
                           </span>
                           <span className="text-[#D1D5DB]">•</span>
-                          <span className="text-[#9CA3AF]">{todo.duration}분</span>
+                          <span className="text-[#9CA3AF]">{formatDuration(todo.duration)}</span>
                         </div>
 
                         {timeStatus === "now" && !todo.completed && (

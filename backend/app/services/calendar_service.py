@@ -5,7 +5,7 @@ Google Calendar API 서비스
 import json
 import logging
 from typing import Optional, Dict, List, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -130,9 +130,13 @@ class GoogleCalendarService:
         start_datetime: datetime = None,
         end_datetime: datetime = None,
         location: str = "",
-        all_day: bool = False
+        all_day: bool = False,
+        notification_reminders: List[Dict[str, Any]] = None,
+        repeat_type: str = None,
+        repeat_pattern: Dict[str, Any] = None,
+        repeat_end_date: date = None
     ) -> Optional[Dict[str, Any]]:
-        """Google Calendar에 이벤트 생성"""
+        """Google Calendar에 이벤트 생성 (알림 및 반복 정보 포함)"""
         try:
             credentials = GoogleCalendarService.get_credentials_from_token(token_json)
             if not credentials:
@@ -156,14 +160,23 @@ class GoogleCalendarService:
             
             if all_day:
                 # 종일 이벤트
+                # end_datetime이 전달되면 사용, 없으면 start_datetime + 1일
+                # Google Calendar는 end date를 exclusive로 저장하므로, inclusive end_date를 전달받으면 +1일 해야 함
+                if end_datetime:
+                    end_date_for_calendar = end_datetime
+                    logger.info(f"[CREATE_EVENT] 종일 이벤트 - start: {start_datetime.date()}, end_datetime 전달값: {end_datetime.date()}, 최종 end: {end_date_for_calendar.date()}")
+                else:
+                    end_date_for_calendar = start_datetime + timedelta(days=1)
+                    logger.info(f"[CREATE_EVENT] 종일 이벤트 (하루) - start: {start_datetime.date()}, end: {end_date_for_calendar.date()}")
                 event['start'] = {
                     'date': start_datetime.strftime('%Y-%m-%d'),
                     'timeZone': 'Asia/Seoul',
                 }
                 event['end'] = {
-                    'date': (end_datetime or start_datetime + timedelta(days=1)).strftime('%Y-%m-%d'),
+                    'date': end_date_for_calendar.strftime('%Y-%m-%d'),
                     'timeZone': 'Asia/Seoul',
                 }
+                logger.info(f"[CREATE_EVENT] Google Calendar API 전송 - start date: {event['start']['date']}, end date: {event['end']['date']}")
             else:
                 # 시간 지정 이벤트
                 # naive datetime에 타임존 정보 추가 (Asia/Seoul)
@@ -196,6 +209,7 @@ class GoogleCalendarService:
                 start_iso = start_datetime.isoformat()  # naive datetime의 ISO 형식 (타임존 없음)
                 end_iso = end_datetime.isoformat()  # naive datetime의 ISO 형식 (타임존 없음)
                 
+                logger.info(f"[CREATE_EVENT] 시간 지정 이벤트 - start_datetime 전달값: {start_datetime}, end_datetime 전달값: {end_datetime}")
                 logger.info(f"[CREATE_EVENT] Google Calendar API 전송 데이터 - start(naive): {start_iso}, end(naive): {end_iso}, timeZone: Asia/Seoul")
                 logger.info(f"[CREATE_EVENT] 변환된 시간 - start(Asia/Seoul): {start_datetime_tz.isoformat()}, end(Asia/Seoul): {end_datetime_tz.isoformat()}")
                 
@@ -207,6 +221,92 @@ class GoogleCalendarService:
                     'dateTime': end_iso,  # 타임존 없는 ISO 형식
                     'timeZone': 'Asia/Seoul',  # 이 타임존으로 해석됨
                 }
+            
+            # 알림 설정 처리
+            if notification_reminders and len(notification_reminders) > 0:
+                reminders = {'useDefault': False, 'overrides': []}
+                for reminder in notification_reminders:
+                    value = reminder.get('value', 30)
+                    unit = reminder.get('unit', 'minutes')
+                    # 단위를 분으로 변환
+                    minutes = value
+                    if unit == 'hours':
+                        minutes = value * 60
+                    elif unit == 'days':
+                        minutes = value * 24 * 60
+                    elif unit == 'weeks':
+                        minutes = value * 7 * 24 * 60
+                    reminders['overrides'].append({
+                        'method': 'popup',  # 또는 'email'
+                        'minutes': minutes
+                    })
+                event['reminders'] = reminders
+            else:
+                # 기본 알림 사용 (30분 전)
+                event['reminders'] = {'useDefault': True}
+            
+            # 반복 설정 처리 - 반복 정보는 웹앱 내에서만 관리하고 Google Calendar에는 전달하지 않음
+            # 반복 정보를 전달하면 Google Calendar에서 자동으로 반복 일정을 생성하여 중복 일정이 발생함
+            if False:  # 반복 정보는 전달하지 않음
+                recurrence_rules = []
+                if repeat_type == 'daily':
+                    if repeat_end_date:
+                        # 종료일까지 반복
+                        end_date_str = repeat_end_date.strftime('%Y%m%d')
+                        recurrence_rules.append(f"RRULE:FREQ=DAILY;UNTIL={end_date_str}")
+                    else:
+                        recurrence_rules.append("RRULE:FREQ=DAILY")
+                elif repeat_type == 'weekly':
+                    if repeat_end_date:
+                        end_date_str = repeat_end_date.strftime('%Y%m%d')
+                        recurrence_rules.append(f"RRULE:FREQ=WEEKLY;UNTIL={end_date_str}")
+                    else:
+                        recurrence_rules.append("RRULE:FREQ=WEEKLY")
+                elif repeat_type == 'monthly':
+                    if repeat_end_date:
+                        end_date_str = repeat_end_date.strftime('%Y%m%d')
+                        recurrence_rules.append(f"RRULE:FREQ=MONTHLY;UNTIL={end_date_str}")
+                    else:
+                        recurrence_rules.append("RRULE:FREQ=MONTHLY")
+                elif repeat_type == 'yearly':
+                    if repeat_end_date:
+                        end_date_str = repeat_end_date.strftime('%Y%m%d')
+                        recurrence_rules.append(f"RRULE:FREQ=YEARLY;UNTIL={end_date_str}")
+                    else:
+                        recurrence_rules.append("RRULE:FREQ=YEARLY")
+                elif repeat_type == 'weekdays':
+                    # 평일만 (월~금)
+                    weekdays = "BYDAY=MO,TU,WE,TH,FR"
+                    if repeat_end_date:
+                        end_date_str = repeat_end_date.strftime('%Y%m%d')
+                        recurrence_rules.append(f"RRULE:FREQ=WEEKLY;{weekdays};UNTIL={end_date_str}")
+                    else:
+                        recurrence_rules.append(f"RRULE:FREQ=WEEKLY;{weekdays}")
+                elif repeat_type == 'weekends':
+                    # 주말만 (토~일)
+                    weekends = "BYDAY=SA,SU"
+                    if repeat_end_date:
+                        end_date_str = repeat_end_date.strftime('%Y%m%d')
+                        recurrence_rules.append(f"RRULE:FREQ=WEEKLY;{weekends};UNTIL={end_date_str}")
+                    else:
+                        recurrence_rules.append(f"RRULE:FREQ=WEEKLY;{weekends}")
+                elif repeat_type == 'custom' and repeat_pattern:
+                    # 사용자 정의 반복 패턴
+                    rrule_parts = ["RRULE:FREQ=" + repeat_pattern.get('freq', 'DAILY').upper()]
+                    if 'interval' in repeat_pattern:
+                        rrule_parts.append(f"INTERVAL={repeat_pattern['interval']}")
+                    if 'byday' in repeat_pattern:
+                        rrule_parts.append(f"BYDAY={repeat_pattern['byday']}")
+                    if repeat_end_date:
+                        end_date_str = repeat_end_date.strftime('%Y%m%d')
+                        rrule_parts.append(f"UNTIL={end_date_str}")
+                    if 'count' in repeat_pattern:
+                        rrule_parts.append(f"COUNT={repeat_pattern['count']}")
+                    recurrence_rules.append(';'.join(rrule_parts))
+                
+                if recurrence_rules:
+                    event['recurrence'] = recurrence_rules
+                    logger.info(f"[CREATE_EVENT] 반복 규칙 추가: {recurrence_rules}")
             
             # 이벤트 생성
             created_event = service.events().insert(calendarId='primary', body=event).execute()
@@ -229,9 +329,13 @@ class GoogleCalendarService:
         start_datetime: datetime = None,
         end_datetime: datetime = None,
         location: str = None,
-        all_day: bool = False
+        all_day: bool = False,
+        notification_reminders: List[Dict[str, Any]] = None,
+        repeat_type: str = None,
+        repeat_pattern: Dict[str, Any] = None,
+        repeat_end_date: date = None
     ) -> Optional[Dict[str, Any]]:
-        """Google Calendar 이벤트 업데이트"""
+        """Google Calendar 이벤트 업데이트 (알림 및 반복 정보 포함)"""
         try:
             credentials = GoogleCalendarService.get_credentials_from_token(token_json)
             if not credentials:
@@ -257,14 +361,23 @@ class GoogleCalendarService:
             
             if start_datetime and end_datetime:
                 if all_day:
+                    # 종일 이벤트
+                    # Google Calendar는 end date를 exclusive로 저장하므로, inclusive end_date를 전달받으면 +1일 해야 함
+                    if end_datetime:
+                        end_date_for_calendar = end_datetime
+                        logger.info(f"[UPDATE_EVENT] 종일 이벤트 - start: {start_datetime.date()}, end_datetime 전달값: {end_datetime.date()}, 최종 end: {end_date_for_calendar.date()}")
+                    else:
+                        end_date_for_calendar = start_datetime + timedelta(days=1)
+                        logger.info(f"[UPDATE_EVENT] 종일 이벤트 (하루) - start: {start_datetime.date()}, end: {end_date_for_calendar.date()}")
                     event['start'] = {
                         'date': start_datetime.strftime('%Y-%m-%d'),
                         'timeZone': 'Asia/Seoul',
                     }
                     event['end'] = {
-                        'date': end_datetime.strftime('%Y-%m-%d'),
+                        'date': end_date_for_calendar.strftime('%Y-%m-%d'),
                         'timeZone': 'Asia/Seoul',
                     }
+                    logger.info(f"[UPDATE_EVENT] Google Calendar API 전송 - start date: {event['start']['date']}, end date: {event['end']['date']}")
                 else:
                     # naive datetime에 타임존 정보 추가 (Asia/Seoul)
                     from datetime import timezone, timedelta
@@ -291,6 +404,7 @@ class GoogleCalendarService:
                     start_iso = start_datetime.isoformat()  # naive datetime의 ISO 형식 (타임존 없음)
                     end_iso = end_datetime.isoformat()  # naive datetime의 ISO 형식 (타임존 없음)
                     
+                    logger.info(f"[UPDATE_EVENT] 시간 지정 이벤트 - start_datetime 전달값: {start_datetime}, end_datetime 전달값: {end_datetime}")
                     logger.info(f"[UPDATE_EVENT] Google Calendar API 전송 데이터 - start(naive): {start_iso}, end(naive): {end_iso}, timeZone: Asia/Seoul")
                     logger.info(f"[UPDATE_EVENT] 변환된 시간 - start(Asia/Seoul): {start_datetime_tz.isoformat()}, end(Asia/Seoul): {end_datetime_tz.isoformat()}")
                     
@@ -302,6 +416,94 @@ class GoogleCalendarService:
                         'dateTime': end_iso,  # 타임존 없는 ISO 형식
                         'timeZone': 'Asia/Seoul',  # 이 타임존으로 해석됨
                     }
+            
+            # 알림 설정 처리
+            if notification_reminders is not None:
+                if len(notification_reminders) > 0:
+                    reminders = {'useDefault': False, 'overrides': []}
+                    for reminder in notification_reminders:
+                        value = reminder.get('value', 30)
+                        unit = reminder.get('unit', 'minutes')
+                        # 단위를 분으로 변환
+                        minutes = value
+                        if unit == 'hours':
+                            minutes = value * 60
+                        elif unit == 'days':
+                            minutes = value * 24 * 60
+                        elif unit == 'weeks':
+                            minutes = value * 7 * 24 * 60
+                        reminders['overrides'].append({
+                            'method': 'popup',  # 또는 'email'
+                            'minutes': minutes
+                        })
+                    event['reminders'] = reminders
+                else:
+                    # 기본 알림 사용 (30분 전)
+                    event['reminders'] = {'useDefault': True}
+            
+            # 반복 설정 처리
+            # 반복 설정 처리 - 반복 정보는 웹앱 내에서만 관리하고 Google Calendar에는 전달하지 않음
+            # 반복 정보를 전달하면 Google Calendar에서 자동으로 반복 일정을 생성하여 중복 일정이 발생함
+            if False:  # 반복 정보는 전달하지 않음
+                if repeat_type == 'none':
+                    # 반복 제거
+                    event['recurrence'] = []
+                elif repeat_type != 'none':
+                    recurrence_rules = []
+                    if repeat_type == 'daily':
+                        if repeat_end_date:
+                            end_date_str = repeat_end_date.strftime('%Y%m%d')
+                            recurrence_rules.append(f"RRULE:FREQ=DAILY;UNTIL={end_date_str}")
+                        else:
+                            recurrence_rules.append("RRULE:FREQ=DAILY")
+                    elif repeat_type == 'weekly':
+                        if repeat_end_date:
+                            end_date_str = repeat_end_date.strftime('%Y%m%d')
+                            recurrence_rules.append(f"RRULE:FREQ=WEEKLY;UNTIL={end_date_str}")
+                        else:
+                            recurrence_rules.append("RRULE:FREQ=WEEKLY")
+                    elif repeat_type == 'monthly':
+                        if repeat_end_date:
+                            end_date_str = repeat_end_date.strftime('%Y%m%d')
+                            recurrence_rules.append(f"RRULE:FREQ=MONTHLY;UNTIL={end_date_str}")
+                        else:
+                            recurrence_rules.append("RRULE:FREQ=MONTHLY")
+                    elif repeat_type == 'yearly':
+                        if repeat_end_date:
+                            end_date_str = repeat_end_date.strftime('%Y%m%d')
+                            recurrence_rules.append(f"RRULE:FREQ=YEARLY;UNTIL={end_date_str}")
+                        else:
+                            recurrence_rules.append("RRULE:FREQ=YEARLY")
+                    elif repeat_type == 'weekdays':
+                        weekdays = "BYDAY=MO,TU,WE,TH,FR"
+                        if repeat_end_date:
+                            end_date_str = repeat_end_date.strftime('%Y%m%d')
+                            recurrence_rules.append(f"RRULE:FREQ=WEEKLY;{weekdays};UNTIL={end_date_str}")
+                        else:
+                            recurrence_rules.append(f"RRULE:FREQ=WEEKLY;{weekdays}")
+                    elif repeat_type == 'weekends':
+                        weekends = "BYDAY=SA,SU"
+                        if repeat_end_date:
+                            end_date_str = repeat_end_date.strftime('%Y%m%d')
+                            recurrence_rules.append(f"RRULE:FREQ=WEEKLY;{weekends};UNTIL={end_date_str}")
+                        else:
+                            recurrence_rules.append(f"RRULE:FREQ=WEEKLY;{weekends}")
+                    elif repeat_type == 'custom' and repeat_pattern:
+                        rrule_parts = ["RRULE:FREQ=" + repeat_pattern.get('freq', 'DAILY').upper()]
+                        if 'interval' in repeat_pattern:
+                            rrule_parts.append(f"INTERVAL={repeat_pattern['interval']}")
+                        if 'byday' in repeat_pattern:
+                            rrule_parts.append(f"BYDAY={repeat_pattern['byday']}")
+                        if repeat_end_date:
+                            end_date_str = repeat_end_date.strftime('%Y%m%d')
+                            rrule_parts.append(f"UNTIL={end_date_str}")
+                        if 'count' in repeat_pattern:
+                            rrule_parts.append(f"COUNT={repeat_pattern['count']}")
+                        recurrence_rules.append(';'.join(rrule_parts))
+                    
+                    if recurrence_rules:
+                        event['recurrence'] = recurrence_rules
+                        logger.info(f"[UPDATE_EVENT] 반복 규칙 추가: {recurrence_rules}")
             
             # 이벤트 업데이트
             updated_event = service.events().update(

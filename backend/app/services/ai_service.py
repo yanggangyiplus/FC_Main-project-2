@@ -195,13 +195,19 @@ class GeminiSTTService:
 4. start_time: 시작 시간 (HH:MM 형식, 언급이 없으면 null)
 5. end_time: 종료 시간 (HH:MM 형식, 언급이 없으면 null)
 6. all_day: 하루종일 여부 (시간이 명시되지 않으면 true, 시간이 있으면 false)
-7. category: 카테고리 (언급이 없으면 내용을 바탕으로 자동 분류: 생활, 업무, 건강, 여가, 기타 중 하나)
+7. category: 카테고리 (언급이 없으면 내용을 바탕으로 자동 분류: 운동, 건강, 업무, 생활, 공부, 기타 중 하나)
 8. checklist: 체크리스트 항목 (일정을 토대로 2-5개의 항목을 추천, 배열로 반환)
 9. location: 장소 (언급이 있으면 추출, 없으면 빈 문자열)
 10. memo: 원본 텍스트 전체
-11. repeat_type: 반복 설정 (none, daily, weekly, monthly, yearly 중 하나, 언급이 없으면 none)
-12. has_notification: 알림 설정 (기본값 false)
-13. notification_times: 알림 시간 배열 (기본값 빈 배열)
+11. repeat_type: 반복 설정 (none, daily, weekly, monthly, yearly, weekdays, weekends, custom 중 하나, 언급이 없으면 none)
+12. repeat_end_date: 반복 종료 날짜 (YYYY-MM-DD 형식, 반복 설정이 있고 종료일이 언급되면 추출, 없으면 null)
+13. repeat_pattern: 맞춤 반복 패턴 (repeat_type이 custom인 경우만, 객체 형식: {{"freq": "days|weeks|months|years", "interval": 숫자, "days": [요일 배열], "endType": "never|date|count", "endDate": "YYYY-MM-DD", "count": 숫자}}, 없으면 null)
+14. has_notification: 알림 설정 여부 (알림 관련 언급이 있으면 true, 없으면 false)
+15. notification_reminders: 알림 리마인더 배열 (예: [{{"value": 30, "unit": "minutes"}}], "30분 전", "1시간 전", "3일 전", "1주 전" 같은 표현 추출, 없으면 빈 배열)
+   - unit은 "minutes", "hours", "days", "weeks" 중 하나
+   - 예시: "30분 전 알림" → [{{"value": 30, "unit": "minutes"}}]
+   - 예시: "1시간 전과 1일 전 알림" → [{{"value": 1, "unit": "hours"}}, {{"value": 1, "unit": "days"}}]
+16. notification_times: 알림 시간 배열 (구버전 호환용, 기본값 빈 배열)
 
 텍스트: {text}
 
@@ -270,14 +276,24 @@ JSON 형식으로만 응답해주세요. 다른 설명 없이 JSON만 반환해�
                 result['checklist'] = []
             
             # 반복 설정 기본값
-            if not result.get('repeat_type') or result.get('repeat_type') not in ['none', 'daily', 'weekly', 'monthly', 'yearly']:
+            if not result.get('repeat_type') or result.get('repeat_type') not in ['none', 'daily', 'weekly', 'monthly', 'yearly', 'weekdays', 'weekends', 'custom']:
                 result['repeat_type'] = 'none'
+            
+            # 반복 종료 날짜 기본값
+            if 'repeat_end_date' not in result:
+                result['repeat_end_date'] = None
+            
+            # 맞춤 반복 패턴 기본값
+            if 'repeat_pattern' not in result:
+                result['repeat_pattern'] = None
             
             # 알림 설정 기본값
             if 'has_notification' not in result:
                 result['has_notification'] = False
             if 'notification_times' not in result:
                 result['notification_times'] = []
+            if 'notification_reminders' not in result:
+                result['notification_reminders'] = []
             
             result['success'] = True
             return result
@@ -297,6 +313,12 @@ JSON 형식으로만 응답해주세요. 다른 설명 없이 JSON만 반환해�
                 'category': '기타',
                 'checklist': [],
                 'location': '',
+                'repeat_type': 'none',
+                'repeat_end_date': None,
+                'repeat_pattern': None,
+                'has_notification': False,
+                'notification_times': [],
+                'notification_reminders': [],
                 'memo': text,
                 'repeat_type': 'none',
                 'has_notification': False,

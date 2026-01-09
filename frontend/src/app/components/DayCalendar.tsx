@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { RoutineItem } from "./RoutineView";
+import { formatDuration } from "@/utils/formatDuration";
 
 interface DayCalendarProps {
   todos: Array<{
@@ -11,6 +12,7 @@ interface DayCalendarProps {
     completed: boolean;
     category: string;
     date?: string;
+    endDate?: string; // 종료 날짜 (기간 일정)
   }>;
   routines?: RoutineItem[];
   onTodoUpdate?: (id: string, updates: { time: string; duration: number }) => void;
@@ -48,8 +50,29 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
     const todayStr = new Date().toISOString().split("T")[0];
     const dayOfWeek = currentDate.getDay();
 
-    // 1. Regular Todos
-    let regularTodos = todos.filter((todo) => todo.date === dateStr);
+    // 1. Regular Todos - 기간 일정인 경우 시작일부터 종료일까지 모든 날짜에 표시
+    let regularTodos = todos.filter((todo) => {
+      if (!todo.date) return false;
+      
+      // 시작일과 동일한 경우
+      if (todo.date === dateStr) return true;
+      
+      // 기간 일정인 경우: 시작일과 종료일 사이에 포함되는지 확인
+      if (todo.endDate && todo.endDate !== todo.date) {
+        const startDate = new Date(todo.date);
+        const endDate = new Date(todo.endDate);
+        const currentDateObj = new Date(dateStr);
+        
+        // 날짜 비교 (시간 제외)
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(0, 0, 0, 0);
+        currentDateObj.setHours(0, 0, 0, 0);
+        
+        return currentDateObj >= startDate && currentDateObj <= endDate;
+      }
+      
+      return false;
+    });
 
     if (dateStr === todayStr) {
       const todayMockTodos = todos.filter(t => !t.date || t.date === todayStr);
@@ -361,7 +384,7 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
 
                     <div className="font-semibold text-sm pointer-events-none">{todo.title}</div>
                     <div className="text-xs mt-1 opacity-90 pointer-events-none">
-                      {todo.time} - {todo.duration}분
+                      {todo.time} - {formatDuration(todo.duration)}
                     </div>
                     <div className="text-xs mt-1 bg-white/20 inline-block px-2 py-0.5 rounded-full pointer-events-none">
                       {todo.category}

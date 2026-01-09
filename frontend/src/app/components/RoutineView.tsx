@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Plus, X, Clock, FileText, Tag } from "lucide-react";
 import { toast } from "sonner";
+import { formatDuration } from "@/utils/formatDuration";
 
 // 시간표 관리 컴포넌트
 export interface RoutineItem {
@@ -16,6 +17,8 @@ export interface RoutineItem {
     duration: number;
   }[];
   addToCalendar?: boolean; // 캘린더에 일정으로 추가 여부
+  endDate?: string; // 스케줄 종료 날짜 (선택사항)
+  hasEndDate?: boolean; // 종료 날짜 사용 여부
 }
 
 interface FamilyMember {
@@ -57,6 +60,8 @@ export function RoutineView({
   const [newRoutineEndTime, setNewRoutineEndTime] = useState("10:00");
   const [newRoutineDays, setNewRoutineDays] = useState<number[]>([]);
   const [addToCalendar, setAddToCalendar] = useState(false);
+  const [hasEndDate, setHasEndDate] = useState(false);
+  const [routineEndDate, setRoutineEndDate] = useState<string>("");
 
   // Drag & Resize State
   const [draggedRoutine, setDraggedRoutine] = useState<{
@@ -95,6 +100,14 @@ export function RoutineView({
 
   const weekDays = ["일", "월", "화", "수", "목", "금", "토"];
   const timeSlots = ["00:00", "03:00", "06:00", "09:00", "12:00", "15:00", "18:00", "21:00"];
+
+  // 로컬 날짜를 YYYY-MM-DD 형식으로 변환하는 헬퍼 함수
+  const formatLocalDate = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  };
 
   const getTimePosition = (time: string) => {
     const [hours, minutes] = time.split(":").map(Number);
@@ -152,6 +165,17 @@ export function RoutineView({
       setAddToCalendar(isInCalendar);
     }
 
+    // 종료 날짜 상태 복원
+    setHasEndDate(routine.hasEndDate || false);
+    if (routine.endDate) {
+      setRoutineEndDate(routine.endDate);
+    } else {
+      // 기본값: 1년 후
+      const oneYearLater = new Date();
+      oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
+      setRoutineEndDate(formatLocalDate(oneYearLater));
+    }
+
     setShowAddRoutine(true);
   };
 
@@ -205,6 +229,8 @@ export function RoutineView({
             };
           }),
           addToCalendar: addToCalendar, // 체크박스 상태 전달
+          hasEndDate: hasEndDate, // 종료 날짜 사용 여부
+          endDate: hasEndDate ? routineEndDate : undefined, // 종료 날짜
         };
         onUpdateRoutine(updatedRoutine); // Use prop
 
@@ -230,6 +256,8 @@ export function RoutineView({
           return { day, startTime: newRoutineStartTime, duration: duration };
         }),
         addToCalendar: addToCalendar, // 체크박스 상태 전달
+        hasEndDate: hasEndDate, // 종료 날짜 사용 여부
+        endDate: hasEndDate ? routineEndDate : undefined, // 종료 날짜
       };
       onAddRoutine(newRoutine); // Use prop
 
@@ -245,6 +273,11 @@ export function RoutineView({
     setNewRoutineStartTime("09:00");
     setNewRoutineEndTime("10:00");
     setNewRoutineDays([]);
+    setHasEndDate(false);
+    // 기본값: 1년 후
+    const oneYearLater = new Date();
+    oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
+    setRoutineEndDate(formatLocalDate(oneYearLater));
     // 체크박스 상태는 초기화하지 않음 (다음에 수정할 때 유지되도록)
     // setAddToCalendar(false); // 주석 처리
     setShowAddRoutine(false);
@@ -506,17 +539,58 @@ export function RoutineView({
           </div>
 
           {/* 캘린더 추가 체크박스 */}
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="addToCalendar"
-              checked={addToCalendar}
-              onChange={(e) => setAddToCalendar(e.target.checked)}
-              className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-[#FF9B82] focus:ring-2"
-            />
-            <label htmlFor="addToCalendar" className="text-sm text-[#6B7280] cursor-pointer">
-              캘린더에 일정으로 추가
-            </label>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="addToCalendar"
+                checked={addToCalendar}
+                onChange={(e) => setAddToCalendar(e.target.checked)}
+                className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-[#FF9B82] focus:ring-2"
+              />
+              <label htmlFor="addToCalendar" className="text-sm text-[#6B7280] cursor-pointer">
+                캘린더에 일정으로 추가
+              </label>
+            </div>
+
+            {/* 스케줄 종료날짜 체크박스 (캘린더 추가가 체크되어 있을 때만 표시) */}
+            {addToCalendar && (
+              <div className="pl-6 space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="hasEndDate"
+                    checked={hasEndDate}
+                    onChange={(e) => {
+                      setHasEndDate(e.target.checked);
+                      if (!e.target.checked) {
+                        // 기본값: 1년 후
+                        const oneYearLater = new Date();
+                        oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
+                        setRoutineEndDate(formatLocalDate(oneYearLater));
+                      }
+                    }}
+                    className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-[#FF9B82] focus:ring-2"
+                  />
+                  <label htmlFor="hasEndDate" className="text-sm text-[#6B7280] cursor-pointer">
+                    일정 종료날짜 지정
+                  </label>
+                </div>
+
+                {hasEndDate && (
+                  <div className="pl-6">
+                    <label className="block text-xs text-[#6B7280] mb-1">종료 날짜</label>
+                    <input
+                      type="date"
+                      value={routineEndDate}
+                      onChange={(e) => setRoutineEndDate(e.target.value)}
+                      min={formatLocalDate(new Date())}
+                      className="w-full px-3 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex gap-2 pt-2">
@@ -703,7 +777,7 @@ export function RoutineView({
             <div className="bg-[#FAFAFA] rounded p-2 text-xs text-[#6B7280] space-y-1">
               <div className="flex items-center gap-2">
                 <Clock size={12} />
-                <span>{hoveredRoutine.slot.startTime} ({hoveredRoutine.slot.duration}분)</span>
+                <span>{hoveredRoutine.slot.startTime} ({formatDuration(hoveredRoutine.slot.duration)})</span>
               </div>
               {hoveredRoutine.routine.category && (
                 <div className="flex items-center gap-2">

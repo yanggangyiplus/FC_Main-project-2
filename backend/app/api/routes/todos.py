@@ -55,6 +55,7 @@ async def get_todos(
             "memo": todo.memo,
             "location": todo.location,
             "date": todo.date.isoformat() if todo.date else None,
+            "end_date": todo.end_date.isoformat() if todo.end_date else None,
             "start_time": todo.start_time.strftime("%H:%M") if todo.start_time else None,
             "end_time": todo.end_time.strftime("%H:%M") if todo.end_time else None,
             "all_day": todo.all_day,
@@ -64,8 +65,10 @@ async def get_todos(
             "repeat_type": todo.repeat_type,
             "repeat_end_date": todo.repeat_end_date.isoformat() if todo.repeat_end_date else None,
             "repeat_days": todo.repeat_days,
+            "repeat_pattern": json.loads(todo.repeat_pattern) if todo.repeat_pattern else None,
             "has_notification": todo.has_notification,
             "notification_times": json.loads(todo.notification_times) if todo.notification_times else [],
+            "notification_reminders": json.loads(todo.notification_reminders) if todo.notification_reminders else [],
             "family_member_ids": json.loads(todo.family_member_ids) if todo.family_member_ids else [],
             "checklist_items": [item.text for item in todo.checklist_items],  # 문자열 리스트로 변환
             "created_at": todo.created_at,
@@ -156,6 +159,7 @@ async def get_todo(
         "memo": todo.memo,
         "location": todo.location,
         "date": todo.date.isoformat() if todo.date else None,
+        "end_date": todo.end_date.isoformat() if todo.end_date else None,
         "start_time": todo.start_time.strftime("%H:%M") if todo.start_time else None,
         "end_time": todo.end_time.strftime("%H:%M") if todo.end_time else None,
         "all_day": todo.all_day,
@@ -165,8 +169,10 @@ async def get_todo(
         "repeat_type": todo.repeat_type,
         "repeat_end_date": todo.repeat_end_date.isoformat() if todo.repeat_end_date else None,
         "repeat_days": todo.repeat_days,
+        "repeat_pattern": json.loads(todo.repeat_pattern) if todo.repeat_pattern else None,
         "has_notification": todo.has_notification,
         "notification_times": json.loads(todo.notification_times) if todo.notification_times else [],
+        "notification_reminders": json.loads(todo.notification_reminders) if todo.notification_reminders else [],
         "family_member_ids": json.loads(todo.family_member_ids) if todo.family_member_ids else [],
         "checklist_items": [item.text for item in todo.checklist_items],  # 문자열 리스트로 변환
         "created_at": todo.created_at,  # datetime 객체 그대로 사용
@@ -187,7 +193,9 @@ async def create_todo(
 ):
     """Create new todo"""
     import json
+    import logging
     from datetime import time as time_obj
+    logger = logging.getLogger(__name__)
     
     # 스키마에서 이미 date 객체로 변환됨
     # 시간 문자열을 Time 객체로 변환
@@ -214,7 +222,8 @@ async def create_todo(
         description=todo.description,
         memo=todo.memo,
         location=todo.location,
-        date=todo.date,  # 스키마에서 이미 date 객체로 변환됨
+        date=todo.date,  # 시작 날짜 (스키마에서 이미 date 객체로 변환됨)
+        end_date=todo.end_date,  # 종료 날짜 (기간 일정인 경우)
         start_time=start_time_obj,
         end_time=end_time_obj,
         all_day=todo.all_day,
@@ -222,23 +231,35 @@ async def create_todo(
         status=todo.status or "pending",
         priority=todo.priority or "medium",
         repeat_type=todo.repeat_type or "none",
-        repeat_end_date=todo.repeat_end_date,  # 스키마에서 이미 date 객체로 변환됨
+        repeat_end_date=todo.repeat_end_date,  # 반복 종료 날짜 (스키마에서 이미 date 객체로 변환됨)
         repeat_days=todo.repeat_days,
+        repeat_pattern=json.dumps(todo.repeat_pattern) if todo.repeat_pattern else None,
         has_notification=todo.has_notification or False,
         notification_times=json.dumps(todo.notification_times) if todo.notification_times else None,
+        notification_reminders=json.dumps(todo.notification_reminders) if todo.notification_reminders else None,
         family_member_ids=json.dumps(todo.family_member_ids) if todo.family_member_ids else None,
         tags=json.dumps([]),
         source="text",
         todo_group_id=todo.todo_group_id  # 일정 그룹 ID (여러 날짜에 걸친 일정 묶기)
     )
     
+    # 반복 일정인 경우 그룹 ID 생성 (없으면 생성)
+    import uuid
+    if todo.repeat_type and todo.repeat_type != "none" and not todo.todo_group_id:
+        todo.todo_group_id = f"repeat_{uuid.uuid4().hex[:12]}"
+        logger.info(f"[CREATE_TODO] 반복 그룹 ID 생성: {todo.todo_group_id}")
+    
+    db_todo.todo_group_id = todo.todo_group_id  # 그룹 ID 설정
     db.add(db_todo)
     db.commit()
     db.refresh(db_todo)
     
+    # end_date 저장 확인
+    logger.info(f"[CREATE_TODO] Todo 저장 완료 - id: {db_todo.id}, date: {db_todo.date}, end_date: {db_todo.end_date}, all_day: {db_todo.all_day}")
+    logger.info(f"[CREATE_TODO] 첫 번째 일정 생성 완료: ID={db_todo.id}, repeat_type={db_todo.repeat_type}, todo_group_id={db_todo.todo_group_id}")
+    
     # 체크리스트 항목 추가
     if todo.checklist_items:
-        from app.models.models import ChecklistItem
         for idx, item_text in enumerate(todo.checklist_items):
             if item_text.strip():
                 checklist_item = ChecklistItem(
@@ -249,6 +270,343 @@ async def create_todo(
                 )
                 db.add(checklist_item)
         db.commit()
+    
+    # 반복 일정 생성 (반복 타입이 있는 경우)
+    # repeat_end_date가 없으면 기본값으로 1년 후까지 반복
+    repeated_todos = []
+    
+    logger.info(f"[CREATE_TODO] 반복 타입 확인: todo.repeat_type={todo.repeat_type}, db_todo.repeat_type={db_todo.repeat_type}, repeat_end_date: {todo.repeat_end_date}")
+    
+    # db_todo의 repeat_type을 확인 (실제 DB에 저장된 값)
+    actual_repeat_type = db_todo.repeat_type or "none"
+    
+    if actual_repeat_type and actual_repeat_type != "none":
+        logger.info(f"[CREATE_TODO] 반복 일정 생성 시작: 타입={actual_repeat_type}, 시작 날짜={db_todo.date}")
+        
+        repeat_end_date = db_todo.repeat_end_date
+        if not repeat_end_date:
+            # 기본값: 시작 날짜로부터 1년 후
+            from datetime import timedelta
+            repeat_end_date = db_todo.date + timedelta(days=365)
+            logger.info(f"[CREATE_TODO] 반복 종료 날짜 기본값 설정: {repeat_end_date}")
+        else:
+            logger.info(f"[CREATE_TODO] 반복 종료 날짜: {repeat_end_date}")
+        
+        from datetime import timedelta
+        
+        # 반복 그룹 ID (첫 번째 일정과 동일한 그룹 ID 사용)
+        repeat_group_id = db_todo.todo_group_id
+        if not repeat_group_id:
+            import uuid
+            repeat_group_id = f"repeat_{uuid.uuid4().hex[:12]}"
+            db_todo.todo_group_id = repeat_group_id
+            db.commit()
+            db.refresh(db_todo)
+        logger.info(f"[CREATE_TODO] 반복 그룹 ID: {repeat_group_id}")
+        
+        # 시작 날짜와 종료 날짜
+        start_date = db_todo.date
+        end_date = repeat_end_date
+        
+        logger.info(f"[CREATE_TODO] 반복 일정 날짜 계산 시작: 시작={start_date}, 종료={end_date}, 타입={actual_repeat_type}")
+        
+        # 반복 주기에 따라 날짜 계산
+        current_date = start_date + timedelta(days=1)  # 다음 날짜부터 시작
+        
+        if actual_repeat_type == "daily":
+            # 매일: 다음 날부터 반복 종료일까지 매일 생성
+            while current_date <= end_date:
+                repeated_todos.append(current_date)
+                current_date += timedelta(days=1)
+        elif actual_repeat_type == "weekly":
+            # 매주: 같은 요일마다 생성
+            start_weekday = start_date.weekday()
+            while current_date <= end_date:
+                if current_date.weekday() == start_weekday:
+                    repeated_todos.append(current_date)
+                current_date += timedelta(days=1)
+        elif actual_repeat_type == "monthly":
+            # 매월: 같은 날짜마다 생성
+            from calendar import monthrange
+            start_day = start_date.day
+            # 첫 번째 반복 날짜: 다음 달 같은 날짜
+            if start_date.month == 12:
+                next_month_date = date(start_date.year + 1, 1, start_day)
+            else:
+                try:
+                    next_month_date = date(start_date.year, start_date.month + 1, start_day)
+                except ValueError:
+                    # 날짜가 유효하지 않은 경우 (예: 31일이 없는 달), 마지막 날로 설정
+                    if start_date.month == 12:
+                        next_month = date(start_date.year + 1, 1, 1)
+                    else:
+                        next_month = date(start_date.year, start_date.month + 1, 1)
+                    last_day = monthrange(next_month.year, next_month.month)[1]
+                    next_month_date = date(next_month.year, next_month.month, min(start_day, last_day))
+            
+            current_date = next_month_date
+            while current_date <= end_date:
+                repeated_todos.append(current_date)
+                # 다음 달로 이동
+                if current_date.month == 12:
+                    next_year = current_date.year + 1
+                    next_month = 1
+                else:
+                    next_year = current_date.year
+                    next_month = current_date.month + 1
+                
+                try:
+                    current_date = date(next_year, next_month, start_day)
+                except ValueError:
+                    # 날짜가 유효하지 않은 경우, 마지막 날로 설정
+                    next_month_start = date(next_year, next_month, 1)
+                    last_day = monthrange(next_month_start.year, next_month_start.month)[1]
+                    current_date = date(next_year, next_month, min(start_day, last_day))
+        elif actual_repeat_type == "yearly":
+            # 매년: 같은 월일마다 생성
+            start_month = start_date.month
+            start_day = start_date.day
+            # 첫 번째 반복 날짜: 다음 년도 같은 날짜
+            next_year_date = date(start_date.year + 1, start_month, start_day)
+            current_date = next_year_date
+            while current_date <= end_date:
+                repeated_todos.append(current_date)
+                # 다음 년도로 이동
+                current_date = date(current_date.year + 1, start_month, start_day)
+        elif actual_repeat_type == "weekdays":
+            # 매주 주중 (월~금)
+            while current_date <= end_date:
+                weekday = current_date.weekday()
+                if weekday < 5:  # 0(월)~4(금)
+                    repeated_todos.append(current_date)
+                current_date += timedelta(days=1)
+        elif actual_repeat_type == "weekends":
+            # 매주 주말 (토~일)
+            while current_date <= end_date:
+                weekday = current_date.weekday()
+                if weekday >= 5:  # 5(토)~6(일)
+                    repeated_todos.append(current_date)
+                current_date += timedelta(days=1)
+        elif actual_repeat_type == "custom" and db_todo.repeat_pattern:
+            # 맞춤 반복 패턴 처리
+            try:
+                pattern = db_todo.repeat_pattern
+                if isinstance(pattern, str):
+                    pattern = json.loads(pattern)
+                
+                freq = pattern.get('freq', 'days')  # days, weeks, months, years
+                interval = pattern.get('interval', 1)  # 반복 주기
+                custom_days = pattern.get('days', [])  # 반복 요일 (주 단위인 경우)
+                end_type = pattern.get('endType', 'never')  # never, date, count
+                
+                # 종료 날짜 계산
+                if end_type == 'date':
+                    end_date_str = pattern.get('endDate')
+                    if end_date_str:
+                        if isinstance(end_date_str, str):
+                            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                        else:
+                            end_date = end_date_str
+                    else:
+                        # 기본값: 시작 날짜로부터 1년 후
+                        end_date = start_date + timedelta(days=365)
+                elif end_type == 'count':
+                    count = pattern.get('count', 10)
+                    # 시작 날짜부터 count번 반복
+                    if freq == 'days':
+                        end_date = start_date + timedelta(days=interval * (count - 1))
+                    elif freq == 'weeks':
+                        end_date = start_date + timedelta(weeks=interval * (count - 1))
+                    elif freq == 'months':
+                        # 매 N개월마다 count번 반복
+                        end_date = start_date
+                        from calendar import monthrange
+                        start_day = start_date.day
+                        for i in range(count - 1):
+                            months_to_add = interval
+                            if end_date.month + months_to_add > 12:
+                                next_year = end_date.year + 1
+                                next_month = (end_date.month + months_to_add) % 12
+                                if next_month == 0:
+                                    next_month = 12
+                                    next_year -= 1
+                            else:
+                                next_year = end_date.year
+                                next_month = end_date.month + months_to_add
+                            
+                            try:
+                                end_date = date(next_year, next_month, start_day)
+                            except ValueError:
+                                last_day = monthrange(next_year, next_month)[1]
+                                end_date = date(next_year, next_month, min(start_day, last_day))
+                    elif freq == 'years':
+                        # 매 N년마다 count번 반복
+                        end_date = date(start_date.year + interval * (count - 1), start_date.month, start_date.day)
+                    else:
+                        end_date = start_date + timedelta(days=interval * (count - 1))
+                else:
+                    # end_type == 'never'인 경우 기본값 사용 (1년 후)
+                    end_date = start_date + timedelta(days=365)
+                
+                # 반복 일정 생성
+                if freq == 'days':
+                    # 매 N일마다
+                    current_date = start_date + timedelta(days=interval)
+                    while current_date <= end_date:
+                        repeated_todos.append(current_date)
+                        current_date += timedelta(days=interval)
+                elif freq == 'weeks':
+                    # 매 N주마다
+                    if custom_days:
+                        # 특정 요일만
+                        # N주 주기로 반복
+                        current_date = start_date
+                        week_count = 0
+                        while current_date <= end_date:
+                            weekday = current_date.weekday()
+                            # 현재 주가 interval 주기의 배수인 경우에만 해당 요일 추가
+                            weeks_from_start = (current_date - start_date).days // 7
+                            if weeks_from_start % interval == 0 and weekday in custom_days:
+                                if current_date > start_date:  # 시작일은 제외
+                                    repeated_todos.append(current_date)
+                            current_date += timedelta(days=1)
+                    else:
+                        # 같은 요일마다 N주마다
+                        start_weekday = start_date.weekday()
+                        current_date = start_date + timedelta(weeks=interval)
+                        while current_date <= end_date:
+                            if current_date.weekday() == start_weekday:
+                                repeated_todos.append(current_date)
+                                current_date += timedelta(weeks=interval)
+                            else:
+                                current_date += timedelta(days=1)
+                elif freq == 'months':
+                    # 매 N개월마다
+                    current_date = start_date
+                    from calendar import monthrange
+                    start_day = start_date.day
+                    # 첫 번째 반복 날짜: N개월 후
+                    months_to_add = interval
+                    if current_date.month + months_to_add > 12:
+                        next_year = current_date.year + 1
+                        next_month = (current_date.month + months_to_add) % 12
+                        if next_month == 0:
+                            next_month = 12
+                            next_year -= 1
+                    else:
+                        next_year = current_date.year
+                        next_month = current_date.month + months_to_add
+                    
+                    try:
+                        current_date = date(next_year, next_month, start_day)
+                    except ValueError:
+                        last_day = monthrange(next_year, next_month)[1]
+                        current_date = date(next_year, next_month, min(start_day, last_day))
+                    
+                    while current_date <= end_date:
+                        repeated_todos.append(current_date)
+                        # 다음 N개월로 이동
+                        months_to_add = interval
+                        if current_date.month + months_to_add > 12:
+                            next_year = current_date.year + 1
+                            next_month = (current_date.month + months_to_add) % 12
+                            if next_month == 0:
+                                next_month = 12
+                                next_year -= 1
+                        else:
+                            next_year = current_date.year
+                            next_month = current_date.month + months_to_add
+                        
+                        try:
+                            current_date = date(next_year, next_month, start_day)
+                        except ValueError:
+                            last_day = monthrange(next_year, next_month)[1]
+                            current_date = date(next_year, next_month, min(start_day, last_day))
+                elif freq == 'years':
+                    # 매 N년마다
+                    current_date = date(start_date.year + interval, start_date.month, start_date.day)
+                    while current_date <= end_date:
+                        repeated_todos.append(current_date)
+                        current_date = date(current_date.year + interval, start_date.month, start_date.day)
+            except Exception as e:
+                logger.error(f"[CREATE_TODO] 맞춤 반복 패턴 처리 실패: {e}", exc_info=True)
+        
+        logger.info(f"[CREATE_TODO] 반복 일정 생성 예정: {len(repeated_todos)}개 (타입: {actual_repeat_type}, 그룹 ID: {repeat_group_id}, 시작 날짜: {start_date}, 종료 날짜: {end_date})")
+        
+        if len(repeated_todos) == 0:
+            logger.warning(f"[CREATE_TODO] 반복 일정 생성 실패: 반복 날짜 목록이 비어있음 (타입: {actual_repeat_type}, 시작 날짜: {start_date}, 종료 날짜: {end_date})")
+        
+        # 반복 일정 생성
+        created_count = 0
+        repeated_todo_objects = []  # 체크리스트 항목 추가를 위해 저장
+        
+        # 원본 일정의 기간 계산 (여러 날짜에 걸친 일정인 경우)
+        original_duration_days = 0
+        if db_todo.end_date and db_todo.date:
+            original_duration_days = (db_todo.end_date - db_todo.date).days
+            logger.info(f"[CREATE_TODO] 원본 일정 기간: {db_todo.date} ~ {db_todo.end_date} ({original_duration_days}일)")
+        
+        for repeat_date in repeated_todos:
+            # 반복 일정의 종료 날짜 계산 (원본 일정과 동일한 기간 유지)
+            repeated_end_date = None
+            if original_duration_days > 0:
+                repeated_end_date = repeat_date + timedelta(days=original_duration_days)
+                logger.info(f"[CREATE_TODO] 반복 일정 기간: {repeat_date} ~ {repeated_end_date} ({original_duration_days}일)")
+            
+            repeated_todo = Todo(
+                user_id=current_user.id,
+                title=db_todo.title,
+                description=db_todo.description,
+                memo=db_todo.memo,
+                location=db_todo.location,
+                date=repeat_date,  # 반복 시작 날짜
+                end_date=repeated_end_date,  # 원본 일정과 동일한 기간 유지
+                start_time=db_todo.start_time,
+                end_time=db_todo.end_time,
+                all_day=db_todo.all_day,
+                category=db_todo.category,
+                status=db_todo.status,
+                priority=db_todo.priority,
+                repeat_type=db_todo.repeat_type,
+                repeat_end_date=db_todo.repeat_end_date,
+                repeat_days=db_todo.repeat_days,
+                repeat_pattern=db_todo.repeat_pattern,
+                has_notification=db_todo.has_notification,
+                notification_times=db_todo.notification_times,
+                notification_reminders=db_todo.notification_reminders,
+                family_member_ids=db_todo.family_member_ids,
+                tags=db_todo.tags,
+                source=db_todo.source,
+                todo_group_id=repeat_group_id  # 같은 그룹 ID로 묶기
+            )
+            db.add(repeated_todo)
+            repeated_todo_objects.append((repeated_todo, repeat_date))
+            created_count += 1
+        
+        # 반복 일정을 먼저 커밋하여 ID 생성
+        if repeated_todos:
+            db.flush()  # ID를 생성하기 위해 flush
+            logger.info(f"[CREATE_TODO] 반복 일정 flush 완료: {created_count}개")
+            
+            # 이제 각 반복 일정에 체크리스트 항목 추가
+            for repeated_todo, repeat_date in repeated_todo_objects:
+                if todo.checklist_items:
+                    for idx, item_text in enumerate(todo.checklist_items):
+                        if item_text.strip():
+                            checklist_item = ChecklistItem(
+                                todo_id=repeated_todo.id,  # 이제 ID가 생성됨
+                                text=item_text,
+                                completed=False,
+                                order_index=idx
+                            )
+                            db.add(checklist_item)
+                logger.info(f"[CREATE_TODO] 반복 일정 생성: 날짜={repeat_date}, ID={repeated_todo.id}")
+            
+            # 체크리스트 항목과 함께 최종 커밋
+            db.commit()
+            logger.info(f"[CREATE_TODO] 반복 일정 생성 완료: {created_count}개 (총 {len(repeated_todos)}개 중)")
+        else:
+            logger.warning(f"[CREATE_TODO] 반복 일정 생성 실패: 반복 날짜 목록이 비어있음")
     
     # Google Calendar 자동 동기화 (연동 활성화 및 내보내기 활성화 시)
     # 사용자 정보를 다시 로드하여 최신 토글 상태 확인
@@ -274,7 +632,15 @@ async def create_todo(
                 if db_todo.all_day:
                     # 종일 이벤트
                     start_datetime = datetime.combine(db_todo.date, datetime.min.time())
-                    end_datetime = start_datetime + timedelta(days=1)
+                    # end_date가 있으면 그 날짜까지, 없으면 하루만
+                    logger.info(f"[CREATE_TODO] 종일 이벤트 - date: {db_todo.date}, end_date: {db_todo.end_date}")
+                    if db_todo.end_date:
+                        # end_date는 inclusive이므로, Google Calendar의 exclusive 형식으로 변환하려면 +1일
+                        end_datetime = datetime.combine(db_todo.end_date, datetime.min.time()) + timedelta(days=1)
+                        logger.info(f"[CREATE_TODO] 종일 이벤트 기간: {db_todo.date} ~ {db_todo.end_date} ({(db_todo.end_date - db_todo.date).days + 1}일), end_datetime: {end_datetime}")
+                    else:
+                        end_datetime = start_datetime + timedelta(days=1)
+                        logger.info(f"[CREATE_TODO] 종일 이벤트 (하루): {db_todo.date}, end_datetime: {end_datetime}")
                 else:
                     # 시간 지정 이벤트
                     if db_todo.start_time:
@@ -282,10 +648,22 @@ async def create_todo(
                     else:
                         start_datetime = datetime.combine(db_todo.date, datetime.min.time())
                     
-                    if db_todo.end_time:
-                        end_datetime = datetime.combine(db_todo.date, db_todo.end_time)
+                    # end_date가 있으면 그 날짜의 end_time 사용, 없으면 같은 날의 end_time 사용
+                    if db_todo.end_date:
+                        # 여러 날짜에 걸친 일정
+                        if db_todo.end_time:
+                            end_datetime = datetime.combine(db_todo.end_date, db_todo.end_time)
+                        else:
+                            # end_time이 없으면 end_date의 23:59:59로 설정
+                            end_datetime = datetime.combine(db_todo.end_date, datetime.max.time())
+                        logger.info(f"[CREATE_TODO] 시간 지정 이벤트 기간: {db_todo.date} {db_todo.start_time} ~ {db_todo.end_date} {db_todo.end_time or '23:59'} ({(db_todo.end_date - db_todo.date).days + 1}일)")
                     else:
-                        end_datetime = start_datetime + timedelta(hours=1)
+                        # 하루 일정
+                        if db_todo.end_time:
+                            end_datetime = datetime.combine(db_todo.date, db_todo.end_time)
+                        else:
+                            end_datetime = start_datetime + timedelta(hours=1)
+                        logger.info(f"[CREATE_TODO] 시간 지정 이벤트 (하루): {db_todo.date} {db_todo.start_time} ~ {db_todo.end_time or '1시간 후'}")
             
             if start_datetime:
                 logger.info(f"[CREATE_TODO] Google Calendar 이벤트 생성 시도 - start={start_datetime}, end={end_datetime}")
@@ -334,6 +712,7 @@ async def create_todo(
         "memo": db_todo_with_items.memo,
         "location": db_todo_with_items.location,
         "date": db_todo_with_items.date.isoformat() if db_todo_with_items.date else None,
+        "end_date": db_todo_with_items.end_date.isoformat() if db_todo_with_items.end_date else None,
         "start_time": db_todo_with_items.start_time.strftime("%H:%M") if db_todo_with_items.start_time else None,
         "end_time": db_todo_with_items.end_time.strftime("%H:%M") if db_todo_with_items.end_time else None,
         "all_day": db_todo_with_items.all_day,
@@ -343,8 +722,10 @@ async def create_todo(
         "repeat_type": db_todo_with_items.repeat_type,
         "repeat_end_date": db_todo_with_items.repeat_end_date.isoformat() if db_todo_with_items.repeat_end_date else None,
         "repeat_days": db_todo_with_items.repeat_days,
+        "repeat_pattern": json.loads(db_todo_with_items.repeat_pattern) if db_todo_with_items.repeat_pattern else None,
         "has_notification": db_todo_with_items.has_notification,
         "notification_times": json.loads(db_todo_with_items.notification_times) if db_todo_with_items.notification_times else [],
+        "notification_reminders": json.loads(db_todo_with_items.notification_reminders) if db_todo_with_items.notification_reminders else [],
         "family_member_ids": json.loads(db_todo_with_items.family_member_ids) if db_todo_with_items.family_member_ids else [],
         "checklist_items": [item.text for item in db_todo_with_items.checklist_items],  # 문자열 리스트로 변환
         "created_at": db_todo_with_items.created_at,  # datetime 객체 그대로 사용
@@ -367,7 +748,12 @@ async def update_todo(
 ):
     """Update todo"""
     import json
+    import logging
     from datetime import time as time_obj
+    logger = logging.getLogger(__name__)
+    
+    # 요청 데이터 로깅
+    logger.info(f"[UPDATE_TODO] 요청 받음: todo_id={todo_id}, start_time={todo_update.start_time}, end_time={todo_update.end_time}")
     
     todo = db.query(Todo).filter(
         Todo.id == todo_id,
@@ -376,10 +762,110 @@ async def update_todo(
     ).first()
     
     if not todo:
+        logger.error(f"[UPDATE_TODO] Todo를 찾을 수 없음: todo_id={todo_id}, user_id={current_user.id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="할 일을 찾을 수 없습니다"
         )
+    
+    logger.info(f"[UPDATE_TODO] 기존 Todo 발견: id={todo.id}, 현재 start_time={todo.start_time}, end_time={todo.end_time}")
+    
+    # 반복 설정이 변경되었는지 확인 (필드 업데이트 이전에 확인)
+    old_repeat_type = todo.repeat_type or "none"
+    old_repeat_end_date = todo.repeat_end_date
+    old_repeat_pattern = todo.repeat_pattern
+    
+    new_repeat_type = todo_update.repeat_type if todo_update.repeat_type is not None else old_repeat_type
+    new_repeat_end_date = None
+    if todo_update.repeat_end_date is not None and todo_update.repeat_end_date.strip():
+        try:
+            new_repeat_end_date = datetime.strptime(todo_update.repeat_end_date.strip(), '%Y-%m-%d').date()
+        except (ValueError, AttributeError):
+            pass
+    elif todo_update.repeat_end_date is None and old_repeat_end_date:
+        new_repeat_end_date = old_repeat_end_date
+    
+    # repeat_pattern 비교를 위해 두 값을 동일한 형식으로 변환
+    if todo_update.repeat_pattern is not None:
+        if isinstance(todo_update.repeat_pattern, str):
+            new_repeat_pattern = todo_update.repeat_pattern
+        else:
+            new_repeat_pattern = json.dumps(todo_update.repeat_pattern)
+    else:
+        new_repeat_pattern = old_repeat_pattern
+    
+    # old_repeat_pattern도 문자열로 변환하여 비교
+    if old_repeat_pattern and isinstance(old_repeat_pattern, str):
+        old_repeat_pattern_str = old_repeat_pattern
+    else:
+        old_repeat_pattern_str = json.dumps(old_repeat_pattern) if old_repeat_pattern else None
+    
+    # 반복 설정이 변경되었는지 확인
+    repeat_changed = False
+    repeat_needs_recreate = False
+    
+    # 반복 설정이 처음 추가되는 경우 (none -> 다른 값) 또는 변경된 경우
+    if (new_repeat_type != old_repeat_type or 
+        new_repeat_end_date != old_repeat_end_date or 
+        new_repeat_pattern != old_repeat_pattern_str):
+        repeat_changed = True
+        # 반복 설정이 추가되거나 변경된 경우 (none -> 다른 값 또는 다른 값 -> 다른 값)
+        if new_repeat_type and new_repeat_type != "none":
+            repeat_needs_recreate = True  # 반복 설정 추가/변경 시 재생성 필요
+    
+    # 시작 날짜가 변경되었는지 확인 (반복 설정이 있는 경우에만 재생성 필요)
+    date_changed = False
+    if todo_update.date is not None and todo_update.date.strip():
+        try:
+            new_date = datetime.strptime(todo_update.date.strip(), '%Y-%m-%d').date()
+            if todo.date != new_date:
+                date_changed = True
+                # 반복 설정이 있는 경우에만 시작 날짜 변경 시 반복 일정 재생성
+                if new_repeat_type and new_repeat_type != "none":
+                    repeat_needs_recreate = True
+        except (ValueError, AttributeError):
+            pass
+    
+    # 기존 반복 일정 삭제 (반복 설정이 변경되거나 시작 날짜가 변경된 경우)
+    # 단, 반복 설정이 "none"으로 변경되는 경우는 제외 (반복 설정이 있는 경우에만)
+    if (repeat_needs_recreate or (repeat_changed and old_repeat_type != "none" and new_repeat_type == "none")) and hasattr(todo, 'todo_group_id') and todo.todo_group_id:
+        # 같은 그룹의 모든 반복 일정 조회 (현재 일정 제외)
+        existing_repeated_todos = db.query(Todo).filter(
+            Todo.todo_group_id == todo.todo_group_id,
+            Todo.user_id == current_user.id,
+            Todo.id != todo.id,  # 현재 일정 제외
+            Todo.deleted_at.is_(None)
+        ).all()
+        
+        if existing_repeated_todos:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[UPDATE_TODO] 기존 반복 일정 삭제: {len(existing_repeated_todos)}개 (todo_group_id={todo.todo_group_id})")
+            
+            # Google Calendar 이벤트 삭제
+            db.refresh(current_user)
+            export_enabled = getattr(current_user, 'google_calendar_export_enabled', 'false')
+            for repeated_todo in existing_repeated_todos:
+                if (current_user.google_calendar_enabled == "true" and 
+                    current_user.google_calendar_token and 
+                    export_enabled == "true" and 
+                    repeated_todo.google_calendar_event_id):
+                    try:
+                        from app.services.calendar_service import GoogleCalendarService
+                        await GoogleCalendarService.delete_event(
+                            token_json=current_user.google_calendar_token,
+                            event_id=repeated_todo.google_calendar_event_id
+                        )
+                    except Exception as e:
+                        logger.warning(f"[UPDATE_TODO] Google Calendar 이벤트 삭제 실패: {e}")
+            
+            # 기존 반복 일정 삭제 (soft delete)
+            deleted_at_value = datetime.utcnow()
+            for repeated_todo in existing_repeated_todos:
+                repeated_todo.deleted_at = deleted_at_value
+            
+            db.commit()
+            logger.info(f"[UPDATE_TODO] 기존 반복 일정 삭제 완료: {len(existing_repeated_todos)}개")
     
     # 업데이트할 필드 처리
     if todo_update.title is not None:
@@ -397,25 +883,41 @@ async def update_todo(
         except (ValueError, AttributeError):
             # 날짜 형식이 잘못된 경우 무시
             pass
+    if todo_update.end_date is not None:
+        # 문자열 날짜를 date 객체로 변환 (빈 문자열이면 None)
+        if todo_update.end_date.strip():
+            try:
+                todo.end_date = datetime.strptime(todo_update.end_date.strip(), '%Y-%m-%d').date()
+            except (ValueError, AttributeError):
+                # 날짜 형식이 잘못된 경우 무시
+                pass
+        else:
+            todo.end_date = None
     if todo_update.start_time is not None:
         # 빈 문자열이거나 None이면 null로 설정
         if todo_update.start_time == "" or todo_update.start_time is None:
             todo.start_time = None
+            logger.info(f"[UPDATE_TODO] start_time을 None으로 설정")
         else:
             try:
                 hours, minutes = map(int, todo_update.start_time.split(':'))
                 todo.start_time = time_obj(hours, minutes)
-            except:
+                logger.info(f"[UPDATE_TODO] start_time 업데이트: {todo_update.start_time} -> {todo.start_time}")
+            except Exception as e:
+                logger.error(f"[UPDATE_TODO] start_time 파싱 실패: {todo_update.start_time}, 에러: {e}")
                 todo.start_time = None
     if todo_update.end_time is not None:
         # 빈 문자열이거나 None이면 null로 설정
         if todo_update.end_time == "" or todo_update.end_time is None:
             todo.end_time = None
+            logger.info(f"[UPDATE_TODO] end_time을 None으로 설정")
         else:
             try:
                 hours, minutes = map(int, todo_update.end_time.split(':'))
                 todo.end_time = time_obj(hours, minutes)
-            except:
+                logger.info(f"[UPDATE_TODO] end_time 업데이트: {todo_update.end_time} -> {todo.end_time}")
+            except Exception as e:
+                logger.error(f"[UPDATE_TODO] end_time 파싱 실패: {todo_update.end_time}, 에러: {e}")
                 todo.end_time = None
     if todo_update.all_day is not None:
         todo.all_day = todo_update.all_day
@@ -436,10 +938,14 @@ async def update_todo(
             pass
     if todo_update.repeat_days is not None:
         todo.repeat_days = todo_update.repeat_days
+    if todo_update.repeat_pattern is not None:
+        todo.repeat_pattern = json.dumps(todo_update.repeat_pattern)
     if todo_update.has_notification is not None:
         todo.has_notification = todo_update.has_notification
     if todo_update.notification_times is not None:
         todo.notification_times = json.dumps(todo_update.notification_times)
+    if todo_update.notification_reminders is not None:
+        todo.notification_reminders = json.dumps(todo_update.notification_reminders)
     if todo_update.family_member_ids is not None:
         todo.family_member_ids = json.dumps(todo_update.family_member_ids)
     
@@ -459,7 +965,340 @@ async def update_todo(
                 db.add(checklist_item)
     
     todo.updated_at = datetime.utcnow()
+    
+    # 업데이트된 시간 값 확인
+    logger.info(f"[UPDATE_TODO] 저장 전 확인: todo_id={todo.id}, start_time={todo.start_time}, end_time={todo.end_time}, updated_at={todo.updated_at}")
+    
     db.commit()
+    db.refresh(todo)
+    
+    # 저장 후 확인
+    logger.info(f"[UPDATE_TODO] 저장 후 확인: todo_id={todo.id}, start_time={todo.start_time}, end_time={todo.end_time}")
+    
+    # 반복 설정이 변경되었고 새로운 반복 타입이 있는 경우 반복 일정 생성
+    # 또는 반복 타입이 "none"으로 변경된 경우 기존 반복 일정이 이미 삭제되었으므로 생성 불필요
+    # todo 객체가 업데이트되었으므로 todo.repeat_type과 todo.repeat_pattern을 사용
+    logger.info(f"[UPDATE_TODO] 반복 설정 체크: repeat_needs_recreate={repeat_needs_recreate}, old_repeat_type={old_repeat_type}, new_repeat_type={new_repeat_type}, todo.repeat_type={todo.repeat_type}, repeat_changed={repeat_changed}")
+    
+    # todo 객체가 업데이트되었으므로 todo.repeat_type을 사용
+    final_repeat_type = todo.repeat_type or "none"
+    
+    logger.info(f"[UPDATE_TODO] 최종 반복 타입 확인: final_repeat_type={final_repeat_type}, repeat_needs_recreate={repeat_needs_recreate}")
+    
+    if repeat_needs_recreate and final_repeat_type and final_repeat_type != "none":
+        logger.info(f"[UPDATE_TODO] 반복 설정 변경됨: {old_repeat_type} -> {final_repeat_type}, 반복 일정 생성 시작")
+        
+        # 반복 그룹 ID 설정 (없으면 생성)
+        import uuid
+        if not todo.todo_group_id:
+            todo.todo_group_id = f"repeat_{uuid.uuid4().hex[:12]}"
+            db.commit()
+            db.refresh(todo)
+        
+        # 반복 종료 날짜 설정 (없으면 기본값으로 1년 후)
+        repeat_end_date = todo.repeat_end_date
+        if not repeat_end_date:
+            from datetime import timedelta
+            repeat_end_date = todo.date + timedelta(days=365)
+            logger.info(f"[UPDATE_TODO] 반복 종료 날짜 기본값 설정: {repeat_end_date}")
+        
+        # 반복 일정 생성 로직 (create_todo와 동일)
+        from datetime import timedelta
+        repeated_todos = []
+        start_date = todo.date
+        end_date = repeat_end_date
+        
+        logger.info(f"[UPDATE_TODO] 반복 일정 생성 준비: 타입={final_repeat_type}, 시작 날짜={start_date}, 종료 날짜={end_date}, repeat_pattern={todo.repeat_pattern}")
+        
+        # 반복 주기에 따라 날짜 계산
+        current_date = start_date + timedelta(days=1)  # 다음 날짜부터 시작
+        
+        if final_repeat_type == "daily":
+            # 매일: 다음 날부터 반복 종료일까지 매일 생성
+            while current_date <= end_date:
+                repeated_todos.append(current_date)
+                current_date += timedelta(days=1)
+        elif final_repeat_type == "weekly":
+            # 매주: 같은 요일마다 생성
+            start_weekday = start_date.weekday()
+            while current_date <= end_date:
+                if current_date.weekday() == start_weekday:
+                    repeated_todos.append(current_date)
+                current_date += timedelta(days=1)
+        elif final_repeat_type == "monthly":
+            # 매월: 같은 날짜마다 생성
+            from calendar import monthrange
+            start_day = start_date.day
+            # 첫 번째 반복 날짜: 다음 달 같은 날짜
+            if start_date.month == 12:
+                next_month_date = date(start_date.year + 1, 1, start_day)
+            else:
+                try:
+                    next_month_date = date(start_date.year, start_date.month + 1, start_day)
+                except ValueError:
+                    # 날짜가 유효하지 않은 경우 (예: 31일이 없는 달), 마지막 날로 설정
+                    if start_date.month == 12:
+                        next_month = date(start_date.year + 1, 1, 1)
+                    else:
+                        next_month = date(start_date.year, start_date.month + 1, 1)
+                    last_day = monthrange(next_month.year, next_month.month)[1]
+                    next_month_date = date(next_month.year, next_month.month, min(start_day, last_day))
+            
+            current_date = next_month_date
+            while current_date <= end_date:
+                repeated_todos.append(current_date)
+                # 다음 달로 이동
+                if current_date.month == 12:
+                    next_year = current_date.year + 1
+                    next_month = 1
+                else:
+                    next_year = current_date.year
+                    next_month = current_date.month + 1
+                
+                try:
+                    current_date = date(next_year, next_month, start_day)
+                except ValueError:
+                    # 날짜가 유효하지 않은 경우, 마지막 날로 설정
+                    next_month_start = date(next_year, next_month, 1)
+                    last_day = monthrange(next_month_start.year, next_month_start.month)[1]
+                    current_date = date(next_year, next_month, min(start_day, last_day))
+        elif final_repeat_type == "yearly":
+            # 매년: 같은 월일마다 생성
+            start_month = start_date.month
+            start_day = start_date.day
+            # 첫 번째 반복 날짜: 다음 년도 같은 날짜
+            next_year_date = date(start_date.year + 1, start_month, start_day)
+            current_date = next_year_date
+            while current_date <= end_date:
+                repeated_todos.append(current_date)
+                # 다음 년도로 이동
+                current_date = date(current_date.year + 1, start_month, start_day)
+        elif final_repeat_type == "weekdays":
+            # 매주 주중 (월~금)
+            while current_date <= end_date:
+                weekday = current_date.weekday()
+                if weekday < 5:  # 0(월)~4(금)
+                    repeated_todos.append(current_date)
+                current_date += timedelta(days=1)
+        elif final_repeat_type == "weekends":
+            # 매주 주말 (토~일)
+            while current_date <= end_date:
+                weekday = current_date.weekday()
+                if weekday >= 5:  # 5(토)~6(일)
+                    repeated_todos.append(current_date)
+                current_date += timedelta(days=1)
+        elif final_repeat_type == "custom" and todo.repeat_pattern:
+            # 맞춤 반복 패턴 처리 (create_todo와 동일한 로직)
+            try:
+                pattern = todo.repeat_pattern
+                if isinstance(pattern, str):
+                    pattern = json.loads(pattern)
+                
+                freq = pattern.get('freq', 'days')
+                interval = pattern.get('interval', 1)
+                custom_days = pattern.get('days', [])
+                end_type = pattern.get('endType', 'never')
+                
+                # 종료 날짜 계산
+                if end_type == 'date':
+                    end_date_str = pattern.get('endDate')
+                    if end_date_str:
+                        if isinstance(end_date_str, str):
+                            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                        else:
+                            end_date = end_date_str
+                elif end_type == 'count':
+                    count = pattern.get('count', 10)
+                    if freq == 'days':
+                        end_date = start_date + timedelta(days=interval * (count - 1))
+                    elif freq == 'weeks':
+                        end_date = start_date + timedelta(weeks=interval * (count - 1))
+                    elif freq == 'months':
+                        from calendar import monthrange
+                        end_date = start_date
+                        start_day = start_date.day
+                        for i in range(count - 1):
+                            months_to_add = interval
+                            if end_date.month + months_to_add > 12:
+                                next_year = end_date.year + 1
+                                next_month = (end_date.month + months_to_add) % 12
+                                if next_month == 0:
+                                    next_month = 12
+                                    next_year -= 1
+                            else:
+                                next_year = end_date.year
+                                next_month = end_date.month + months_to_add
+                            
+                            try:
+                                end_date = date(next_year, next_month, start_day)
+                            except ValueError:
+                                last_day = monthrange(next_year, next_month)[1]
+                                end_date = date(next_year, next_month, min(start_day, last_day))
+                    elif freq == 'years':
+                        end_date = date(start_date.year + interval * (count - 1), start_date.month, start_date.day)
+                    else:
+                        end_date = start_date + timedelta(days=interval * (count - 1))
+                else:
+                    # end_type == 'never'인 경우 기본값 사용 (1년 후)
+                    end_date = start_date + timedelta(days=365)
+                
+                # 반복 일정 생성
+                if freq == 'days':
+                    current_date = start_date + timedelta(days=interval)
+                    while current_date <= end_date:
+                        repeated_todos.append(current_date)
+                        current_date += timedelta(days=interval)
+                elif freq == 'weeks':
+                    if custom_days:
+                        # 특정 요일만
+                        current_date = start_date
+                        week_count = 0
+                        while current_date <= end_date:
+                            weekday = current_date.weekday()
+                            weeks_from_start = (current_date - start_date).days // 7
+                            if weeks_from_start % interval == 0 and weekday in custom_days:
+                                if current_date > start_date:
+                                    repeated_todos.append(current_date)
+                            current_date += timedelta(days=1)
+                    else:
+                        # 같은 요일마다 N주마다
+                        start_weekday = start_date.weekday()
+                        current_date = start_date + timedelta(weeks=interval)
+                        while current_date <= end_date:
+                            if current_date.weekday() == start_weekday:
+                                repeated_todos.append(current_date)
+                                current_date += timedelta(weeks=interval)
+                            else:
+                                current_date += timedelta(days=1)
+                elif freq == 'months':
+                    # 매 N개월마다 (create_todo와 동일한 로직)
+                    current_date = start_date
+                    from calendar import monthrange
+                    start_day = start_date.day
+                    months_to_add = interval
+                    if current_date.month + months_to_add > 12:
+                        next_year = current_date.year + 1
+                        next_month = (current_date.month + months_to_add) % 12
+                        if next_month == 0:
+                            next_month = 12
+                            next_year -= 1
+                    else:
+                        next_year = current_date.year
+                        next_month = current_date.month + months_to_add
+                    
+                    try:
+                        current_date = date(next_year, next_month, start_day)
+                    except ValueError:
+                        last_day = monthrange(next_year, next_month)[1]
+                        current_date = date(next_year, next_month, min(start_day, last_day))
+                    
+                    while current_date <= end_date:
+                        repeated_todos.append(current_date)
+                        months_to_add = interval
+                        if current_date.month + months_to_add > 12:
+                            next_year = current_date.year + 1
+                            next_month = (current_date.month + months_to_add) % 12
+                            if next_month == 0:
+                                next_month = 12
+                                next_year -= 1
+                        else:
+                            next_year = current_date.year
+                            next_month = current_date.month + months_to_add
+                        
+                        try:
+                            current_date = date(next_year, next_month, start_day)
+                        except ValueError:
+                            last_day = monthrange(next_year, next_month)[1]
+                            current_date = date(next_year, next_month, min(start_day, last_day))
+                elif freq == 'years':
+                    current_date = date(start_date.year + interval, start_date.month, start_date.day)
+                    while current_date <= end_date:
+                        repeated_todos.append(current_date)
+                        current_date = date(current_date.year + interval, start_date.month, start_date.day)
+            except Exception as e:
+                logger.error(f"[UPDATE_TODO] 맞춤 반복 패턴 처리 실패: {e}", exc_info=True)
+        
+        logger.info(f"[UPDATE_TODO] 반복 일정 생성 예정: {len(repeated_todos)}개 (타입: {final_repeat_type}, 그룹 ID: {todo.todo_group_id}, 시작 날짜: {start_date}, 종료 날짜: {end_date})")
+        
+        if len(repeated_todos) == 0:
+            logger.warning(f"[UPDATE_TODO] 반복 일정 생성 실패: 반복 날짜 목록이 비어있음 (타입: {final_repeat_type}, 시작 날짜: {start_date}, 종료 날짜: {end_date})")
+        
+        # 반복 일정 생성
+        created_count = 0
+        repeated_todo_objects = []  # 체크리스트 항목 추가를 위해 저장
+        
+        # 원본 일정의 기간 계산 (여러 날짜에 걸친 일정인 경우)
+        original_duration_days = 0
+        if todo.end_date and todo.date:
+            original_duration_days = (todo.end_date - todo.date).days
+            logger.info(f"[UPDATE_TODO] 원본 일정 기간: {todo.date} ~ {todo.end_date} ({original_duration_days}일)")
+        
+        for repeat_date in repeated_todos:
+            # 반복 일정의 종료 날짜 계산 (원본 일정과 동일한 기간 유지)
+            repeated_end_date = None
+            if original_duration_days > 0:
+                repeated_end_date = repeat_date + timedelta(days=original_duration_days)
+                logger.info(f"[UPDATE_TODO] 반복 일정 기간: {repeat_date} ~ {repeated_end_date} ({original_duration_days}일)")
+            
+            repeated_todo = Todo(
+                user_id=current_user.id,
+                title=todo.title,
+                description=todo.description,
+                memo=todo.memo,
+                location=todo.location,
+                date=repeat_date,  # 반복 시작 날짜
+                end_date=repeated_end_date,  # 원본 일정과 동일한 기간 유지
+                start_time=todo.start_time,
+                end_time=todo.end_time,
+                all_day=todo.all_day,
+                category=todo.category,
+                status=todo.status,
+                priority=todo.priority,
+                repeat_type=todo.repeat_type,
+                repeat_end_date=todo.repeat_end_date,
+                repeat_days=todo.repeat_days,
+                repeat_pattern=todo.repeat_pattern,
+                has_notification=todo.has_notification,
+                notification_times=todo.notification_times,
+                notification_reminders=todo.notification_reminders,
+                family_member_ids=todo.family_member_ids,
+                tags=todo.tags,
+                source=todo.source,
+                todo_group_id=todo.todo_group_id  # 같은 그룹 ID로 묶기
+            )
+            db.add(repeated_todo)
+            repeated_todo_objects.append((repeated_todo, repeat_date))
+            created_count += 1
+        
+        # 반복 일정을 먼저 flush하여 ID 생성
+        if repeated_todos:
+            db.flush()  # ID를 생성하기 위해 flush
+            logger.info(f"[UPDATE_TODO] 반복 일정 flush 완료: {created_count}개")
+            
+            # 이제 각 반복 일정에 체크리스트 항목 추가
+            for repeated_todo, repeat_date in repeated_todo_objects:
+                if todo_update.checklist_items:
+                    for idx, item_text in enumerate(todo_update.checklist_items):
+                        if item_text.strip():
+                            checklist_item = ChecklistItem(
+                                todo_id=repeated_todo.id,  # 이제 ID가 생성됨
+                                text=item_text,
+                                completed=False,
+                                order_index=idx
+                            )
+                            db.add(checklist_item)
+                logger.info(f"[UPDATE_TODO] 반복 일정 생성: 날짜={repeat_date}, ID={repeated_todo.id}")
+            
+            # 체크리스트 항목과 함께 최종 커밋
+            db.commit()
+            logger.info(f"[UPDATE_TODO] 반복 일정 생성 완료: {created_count}개 (총 {len(repeated_todos)}개 중)")
+        else:
+            logger.warning(f"[UPDATE_TODO] 반복 일정 생성 실패: 반복 날짜 목록이 비어있음")
+    else:
+        if not repeat_needs_recreate:
+            logger.info(f"[UPDATE_TODO] 반복 일정 생성 스킵: repeat_needs_recreate={repeat_needs_recreate}")
+        elif not new_repeat_type or new_repeat_type == "none":
+            logger.info(f"[UPDATE_TODO] 반복 일정 생성 스킵: new_repeat_type={new_repeat_type}")
     
     # Google Calendar 자동 업데이트 (연동 활성화 및 내보내기 활성화 시)
     # 사용자 정보를 다시 로드하여 최신 토글 상태 확인
@@ -486,7 +1325,15 @@ async def update_todo(
                     if todo.all_day:
                         # 종일 이벤트
                         start_datetime = datetime.combine(todo.date, datetime.min.time())
-                        end_datetime = start_datetime + timedelta(days=1)
+                        # end_date가 있으면 그 날짜까지, 없으면 하루만
+                        logger.info(f"[UPDATE_TODO] 종일 이벤트 - date: {todo.date}, end_date: {todo.end_date}")
+                        if todo.end_date:
+                            # end_date는 inclusive이므로, Google Calendar의 exclusive 형식으로 변환하려면 +1일
+                            end_datetime = datetime.combine(todo.end_date, datetime.min.time()) + timedelta(days=1)
+                            logger.info(f"[UPDATE_TODO] 종일 이벤트 기간: {todo.date} ~ {todo.end_date} ({(todo.end_date - todo.date).days + 1}일), end_datetime: {end_datetime}")
+                        else:
+                            end_datetime = start_datetime + timedelta(days=1)
+                            logger.info(f"[UPDATE_TODO] 종일 이벤트 (하루): {todo.date}, end_datetime: {end_datetime}")
                     else:
                         # 시간 지정 이벤트
                         if todo.start_time:
@@ -494,10 +1341,22 @@ async def update_todo(
                         else:
                             start_datetime = datetime.combine(todo.date, datetime.min.time())
                         
-                        if todo.end_time:
-                            end_datetime = datetime.combine(todo.date, todo.end_time)
+                        # end_date가 있으면 그 날짜의 end_time 사용, 없으면 같은 날의 end_time 사용
+                        if todo.end_date:
+                            # 여러 날짜에 걸친 일정
+                            if todo.end_time:
+                                end_datetime = datetime.combine(todo.end_date, todo.end_time)
+                            else:
+                                # end_time이 없으면 end_date의 23:59:59로 설정
+                                end_datetime = datetime.combine(todo.end_date, datetime.max.time())
+                            logger.info(f"[UPDATE_TODO] 시간 지정 이벤트 기간: {todo.date} {todo.start_time} ~ {todo.end_date} {todo.end_time or '23:59'} ({(todo.end_date - todo.date).days + 1}일)")
                         else:
-                            end_datetime = start_datetime + timedelta(hours=1)
+                            # 하루 일정
+                            if todo.end_time:
+                                end_datetime = datetime.combine(todo.date, todo.end_time)
+                            else:
+                                end_datetime = start_datetime + timedelta(hours=1)
+                            logger.info(f"[UPDATE_TODO] 시간 지정 이벤트 (하루): {todo.date} {todo.start_time} ~ {todo.end_time or '1시간 후'}")
                 
                 if start_datetime:
                     # Google Calendar 이벤트 업데이트
@@ -523,18 +1382,35 @@ async def update_todo(
                 
                 if todo.date:
                     if todo.all_day:
+                        # 종일 이벤트
                         start_datetime = datetime.combine(todo.date, datetime.min.time())
-                        end_datetime = start_datetime + timedelta(days=1)
+                        # end_date가 있으면 그 날짜까지, 없으면 하루만
+                        if todo.end_date:
+                            # end_date는 inclusive이므로, Google Calendar의 exclusive 형식으로 변환하려면 +1일
+                            end_datetime = datetime.combine(todo.end_date, datetime.min.time()) + timedelta(days=1)
+                        else:
+                            end_datetime = start_datetime + timedelta(days=1)
                     else:
+                        # 시간 지정 이벤트
                         if todo.start_time:
                             start_datetime = datetime.combine(todo.date, todo.start_time)
                         else:
                             start_datetime = datetime.combine(todo.date, datetime.min.time())
                         
-                        if todo.end_time:
-                            end_datetime = datetime.combine(todo.date, todo.end_time)
+                        # end_date가 있으면 그 날짜의 end_time 사용, 없으면 같은 날의 end_time 사용
+                        if todo.end_date:
+                            # 여러 날짜에 걸친 일정
+                            if todo.end_time:
+                                end_datetime = datetime.combine(todo.end_date, todo.end_time)
+                            else:
+                                # end_time이 없으면 end_date의 23:59:59로 설정
+                                end_datetime = datetime.combine(todo.end_date, datetime.max.time())
                         else:
-                            end_datetime = start_datetime + timedelta(hours=1)
+                            # 하루 일정
+                            if todo.end_time:
+                                end_datetime = datetime.combine(todo.date, todo.end_time)
+                            else:
+                                end_datetime = start_datetime + timedelta(hours=1)
                 
                 if start_datetime:
                     event = await GoogleCalendarService.create_event(
@@ -578,6 +1454,7 @@ async def update_todo(
         "memo": updated_todo.memo,
         "location": updated_todo.location,
         "date": updated_todo.date.isoformat() if updated_todo.date else None,
+        "end_date": updated_todo.end_date.isoformat() if updated_todo.end_date else None,
         "start_time": updated_todo.start_time.strftime("%H:%M") if updated_todo.start_time else None,
         "end_time": updated_todo.end_time.strftime("%H:%M") if updated_todo.end_time else None,
         "all_day": updated_todo.all_day,
@@ -587,8 +1464,10 @@ async def update_todo(
         "repeat_type": updated_todo.repeat_type,
         "repeat_end_date": updated_todo.repeat_end_date.isoformat() if updated_todo.repeat_end_date else None,
         "repeat_days": updated_todo.repeat_days,
+        "repeat_pattern": json.loads(updated_todo.repeat_pattern) if updated_todo.repeat_pattern else None,
         "has_notification": updated_todo.has_notification,
         "notification_times": json.loads(updated_todo.notification_times) if updated_todo.notification_times else [],
+        "notification_reminders": json.loads(updated_todo.notification_reminders) if updated_todo.notification_reminders else [],
         "family_member_ids": json.loads(updated_todo.family_member_ids) if updated_todo.family_member_ids else [],
         "checklist_items": [item.text for item in updated_todo.checklist_items],  # 문자열 리스트로 변환
         "created_at": updated_todo.created_at,  # datetime 객체 그대로 사용
@@ -675,33 +1554,13 @@ async def delete_todo(
         # 커밋
         db.commit()
         
+        # 삭제된 일정 ID 목록 저장 (로깅용)
+        deleted_ids = [t.id for t in todos_to_delete]
+        
         # 삭제된 일정 수 로깅
-        logger.info(f"[DELETE-TODO] 삭제 완료: {len(todos_to_delete)}개 일정 삭제됨 (todo_group_id={todo.todo_group_id if hasattr(todo, 'todo_group_id') else None})")
+        logger.info(f"[DELETE-TODO] 삭제 완료: {len(todos_to_delete)}개 일정 삭제됨 (todo_group_id={todo.todo_group_id if hasattr(todo, 'todo_group_id') else None}, ids={deleted_ids})")
         
-        # 삭제 확인: deleted_at이 제대로 설정되었는지 확인
-        if todo.deleted_at is None:
-            logger.error(f"[DELETE-TODO] 삭제 실패: deleted_at이 None입니다. todo_id={todo_id}")
-            db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="일정 삭제에 실패했습니다"
-            )
-        
-        # 삭제 후 확인 쿼리
-        deleted_check = db.query(Todo).filter(
-            Todo.id == todo_id,
-            Todo.deleted_at.is_(None)
-        ).first()
-        
-        if deleted_check is not None:
-            logger.error(f"[DELETE-TODO] 삭제 확인 실패: 여전히 deleted_at이 None입니다. todo_id={todo_id}")
-            db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="일정 삭제 확인에 실패했습니다"
-            )
-        
-        logger.info(f"[DELETE-TODO] 삭제 성공: todo_id={todo_id}, deleted_at={todo.deleted_at}")
+        logger.info(f"[DELETE-TODO] 삭제 성공: todo_id={todo_id}, deleted_at={deleted_at_value}")
         
     except HTTPException:
         raise

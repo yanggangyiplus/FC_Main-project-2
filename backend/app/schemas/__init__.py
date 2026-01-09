@@ -2,7 +2,7 @@
 Pydantic 스키마 (데이터 검증)
 """
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
-from typing import Optional, List, Union, Any
+from typing import Optional, List, Union, Any, Dict
 from datetime import datetime, date
 from decimal import Decimal
 
@@ -44,7 +44,8 @@ class TodoBase(BaseModel):
     """할일 기본 스키마"""
     title: str
     description: Optional[str] = None
-    date: date  # Pydantic v2가 자동으로 문자열을 date로 변환
+    date: date  # 시작 날짜 (Pydantic v2가 자동으로 문자열을 date로 변환)
+    end_date: Optional[date] = None  # 종료 날짜 (기간 일정인 경우)
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     all_day: bool = False
@@ -53,11 +54,13 @@ class TodoBase(BaseModel):
     status: str = "pending"
     location: Optional[str] = None
     memo: Optional[str] = None
-    repeat_type: Optional[str] = "none"  # none, daily, weekly, monthly, yearly
-    repeat_end_date: Optional[date] = None
-    repeat_days: Optional[str] = None
+    repeat_type: Optional[str] = "none"  # none, daily, weekly, monthly, yearly, weekdays, weekends, custom
+    repeat_end_date: Optional[date] = None  # 반복 종료 날짜
+    repeat_days: Optional[str] = None  # 구버전 호환
+    repeat_pattern: Optional[Dict[str, Any]] = None  # 반복 패턴 JSON
     has_notification: bool = False
-    notification_times: Optional[List[str]] = None
+    notification_times: Optional[List[str]] = None  # 구버전 호환
+    notification_reminders: Optional[List[Dict[str, Any]]] = None  # [{"value": 30, "unit": "minutes"}, ...]
     family_member_ids: Optional[List[str]] = None
     checklist_items: Optional[List[str]] = None
     
@@ -88,7 +91,8 @@ class TodoUpdate(BaseModel):
     """할일 수정"""
     title: Optional[str] = None
     description: Optional[str] = None
-    date: Optional[str] = None  # 문자열로 받아서 엔드포인트에서 변환
+    date: Optional[str] = None  # 시작 날짜 (문자열로 받아서 엔드포인트에서 변환)
+    end_date: Optional[str] = None  # 종료 날짜 (문자열로 받아서 엔드포인트에서 변환)
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     all_day: Optional[bool] = None
@@ -98,10 +102,12 @@ class TodoUpdate(BaseModel):
     location: Optional[str] = None
     memo: Optional[str] = None
     repeat_type: Optional[str] = None
-    repeat_end_date: Optional[str] = None  # 문자열로 받아서 엔드포인트에서 변환
+    repeat_end_date: Optional[str] = None  # 반복 종료 날짜 (문자열로 받아서 엔드포인트에서 변환)
     repeat_days: Optional[str] = None
+    repeat_pattern: Optional[Dict[str, Any]] = None
     has_notification: Optional[bool] = None
     notification_times: Optional[List[str]] = None
+    notification_reminders: Optional[List[Dict[str, Any]]] = None
     family_member_ids: Optional[List[str]] = None
     checklist_items: Optional[List[str]] = None
 
@@ -111,6 +117,9 @@ class TodoResponse(TodoBase):
     id: str
     user_id: str
     created_at: datetime
+    updated_at: Optional[datetime] = None
+    google_calendar_event_id: Optional[str] = None
+    bulk_synced: Optional[bool] = False
     todo_group_id: Optional[str] = None  # 일정 그룹 ID (여러 날짜에 걸친 일정 묶기)
     
     class Config:

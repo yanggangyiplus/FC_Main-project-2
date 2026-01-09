@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { ChevronLeft, ChevronRight, X, Clock, Tag, FileText } from "lucide-react";
 import { RoutineItem } from "./RoutineView";
+import { formatDuration } from "@/utils/formatDuration";
 
 interface WeekCalendarProps {
   todos: Array<{
@@ -11,6 +12,7 @@ interface WeekCalendarProps {
     completed: boolean;
     category: string;
     date?: string;
+    endDate?: string; // 종료 날짜 (기간 일정)
     memo?: string;
   }>;
   routines?: RoutineItem[];
@@ -66,8 +68,29 @@ export function WeekCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }
     const todayStr = new Date().toISOString().split("T")[0];
     const dayOfWeek = date.getDay();
 
-    // 1. Regular Todos
-    let regularTodos = todos.filter((todo) => todo.date === dateStr);
+    // 1. Regular Todos - 기간 일정인 경우 시작일부터 종료일까지 모든 날짜에 표시
+    let regularTodos = todos.filter((todo) => {
+      if (!todo.date) return false;
+      
+      // 시작일과 동일한 경우
+      if (todo.date === dateStr) return true;
+      
+      // 기간 일정인 경우: 시작일과 종료일 사이에 포함되는지 확인
+      if (todo.endDate && todo.endDate !== todo.date) {
+        const startDate = new Date(todo.date);
+        const endDate = new Date(todo.endDate);
+        const currentDate = new Date(dateStr);
+        
+        // 날짜 비교 (시간 제외)
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(0, 0, 0, 0);
+        currentDate.setHours(0, 0, 0, 0);
+        
+        return currentDate >= startDate && currentDate <= endDate;
+      }
+      
+      return false;
+    });
 
     // Fallback for "Today's" mock todos that might not have a date
     if (dateStr === todayStr) {
@@ -345,7 +368,7 @@ export function WeekCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }
                 <div className="space-y-2">
                   <div className="bg-[#FAFAFA] rounded p-2 text-xs text-[#6B7280] space-y-1">
                     <div className="flex items-center gap-2">
-                      <Clock size={12} /> <span>{todo.time} ({todo.duration}분)</span>
+                      <Clock size={12} /> <span>{todo.time} ({formatDuration(todo.duration)})</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Tag size={12} /> <span className={`px-1.5 py-0.5 rounded ${getCategoryColor(todo.category)}`}>{todo.category}</span>

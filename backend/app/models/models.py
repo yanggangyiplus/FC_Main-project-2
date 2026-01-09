@@ -37,7 +37,8 @@ class Todo(BaseModel):
     memo = Column(Text)  # 메모
     location = Column(String(255))  # 장소
     
-    date = Column(Date, nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)  # 시작 날짜
+    end_date = Column(Date, index=True)  # 종료 날짜 (기간 일정인 경우)
     start_time = Column(Time)
     end_time = Column(Time)
     all_day = Column(Boolean, default=False)
@@ -51,11 +52,13 @@ class Todo(BaseModel):
     completed_at = Column(DateTime)
     
     has_notification = Column(Boolean, default=False)
-    notification_times = Column(Text)  # JSON 배열
+    notification_times = Column(Text)  # JSON 배열 (구버전 호환)
+    notification_reminders = Column(Text)  # JSON 배열: [{"value": 30, "unit": "minutes"}, ...]
     
     repeat_type = Column(String(20), default="none")
-    repeat_end_date = Column(Date)
+    repeat_end_date = Column(Date)  # 반복 종료 날짜
     repeat_days = Column(String(20))
+    repeat_pattern = Column(Text)  # JSON: {"frequency": "daily", "interval": 1, "count": null, "until": "2026-01-31", "byday": null, "bymonthday": null}
     
     source = Column(String(50))  # voice, text, camera, sync
     deleted_at = Column(DateTime, index=True)

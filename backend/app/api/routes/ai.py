@@ -272,8 +272,11 @@ async def extract_todo_info(
             "location": result.get("location", ""),
             "memo": result.get("memo", request.text),
             "repeat_type": result.get("repeat_type", "none"),
+            "repeat_end_date": result.get("repeat_end_date"),
+            "repeat_pattern": result.get("repeat_pattern"),
             "has_notification": result.get("has_notification", False),
             "notification_times": result.get("notification_times", []),
+            "notification_reminders": result.get("notification_reminders", []),  # 새로운 알림 형식
             "timestamp": datetime.utcnow().isoformat()
         }
         
