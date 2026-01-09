@@ -174,13 +174,18 @@ export function CalendarHomeScreen() {
       const urlParams = new URLSearchParams(window.location.search);
       const code = urlParams.get('code');
       const state = urlParams.get('state');
-      const source = urlParams.get('source');
+      const scope = urlParams.get('scope');
 
-      // Google Calendar OAuth 콜백인지 확인
-      if (code && state && source === 'calendar') {
+      // Google Calendar OAuth 콜백인지 확인 (scope에 calendar가 포함되어 있거나 저장된 state가 있는 경우)
+      const storedState = localStorage.getItem('google_calendar_oauth_state');
+      const isCalendarCallback = code && state && (
+        (scope && scope.includes('calendar')) || 
+        storedState === state
+      );
+
+      if (isCalendarCallback) {
         try {
-          const storedState = localStorage.getItem('google_calendar_oauth_state');
-          if (storedState !== state) {
+          if (storedState && storedState !== state) {
             console.error('[Google Calendar] State 불일치');
             toast.error('Google Calendar 연동에 실패했습니다.');
             // URL 정리
@@ -188,6 +193,8 @@ export function CalendarHomeScreen() {
             return;
           }
 
+          console.log('[Google Calendar] OAuth 콜백 처리 시작...');
+          
           // 백엔드로 콜백 처리 요청
           await apiClient.googleCalendarCallback(code, state);
           toast.success('Google Calendar 연동이 완료되었습니다.');
@@ -710,59 +717,31 @@ export function CalendarHomeScreen() {
     loadInitialData();
   }, []); // 컴포넌트 마운트 시 한 번만 실행
 
-  // Google Calendar 이벤트를 주기적으로 가져오기 (1분마다)
+  // Google Calendar 초기 상태 확인 및 이벤트 로드 (마운트 시 한 번만)
   useEffect(() => {
-    console.log('[Google Calendar] 주기적 업데이트 설정 시작...');
-
-    // 가져오기 토글이 활성화되어 있을 때만 주기적으로 가져오기
-    const interval = setInterval(async () => {
-      console.log('[Google Calendar] 주기적 업데이트 실행 (1분마다)...');
+    const initialCheck = async () => {
+      console.log('[Google Calendar] 초기 상태 확인 실행...');
       try {
         const calendarStatusResponse = await apiClient.getCalendarStatus();
         const googleCalendarEnabled = calendarStatusResponse.data?.enabled || false;
         const googleCalendarConnected = calendarStatusResponse.data?.connected || false;
         const googleCalendarImportEnabled = calendarStatusResponse.data?.import_enabled || false;
 
-        console.log('[Google Calendar] 상태 확인:', {
-          enabled: googleCalendarEnabled,
-          connected: googleCalendarConnected,
-          importEnabled: googleCalendarImportEnabled
-        });
-
         if (googleCalendarEnabled && googleCalendarConnected && googleCalendarImportEnabled) {
-          console.log('[Google Calendar] 주기적 이벤트 가져오기 시작...');
+          console.log('[Google Calendar] 초기 이벤트 가져오기 시작...');
           await loadGoogleCalendarEvents();
         } else {
-          console.log('[Google Calendar] 주기적 업데이트 스킵 (토글 비활성화 또는 연결 안됨)');
+          console.log('[Google Calendar] 초기 로드 스킵 (토글 비활성화 또는 연결 안됨)');
         }
       } catch (error) {
-        console.error('[Google Calendar] 주기적 이벤트 가져오기 실패:', error);
-      }
-    }, 60000); // 1분마다
-
-    // 즉시 한 번 실행 (초기 로드 후)
-    const immediateCheck = async () => {
-      console.log('[Google Calendar] 즉시 상태 확인 실행...');
-      try {
-        const calendarStatusResponse = await apiClient.getCalendarStatus();
-        const googleCalendarEnabled = calendarStatusResponse.data?.enabled || false;
-        const googleCalendarConnected = calendarStatusResponse.data?.connected || false;
-        const googleCalendarImportEnabled = calendarStatusResponse.data?.import_enabled || false;
-
-        if (googleCalendarEnabled && googleCalendarConnected && googleCalendarImportEnabled) {
-          console.log('[Google Calendar] 즉시 이벤트 가져오기 시작...');
-          await loadGoogleCalendarEvents();
-        }
-      } catch (error) {
-        console.error('[Google Calendar] 즉시 이벤트 가져오기 실패:', error);
+        console.error('[Google Calendar] 초기 이벤트 가져오기 실패:', error);
       }
     };
 
     // 약간의 지연 후 실행 (초기 로드 완료 후)
-    const timeoutId = setTimeout(immediateCheck, 2000);
+    const timeoutId = setTimeout(initialCheck, 2000);
 
     return () => {
-      clearInterval(interval);
       clearTimeout(timeoutId);
     };
   }, [loadGoogleCalendarEvents]);

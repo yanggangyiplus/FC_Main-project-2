@@ -8,14 +8,23 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, date
+from pydantic import BaseModel
 
 from app.database import get_db
 from app.models.user import User
+from app.models.models import Todo
 from app.services.calendar_service import GoogleCalendarService
 from app.api.routes.auth import get_current_user, oauth_states
 from app.config import settings
+from googleapiclient.errors import HttpError
+from google.auth.transport.requests import Request
+
 
 logger = logging.getLogger(__name__)
+
+class GoogleCallbackRequest(BaseModel):
+    code: str
+    state: str
 
 router = APIRouter(
     prefix="/calendar",
@@ -850,13 +859,6 @@ async def get_google_calendar_auth_url(
     # 캘린더 전용 OAuth URL 생성
     auth_url = GoogleOAuthService.get_authorization_url(state, calendar=True)
     
-    # Calendar OAuth임을 나타내는 source 파라미터 추가 (프론트엔드 호환성)
-    # 프론트엔드에서 이를 감지하여 /calendar/google-callback으로 보내도록 함
-    if '?' in auth_url:
-        auth_url += '&source=calendar'
-    else:
-        auth_url += '?source=calendar'
-    
     logger.info(f"[GOOGLE_CALENDAR_AUTH_URL] Calendar OAuth URL 생성 - state: {state[:20]}..., calendar_mode: true")
     
     return {
@@ -1314,11 +1316,11 @@ async def disable_calendar_sync(
 
 @router.post("/google-callback")
 async def google_calendar_callback(
-    code: str,
-    state: str,
+    request: GoogleCallbackRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    
     """Google Calendar OAuth 콜백 처리"""
     from app.api.routes.auth import oauth_states
     from app.services.auth_service import GoogleOAuthService
@@ -1326,17 +1328,17 @@ async def google_calendar_callback(
     
     try:
         # State 검증
-        if state not in oauth_states:
+        if request.state not in oauth_states:
             raise HTTPException(
                 status_code=400,
                 detail="유효하지 않은 상태값(state)입니다"
             )
         
-        state_data = oauth_states[state]
-        del oauth_states[state]
+        state_data = oauth_states[request.state]
+        del oauth_states[request.state]
         
         # 캘린더 전용 토큰으로 교환
-        token_data = await GoogleOAuthService.exchange_code_for_token(code, calendar=True)
+        token_data = await GoogleOAuthService.exchange_code_for_token(request.code, calendar=True)
         if not token_data or not token_data.get('access_token'):
             raise HTTPException(
                 status_code=401,
