@@ -1,8 +1,10 @@
 # Dependencies
 node_modules/
 backend/venv/
-venv/
+backend/.venv/
+.venv/
 .python-version
+
 
 # Environment Variables
 .env
