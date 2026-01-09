@@ -916,11 +916,12 @@ export function CalendarHomeScreen() {
             const day = currentDate.getDate();
             const dateString = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
-            // 이 요일에 이미 일정이 있는지 확인 (중복 방지)
+            // 이 요일에 이미 일정이 있는지 확인 (중복 방지) - memberId도 확인
             const existingTodo = todos.find(t =>
               t.title === routine.name &&
               t.date === dateString &&
-              t.startTime === slot.startTime
+              t.startTime === slot.startTime &&
+              t.memberId === routine.memberId
             );
             if (existingTodo) {
               // 다음 주로 이동
@@ -953,6 +954,7 @@ export function CalendarHomeScreen() {
                 notification_times: [],
                 repeat_type: "none",
                 checklist_items: [],
+                member_id: routine.memberId, // 구성원 ID 추가
               };
 
               const response = await apiClient.createTodo(todoData);
@@ -1012,10 +1014,11 @@ export function CalendarHomeScreen() {
         toast.info(`${routine.name}의 일정이 이미 캘린더에 존재합니다.`);
       }
     } else {
-      // 체크박스 해제 시 해당 시간표로 생성된 모든 일정 제거 (백엔드에서도 삭제)
+      // 체크박스 해제 시 해당 시간표로 생성된 모든 일정 제거 (백엔드에서도 삭제) - memberId도 확인
       const routineTodos = todos.filter(t =>
         t.title === routine.name &&
         t.startTime &&
+        t.memberId === routine.memberId &&
         routine.timeSlots.some(slot => slot.startTime === t.startTime)
       );
 
@@ -1033,11 +1036,12 @@ export function CalendarHomeScreen() {
         }
       }
 
-      // 프론트엔드 상태 업데이트
+      // 프론트엔드 상태 업데이트 - memberId도 확인
       setTodos(prev => {
         const filtered = prev.filter(t =>
           !(t.title === routine.name &&
             t.startTime &&
+            t.memberId === routine.memberId &&
             routine.timeSlots.some(slot => slot.startTime === t.startTime))
         );
         return filtered;

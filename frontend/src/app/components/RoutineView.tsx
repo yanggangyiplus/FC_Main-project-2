@@ -274,15 +274,28 @@ export function RoutineView({
       }
     } else {
       // Create new - 선택된 가족 구성원마다 시간표 항목 생성
-      const targetMemberIds = selectedRoutineMemberIds.length > 0
-        ? selectedRoutineMemberIds
-        : selectedMemberIds.length > 0
-          ? selectedMemberIds
-          : ["1"];
+      // 팝업에서 선택된 구성원만 사용 (selectedRoutineMemberIds가 비어있으면 에러)
+      if (selectedRoutineMemberIds.length === 0) {
+        toast.error("최소 1명 이상의 구성원을 선택해주세요.");
+        return;
+      }
+
+      const targetMemberIds = selectedRoutineMemberIds;
 
       let addedCount = 0;
       targetMemberIds.forEach((memberId, index) => {
+        // memberId가 없거나 유효하지 않으면 건너뛰기
+        if (!memberId || memberId.trim() === '') {
+          console.warn(`유효하지 않은 memberId: ${memberId}, 건너뜀`);
+          return;
+        }
+
         const member = familyMembers.find(m => m.id === memberId);
+        if (!member) {
+          console.warn(`구성원을 찾을 수 없음: ${memberId}, 건너뜀`);
+          return;
+        }
+
         let routineColor: string;
         if (member?.color) {
           // hex 색상인 경우 rgba로 변환
@@ -320,6 +333,11 @@ export function RoutineView({
 
         addedCount++;
       });
+
+      if (addedCount === 0) {
+        toast.error("유효한 구성원이 선택되지 않았습니다.");
+        return;
+      }
 
       toast.success(`${newRoutineName} 항목이 ${addedCount}개 추가되었습니다.`);
     }
@@ -534,7 +552,7 @@ export function RoutineView({
               setNewRoutineEndTime("10:00");
               setNewRoutineDays([]);
               setAddToCalendar(false);
-              setSelectedRoutineMemberIds(selectedMemberIds.length > 0 ? [...selectedMemberIds] : []); // 현재 선택된 구성원으로 초기화
+              setSelectedRoutineMemberIds([]); // 빈 배열로 초기화 (사용자가 팝업에서 직접 선택하도록)
               setShowAddRoutine(true);
             }}
             className="px-3 py-2 rounded-full text-sm font-medium bg-[#F3F4F6] text-[#6B7280] hover:bg-[#E5E7EB] transition-colors flex items-center gap-1 flex-shrink-0"
