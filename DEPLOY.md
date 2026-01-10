@@ -47,6 +47,49 @@ postgresql://postgres.[PROJECT-REF]:[YOUR-PASSWORD]@aws-0-ap-northeast-2.pooler.
 
 ---
 
+## 1.5 SQLite → PostgreSQL 데이터 마이그레이션 (선택)
+
+기존 SQLite 데이터가 있다면 PostgreSQL로 마이그레이션할 수 있습니다.
+
+### 방법 1: 마이그레이션 스크립트 사용
+
+```bash
+cd backend
+
+# 환경변수 설정
+export SOURCE_DB="sqlite:///./always-plan.db"
+export TARGET_DB="postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres"
+
+# 마이그레이션 실행
+python migrate_to_postgres.py
+```
+
+**스크립트 기능:**
+- 모든 테이블 자동 마이그레이션
+- 외래키 의존성 순서대로 처리
+- Boolean 값 자동 변환 (SQLite: 0/1 → PostgreSQL: true/false)
+- 시퀀스 자동 리셋
+
+### 방법 2: 새로 시작 (권장)
+
+프로덕션에서는 새로운 데이터로 시작하는 것을 권장합니다:
+
+1. Supabase에 빈 데이터베이스 생성
+2. Cloud Run에서 앱 시작 시 테이블 자동 생성
+3. 사용자가 새로 가입하여 데이터 생성
+
+### 방법 3: Supabase SQL Editor 사용
+
+Supabase Dashboard → SQL Editor에서 직접 데이터 삽입:
+
+```sql
+-- 예시: 테스트 사용자 추가
+INSERT INTO users (id, email, name, created_at)
+VALUES ('uuid-here', 'test@example.com', '테스트 사용자', NOW());
+```
+
+---
+
 ## 2. Google Cloud 설정
 
 ### 2.1 사전 준비
