@@ -93,7 +93,7 @@ async def health_check():
 
 
 # 라우터 포함
-from app.api.routes import auth, todos, receipts, ai, family, routines, files, calendar, notifications
+from app.api.routes import auth, todos, receipts, ai, family, routines, files, calendar, notifications, push
 
 app.include_router(auth.router)
 app.include_router(todos.router)
@@ -104,6 +104,7 @@ app.include_router(routines.router)
 app.include_router(files.router)
 app.include_router(calendar.router)
 app.include_router(notifications.router)
+app.include_router(push.router)
 
 from app.api.routes import memos
 app.include_router(memos.router)

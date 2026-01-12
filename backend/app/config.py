@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # 로깅
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     
+    # VAPID 키 (웹 푸시 알림용)
+    vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "")
+    vapid_public_key: str = os.getenv("VAPID_PUBLIC_KEY", "")
+    vapid_email: str = os.getenv("VAPID_EMAIL", "admin@always-plan.com")
+    
     class Config:
         env_file = ".env"
         case_sensitive = False

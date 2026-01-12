@@ -10,10 +10,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 from app.database import get_db
-from app.models.models import Todo, Notification
+from app.models.models import Todo, Notification, PushSubscription
 from app.models.user import User
 from app.api.routes.auth import get_current_user
 from app.services.email_service import EmailService
+from app.services.push_service import push_service
 
 logger = logging.getLogger(__name__)
 
@@ -88,29 +89,27 @@ def send_scheduled_emails(db: Session):
                     else:
                         continue
                     
-                    # 알림 시간이 현재 시간과 가까운지 확인 (5분 이내)
+                    # 알림 시간이 현재 시간과 가까운지 확인 (1분 이내)
                     time_diff = abs((reminder_datetime - now).total_seconds())
-                    if time_diff <= 300:  # 5분 이내
+                    if time_diff <= 60:  # 1분 이내
                         # 이미 발송된 알림인지 확인
                         existing_notification = db.query(Notification).filter(
                             and_(
                                 Notification.user_id == todo.user_id,
                                 Notification.todo_id == todo.id,
                                 Notification.scheduled_time.between(
-                                    reminder_datetime - timedelta(minutes=5),
-                                    reminder_datetime + timedelta(minutes=5)
-                                ),
-                                Notification.channels.contains('email')
+                                    reminder_datetime - timedelta(minutes=1),
+                                    reminder_datetime + timedelta(minutes=1)
+                                )
                             )
                         ).first()
                         
                         if not existing_notification:
                             # 사용자 정보 가져오기
                             user = db.query(User).filter(User.id == todo.user_id).first()
-                            if not user or not user.email:
+                            if not user:
                                 continue
                             
-                            # 이메일 발송
                             time_str = todo.start_time.strftime("%H:%M") if todo.start_time else None
                             reminder_str = f"{value} {unit} 전" if unit != 'minutes' else f"{value}분 전"
                             
@@ -119,33 +118,72 @@ def send_scheduled_emails(db: Session):
                             if hasattr(todo, 'checklist_items'):
                                 checklist_items = [item.text for item in todo.checklist_items if hasattr(item, 'text')]
                             
-                            success = EmailService.send_notification_email(
-                                to_email=user.email,
-                                todo_title=todo.title,
-                                todo_date=todo_date.strftime("%Y년 %m월 %d일"),
-                                todo_time=time_str,
-                                reminder_time=reminder_str,
-                                todo_location=todo.location if hasattr(todo, 'location') else None,
-                                todo_category=todo.category if hasattr(todo, 'category') else None,
-                                todo_checklist=checklist_items if checklist_items else None,
-                                todo_memo=todo.memo if hasattr(todo, 'memo') and todo.memo else None
-                            )
+                            # 발송된 채널 목록
+                            sent_channels = []
                             
-                            if success:
-                                # 알림 기록 저장
-                                notification = Notification(
-                                    user_id=todo.user_id,
-                                    todo_id=todo.id,
-                                    type="reminder",
-                                    title=f"일정 알림: {todo.title}",
-                                    message=f"{reminder_str} 알림",
-                                    scheduled_time=reminder_datetime,
-                                    sent_at=now,
-                                    channels=json.dumps(["email"])
+                            # 이메일 발송
+                            if user.email:
+                                email_success = EmailService.send_notification_email(
+                                    to_email=user.email,
+                                    todo_title=todo.title,
+                                    todo_date=todo_date.strftime("%Y년 %m월 %d일"),
+                                    todo_time=time_str,
+                                    reminder_time=reminder_str,
+                                    todo_location=todo.location if hasattr(todo, 'location') else None,
+                                    todo_category=todo.category if hasattr(todo, 'category') else None,
+                                    todo_checklist=checklist_items if checklist_items else None,
+                                    todo_memo=todo.memo if hasattr(todo, 'memo') and todo.memo else None
                                 )
-                                db.add(notification)
-                                sent_count += 1
-                                logger.info(f"[EMAIL_NOTIFICATION] 이메일 발송 성공: {user.email}, 일정: {todo.title}")
+                                if email_success:
+                                    sent_channels.append("email")
+                            
+                            # 푸시 알림 발송
+                            push_subscriptions = db.query(PushSubscription).filter(
+                                PushSubscription.user_id == todo.user_id
+                            ).all()
+                            
+                            push_sent = False
+                            for subscription in push_subscriptions:
+                                push_data = {
+                                    "todo_id": todo.id,
+                                    "todo_title": todo.title,
+                                    "reminder_time": reminder_str
+                                }
+                                
+                                push_success = push_service.send_notification(
+                                    subscription_info={
+                                        "endpoint": subscription.endpoint,
+                                        "p256dh": subscription.p256dh,
+                                        "auth": subscription.auth
+                                    },
+                                    title=f"일정 알림: {todo.title}",
+                                    body=f"{reminder_str} 알림",
+                                    data=push_data
+                                )
+                                
+                                if push_success:
+                                    push_sent = True
+                            
+                            if push_sent:
+                                sent_channels.append("push")
+                            
+                            # 인앱 알림은 항상 추가
+                            sent_channels.append("in-app")
+                            
+                            # 알림 기록 저장
+                            notification = Notification(
+                                user_id=todo.user_id,
+                                todo_id=todo.id,
+                                type="reminder",
+                                title=f"일정 알림: {todo.title}",
+                                message=f"{reminder_str} 알림",
+                                scheduled_time=reminder_datetime,
+                                sent_at=now,
+                                channels=json.dumps(sent_channels)
+                            )
+                            db.add(notification)
+                            sent_count += 1
+                            logger.info(f"[NOTIFICATION] 알림 발송 성공: user_id={todo.user_id}, 일정={todo.title}, 채널={sent_channels}")
                             
             except Exception as e:
                 logger.error(f"[EMAIL_NOTIFICATION] 일정 알림 발송 실패: {todo.id}, 오류: {e}", exc_info=True)

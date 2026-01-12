@@ -2,6 +2,7 @@ import { ArrowLeft } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { apiClient } from "@/services/apiClient";
+import { pushService } from "@/services/pushService";
 
 interface SettingsScreenProps {
   isOpen: boolean;
@@ -10,7 +11,7 @@ interface SettingsScreenProps {
 }
 
 export function SettingsScreen({ isOpen, onClose, onRefreshCalendar }: SettingsScreenProps) {
-  const [notificationEnabled, setNotificationEnabled] = useState(true);
+  const [notificationEnabled, setNotificationEnabled] = useState(false);
   const [googleCalendarEnabled, setGoogleCalendarEnabled] = useState(false);
   const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false);
   const [googleCalendarImportEnabled, setGoogleCalendarImportEnabled] = useState(false);
@@ -18,12 +19,24 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar }: SettingsS
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncLoading, setIsSyncLoading] = useState(false); // 동기화 후 저장 버튼 전용 로딩 상태
 
-  // Google Calendar 연동 상태 확인
+  // Google Calendar 연동 상태 확인 및 푸시 알림 상태 확인
   useEffect(() => {
     if (isOpen) {
       checkCalendarStatus();
+      checkPushStatus();
     }
   }, [isOpen]);
+
+  // 푸시 알림 상태 확인
+  const checkPushStatus = async () => {
+    try {
+      const isSubscribed = await pushService.isSubscribed();
+      setNotificationEnabled(isSubscribed);
+    } catch (error) {
+      console.error("푸시 알림 상태 확인 실패:", error);
+      setNotificationEnabled(false);
+    }
+  };
 
   const checkCalendarStatus = async () => {
     try {
@@ -50,10 +63,41 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar }: SettingsS
 
   if (!isOpen) return null;
 
-  const handleNotificationToggle = () => {
-    const newState = !notificationEnabled;
-    setNotificationEnabled(newState);
-    toast.success(newState ? "알림이 활성화되었습니다." : "알림이 비활성화되었습니다.");
+  const handleNotificationToggle = async () => {
+    if (isLoading) return;
+    
+    setIsLoading(true);
+    try {
+      if (notificationEnabled) {
+        // 구독 해제
+        const success = await pushService.unsubscribe();
+        if (success) {
+          setNotificationEnabled(false);
+          toast.success("푸시 알림이 비활성화되었습니다.");
+        } else {
+          toast.error("푸시 알림 비활성화에 실패했습니다.");
+        }
+      } else {
+        // 구독 요청
+        const success = await pushService.subscribe();
+        if (success) {
+          setNotificationEnabled(true);
+          toast.success("푸시 알림이 활성화되었습니다.");
+        } else {
+          const permission = pushService.getPermission();
+          if (permission === 'denied') {
+            toast.error("브라우저에서 알림 권한이 거부되었습니다. 브라우저 설정에서 권한을 허용해주세요.");
+          } else {
+            toast.error("푸시 알림 활성화에 실패했습니다.");
+          }
+        }
+      }
+    } catch (error) {
+      console.error("푸시 알림 토글 실패:", error);
+      toast.error("푸시 알림 설정 중 오류가 발생했습니다.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleGoogleCalendarToggle = async () => {
