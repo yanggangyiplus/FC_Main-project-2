@@ -530,7 +530,7 @@ export function RoutineView({
             추가
           </button>
           {/* 생성된 항목들 (스크롤 가능, 드래그 가능) */}
-          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6] flex-1 items-center pt-0.5">
+          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6] flex-1 items-center pt-1.5">
             {routines
               .filter(r => selectedMemberIds.includes(r.memberId))
               .map((routine) => (
