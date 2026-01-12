@@ -141,6 +141,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
   // 추출 상태 관리
   const [isExtracting, setIsExtracting] = useState(false);
   const [hasExtracted, setHasExtracted] = useState(false);
+  const [lastExtractedMemo, setLastExtractedMemo] = useState<string>(''); // 마지막으로 추출된 메모 저장
 
   // initialData가 변경될 때 formData 업데이트
   useEffect(() => {
@@ -219,12 +220,44 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
   useEffect(() => {
     if (initialData) {
       setHasExtracted(false);
+      setLastExtractedMemo(''); // 수정 모드에서는 리셋
+    } else {
+      // 추가 모드로 전환될 때도 리셋
+      setHasExtracted(false);
+      setLastExtractedMemo(''); // 추가 모드로 전환 시 리셋
     }
   }, [initialData]);
 
-  // 모달이 열릴 때 메모 텍스트가 있고 제목이 비어있으면 자동으로 정보 추출
+  // 추가 모드에서 메모가 변경되면 hasExtracted 리셋 (수정된 메모에서 다시 추출 가능하도록)
+  // 단, lastExtractedMemo가 있을 때만 리셋 (자동 추출 후 수정된 경우만)
   useEffect(() => {
-    if (isOpen && formData.memo.trim() && !formData.title.trim() && !hasExtracted && !isExtracting) {
+    const isAddMode = !initialData || !initialData.title;
+    if (isAddMode && hasExtracted && lastExtractedMemo && formData.memo !== lastExtractedMemo) {
+      // 메모가 추출된 이후 변경되었으면 리셋
+      setHasExtracted(false);
+    }
+  }, [formData.memo, initialData, hasExtracted, lastExtractedMemo]);
+
+  // 모달이 열릴 때 메모 텍스트가 있고 제목이 비어있으면 자동으로 정보 추출
+  // initialData가 있어도 title이 없으면 자동 추출 실행 (InputMethodModal에서 텍스트만 입력한 경우)
+  useEffect(() => {
+    // 디버깅을 위한 로그
+    if (isOpen && formData.memo.trim() && !formData.title.trim()) {
+      console.log('[자동 추출 조건 체크]', {
+        isOpen,
+        hasInitialData: !!initialData,
+        hasInitialDataTitle: !!(initialData?.title),
+        hasMemo: !!formData.memo.trim(),
+        hasTitle: !!formData.title.trim(),
+        hasExtracted,
+        isExtracting,
+      });
+    }
+
+    // initialData가 있어도 title이 없으면 자동 추출 실행 (추가 모드)
+    const isAddMode = !initialData || !initialData.title;
+    if (isOpen && isAddMode && formData.memo.trim() && !formData.title.trim() && !hasExtracted && !isExtracting) {
+      console.log('[자동 추출 시작]');
       const extractInfo = async () => {
         try {
           setIsExtracting(true);
@@ -265,6 +298,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
             }));
 
             setHasExtracted(true);
+            setLastExtractedMemo(formData.memo); // 추출된 메모 저장
             toast.dismiss();
             toast.success('일정 정보가 자동으로 추출되었습니다.');
           }
@@ -279,7 +313,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
 
       extractInfo();
     }
-  }, [isOpen, formData.memo, formData.title, hasExtracted, isExtracting]);
+  }, [isOpen, formData.memo, formData.title, hasExtracted, isExtracting, initialData]);
 
   const categories = ['공부', '업무', '약속', '생활', '건강', '구글', '기타'];
   const repeatOptions = [
@@ -377,8 +411,9 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
   };
 
   const handleSave = async () => {
-    // 메모 텍스트가 있고 아직 추출하지 않았으면 자동으로 정보 추출
-    if (formData.memo.trim() && !hasExtracted) {
+    // 메모 텍스트가 있고 아직 추출하지 않았으면 자동으로 정보 추출 (추가 모드에서만)
+    const isAddMode = !initialData || !initialData.title;
+    if (isAddMode && formData.memo.trim() && !hasExtracted) {
       try {
         setIsExtracting(true);
         toast.loading('일정 정보를 추출하는 중...');
@@ -418,6 +453,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
           });
 
           setHasExtracted(true);
+          setLastExtractedMemo(formData.memo); // 추출된 메모 저장
           toast.dismiss();
           toast.success('일정 정보가 자동으로 추출되었습니다. 확인 후 저장해주세요.');
           setIsExtracting(false);
@@ -460,6 +496,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
       repeatPattern: undefined,
     });
     setHasExtracted(false);
+    setLastExtractedMemo(''); // 메모 추출 상태도 리셋
   };
 
   return (
@@ -960,7 +997,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
             disabled={isExtracting}
             className="flex-1 px-6 py-3 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isExtracting ? '추출 중...' : (hasExtracted && formData.memo.trim() ? '저장' : (formData.memo.trim() ? '정보 추출' : '저장'))}
+            {isExtracting ? '추출 중...' : (initialData?.title ? '저장' : (hasExtracted && formData.memo.trim() ? '저장' : (formData.memo.trim() ? '정보 추출' : '저장')))}
           </button>
         </div>
       </div>
