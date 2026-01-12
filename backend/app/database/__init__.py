@@ -62,9 +62,14 @@ def init_db():
                     'repeat_days': 'VARCHAR(20)',
                     'has_notification': 'INTEGER',  # SQLite는 BOOLEAN을 INTEGER로 저장
                     'notification_times': 'TEXT',
+                    'notification_reminders': 'TEXT',
                     'family_member_ids': 'TEXT',
                     'source': 'VARCHAR(50)',
                     'completed_at': 'DATETIME',
+                    'google_calendar_event_id': 'VARCHAR(255)',
+                    'bulk_synced': 'INTEGER',
+                    'todo_group_id': 'VARCHAR(255)',
+                    'end_date': 'DATE',
                 }
                 
                 # 누락된 컬럼 추가
@@ -120,6 +125,28 @@ def init_db():
                             conn.execute(text(f"ALTER TABLE {table} ADD COLUMN deleted_at DATETIME"))
                             conn.commit()
                             logger.info(f"Successfully added deleted_at to {table}")
+
+                        if table == 'notifications':
+                            required_notification_columns = {
+                                'todo_id': 'VARCHAR(36)',
+                                'family_member_id': 'VARCHAR(36)',
+                                'type': 'VARCHAR(50)',
+                                'title': 'VARCHAR(255)',
+                                'message': 'TEXT',
+                                'action_url': 'VARCHAR(500)',
+                                'scheduled_time': 'DATETIME',
+                                'sent_at': 'DATETIME',
+                                'read_at': 'DATETIME',
+                                'channels': 'TEXT',
+                            }
+                            for col, col_type in required_notification_columns.items():
+                                if col not in columns:
+                                    try:
+                                        conn.execute(text(f"ALTER TABLE notifications ADD COLUMN {col} {col_type}"))
+                                        conn.commit()
+                                        logger.info(f"✓ notifications 테이블에 {col} 컬럼 추가 완료")
+                                    except Exception as e:
+                                        logger.debug(f"✗ notifications.{col} 컬럼 추가 실패: {e}")
                 except Exception as e:
                     logger.debug(f"Could not add deleted_at to {table}: {e}")
     except Exception as e:

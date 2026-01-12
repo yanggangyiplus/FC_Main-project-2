@@ -10,6 +10,7 @@ from datetime import datetime, date
 
 from app.database import get_db
 from app.models.models import Todo, ChecklistItem
+from app.services.notification_email_service import sync_todo_email_reminder_notification
 from app.models.user import User
 from app.schemas import (
     TodoCreate, TodoUpdate, TodoResponse, TodoStatsResponse
@@ -215,6 +216,14 @@ async def create_todo(
         except:
             pass
     
+    # 알림은 1개만 지원 (첫 번째만 저장)
+    normalized_notification_reminders = None
+    if todo.notification_reminders:
+        try:
+            normalized_notification_reminders = list(todo.notification_reminders)[:1]
+        except Exception:
+            normalized_notification_reminders = None
+
     # 스키마에서 이미 date 객체로 변환됨
     db_todo = Todo(
         user_id=current_user.id,
@@ -236,7 +245,7 @@ async def create_todo(
         repeat_pattern=json.dumps(todo.repeat_pattern) if todo.repeat_pattern else None,
         has_notification=todo.has_notification or False,
         notification_times=json.dumps(todo.notification_times) if todo.notification_times else None,
-        notification_reminders=json.dumps(todo.notification_reminders) if todo.notification_reminders else None,
+        notification_reminders=json.dumps(normalized_notification_reminders) if normalized_notification_reminders else None,
         family_member_ids=json.dumps(todo.family_member_ids) if todo.family_member_ids else None,
         tags=json.dumps([]),
         source="text",
@@ -253,6 +262,13 @@ async def create_todo(
     db.add(db_todo)
     db.commit()
     db.refresh(db_todo)
+
+    # 이메일 알림(1개) 스케줄 동기화
+    try:
+        sync_todo_email_reminder_notification(db, db_todo, current_user)
+        db.commit()
+    except Exception as e:
+        logger.warning(f"[CREATE_TODO] 알림 스케줄 생성 실패: {e}")
     
     # end_date 저장 확인
     logger.info(f"[CREATE_TODO] Todo 저장 완료 - id: {db_todo.id}, date: {db_todo.date}, end_date: {db_todo.end_date}, all_day: {db_todo.all_day}")
@@ -945,7 +961,12 @@ async def update_todo(
     if todo_update.notification_times is not None:
         todo.notification_times = json.dumps(todo_update.notification_times)
     if todo_update.notification_reminders is not None:
-        todo.notification_reminders = json.dumps(todo_update.notification_reminders)
+        # 알림은 1개만 지원 (첫 번째만 저장)
+        try:
+            normalized = list(todo_update.notification_reminders)[:1]
+        except Exception:
+            normalized = []
+        todo.notification_reminders = json.dumps(normalized)
     if todo_update.family_member_ids is not None:
         todo.family_member_ids = json.dumps(todo_update.family_member_ids)
     
@@ -971,6 +992,13 @@ async def update_todo(
     
     db.commit()
     db.refresh(todo)
+
+    # 이메일 알림(1개) 스케줄 동기화
+    try:
+        sync_todo_email_reminder_notification(db, todo, current_user)
+        db.commit()
+    except Exception as e:
+        logger.warning(f"[UPDATE_TODO] 알림 스케줄 동기화 실패: {e}")
     
     # 저장 후 확인
     logger.info(f"[UPDATE_TODO] 저장 후 확인: todo_id={todo.id}, start_time={todo.start_time}, end_time={todo.end_time}")

@@ -7,9 +7,10 @@ from fastapi.responses import JSONResponse
 import logging
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 
 # 환경변수 로드
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).with_name('.env'))
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -103,6 +104,9 @@ app.include_router(family.router)
 app.include_router(routines.router)
 app.include_router(files.router)
 app.include_router(calendar.router)
+
+from app.api.routes import notifications
+app.include_router(notifications.router)
 
 from app.api.routes import memos
 app.include_router(memos.router)
