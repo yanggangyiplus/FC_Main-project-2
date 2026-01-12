@@ -134,7 +134,8 @@ class GoogleCalendarService:
         notification_reminders: List[Dict[str, Any]] = None,
         repeat_type: str = None,
         repeat_pattern: Dict[str, Any] = None,
-        repeat_end_date: date = None
+        repeat_end_date: date = None,
+        source_id: str = None  # Always Plan의 Todo ID (중복 제거용)
     ) -> Optional[Dict[str, Any]]:
         """Google Calendar에 이벤트 생성 (알림 및 반복 정보 포함)"""
         try:
@@ -244,6 +245,22 @@ class GoogleCalendarService:
             else:
                 # 기본 알림 사용 (30분 전)
                 event['reminders'] = {'useDefault': True}
+            
+            # sourceId를 extendedProperties에 저장 (중복 제거용)
+            # Always Plan의 Todo ID를 sourceId로 저장하여 동기화 시 정확한 매칭 가능
+            if source_id:
+                if 'extendedProperties' not in event:
+                    event['extendedProperties'] = {}
+                if 'private' not in event['extendedProperties']:
+                    event['extendedProperties']['private'] = {}
+                event['extendedProperties']['private']['alwaysPlanSourceId'] = source_id
+                logger.info(f"[CREATE_EVENT] sourceId 저장: {source_id}")
+                
+                # description에 sourceId 태그도 추가 (extendedProperties가 없는 경우 대비)
+                if description and 'AlwaysPlanID:' not in description:
+                    event['description'] = f"{description}\n\nAlwaysPlanID:{source_id}"
+                elif not description:
+                    event['description'] = f"AlwaysPlanID:{source_id}"
             
             # 반복 설정 처리 - 반복 정보는 웹앱 내에서만 관리하고 Google Calendar에는 전달하지 않음
             # 반복 정보를 전달하면 Google Calendar에서 자동으로 반복 일정을 생성하여 중복 일정이 발생함

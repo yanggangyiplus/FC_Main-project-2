@@ -274,7 +274,8 @@ async def sync_all_todos_to_google_calendar(
                     notification_reminders=notification_reminders if notification_reminders else None,
                     repeat_type=None,  # 반복 정보는 전달하지 않음
                     repeat_pattern=None,
-                    repeat_end_date=None
+                    repeat_end_date=None,
+                    source_id=todo.id  # Always Plan의 Todo ID 저장 (중복 제거용)
                 )
                 
                 if event and event.get('id'):
@@ -811,7 +812,8 @@ async def sync_todo_to_google_calendar(
             notification_reminders=notification_reminders if notification_reminders else None,
             repeat_type=None,  # 반복 정보는 전달하지 않음
             repeat_pattern=None,
-            repeat_end_date=None
+            repeat_end_date=None,
+            source_id=todo.id  # Always Plan의 Todo ID 저장 (중복 제거용)
         )
         
         if not event:
@@ -1110,7 +1112,8 @@ async def toggle_calendar_export(
                         notification_reminders=notification_reminders if notification_reminders else None,
                         repeat_type=repeat_type if repeat_type != 'none' else None,
                         repeat_pattern=repeat_pattern,
-                        repeat_end_date=repeat_end_date
+                        repeat_end_date=repeat_end_date,
+                        source_id=todo.id  # Always Plan의 Todo ID 저장 (중복 제거용)
                     )
                     
                     if event and event.get('id'):
@@ -1754,6 +1757,21 @@ async def get_google_calendar_events(
                             'count': count
                         }
             
+            # extendedProperties에서 sourceId 추출 (중복 제거용)
+            source_id = None
+            extended_props = event.get('extendedProperties', {})
+            private_props = extended_props.get('private', {})
+            if private_props.get('alwaysPlanSourceId'):
+                source_id = private_props.get('alwaysPlanSourceId')
+            else:
+                # description에서도 추출 시도 (fallback)
+                description = event.get('description', '')
+                if description and 'AlwaysPlanID:' in description:
+                    import re
+                    match = re.search(r'AlwaysPlanID:([^\s\n]+)', description)
+                    if match:
+                        source_id = match.group(1)
+            
             formatted_events.append({
                 'id': event.get('id'),
                 'title': event.get('summary', '제목 없음'),
@@ -1766,6 +1784,7 @@ async def get_google_calendar_events(
                 'all_day': all_day,
                 'html_link': event.get('htmlLink'),
                 'google_calendar_event_id': event.get('id'),
+                'source_id': source_id,  # Always Plan의 Todo ID (중복 제거용)
                 'source': 'google_calendar',
                 'notification_reminders': notification_reminders,
                 'repeat_type': repeat_type,

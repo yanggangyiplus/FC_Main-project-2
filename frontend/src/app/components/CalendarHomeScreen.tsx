@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Bell,
   Pencil,
@@ -243,8 +243,30 @@ export function CalendarHomeScreen() {
     handleGoogleCalendarCallback();
   }, []);
 
+  // Google Calendar 동기화 상태 관리
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error' | 'disabled'>('idle');
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  // ref로 관리하여 함수 재생성 방지 (UI 표시는 state로)
+  const isSyncInFlightRef = useRef(false);
+  const lastSyncTimestampRef = useRef<number>(0);
+  const SYNC_COOLDOWN_MS = 30000; // 30초 쿨다운
+
   // Google Calendar 이벤트 가져오기 함수 (재사용 가능하도록 분리)
-  const loadGoogleCalendarEvents = useCallback(async () => {
+  const loadGoogleCalendarEvents = useCallback(async (force: boolean = false) => {
+    // 쿨다운 체크
+    const now = Date.now();
+    if (!force && (isSyncInFlightRef.current || (now - lastSyncTimestampRef.current < SYNC_COOLDOWN_MS))) {
+      const remainingSeconds = Math.ceil((SYNC_COOLDOWN_MS - (now - lastSyncTimestampRef.current)) / 1000);
+      console.log(`[Google Calendar] 동기화 쿨다운 중... (${remainingSeconds}초 남음)`);
+      return;
+    }
+
+    isSyncInFlightRef.current = true;
+    setSyncStatus('syncing');
+    setSyncError(null);
+    lastSyncTimestampRef.current = now;
+
     try {
       const calendarStatusResponse = await apiClient.getCalendarStatus();
       const googleCalendarEnabled = calendarStatusResponse.data?.enabled || false;
@@ -365,6 +387,7 @@ export function CalendarHomeScreen() {
                 isRoutine: false,
                 source: 'google_calendar' as const,
                 googleCalendarEventId: event.id,
+                sourceId: event.source_id, // Always Plan의 Todo ID (중복 제거용)
               };
             });
 
@@ -391,34 +414,30 @@ export function CalendarHomeScreen() {
                   .map(t => t.googleCalendarEventId!)
               );
 
-              // Always Plan 일정의 제목+날짜+시간 키 생성 (중복 방지)
-              const alwaysPlanKeys = new Set(
-                alwaysPlanTodos.map(t => {
-                  const dateStr = t.date || '';
-                  const timeStr = t.startTime || (t.isAllDay ? 'all_day' : '');
-                  return `${t.title}_${dateStr}_${timeStr}`.toLowerCase().trim();
-                })
-              );
-
               // 중복되지 않는 Google Calendar 이벤트만 추가
+              // ID 기반 중복 제거 (제목+날짜+시간 기반은 제거 - 사용자 의도 반영)
               const newGoogleEvents = formattedGoogleEvents.filter(
                 (event: any) => {
-                  // ID로 중복 체크
+                  // 1. ID로 중복 체크 (가장 정확)
                   if (existingIds.has(event.id)) {
                     console.log(`[Google Calendar] 중복 제거 (ID): ${event.id}`);
                     return false;
                   }
-                  // Always Plan 일정과 이미 매칭된 Google Calendar 이벤트는 표시하지 않음 (중복 방지)
+                  // 2. Always Plan 일정과 이미 매칭된 Google Calendar 이벤트는 표시하지 않음
+                  // (googleCalendarEventId로 매칭된 일정은 이미 동기화된 것으로 간주)
                   if (event.googleCalendarEventId && alwaysPlanGoogleEventIds.has(event.googleCalendarEventId)) {
                     console.log(`[Google Calendar] 중복 제거 (Always Plan과 매칭됨): ${event.googleCalendarEventId}`);
                     return false;
                   }
-                  // 제목+날짜+시간이 같은 Always Plan 일정이 있으면 중복으로 간주
-                  const eventKey = `${event.title}_${event.date || ''}_${event.startTime || (event.isAllDay ? 'all_day' : '')}`.toLowerCase().trim();
-                  if (alwaysPlanKeys.has(eventKey)) {
-                    console.log(`[Google Calendar] 중복 제거 (제목+날짜+시간 일치): ${event.title} ${event.date} ${event.startTime}`);
-                    return false;
+                  // 3. sourceId로 중복 체크 (extendedProperties 또는 description에서 추출)
+                  if (event.sourceId) {
+                    const existingTodoWithSourceId = alwaysPlanTodos.find(t => t.id === event.sourceId);
+                    if (existingTodoWithSourceId) {
+                      console.log(`[Google Calendar] 중복 제거 (sourceId 매칭): ${event.sourceId}`);
+                      return false;
+                    }
                   }
+                  // 4. 제목+날짜+시간 기반 중복 제거는 제거 (사용자가 비슷한 일정을 만들 수 있도록)
                   return true;
                 }
               );
@@ -429,20 +448,19 @@ export function CalendarHomeScreen() {
               // Always Plan 일정과 새로 가져온 Google Calendar 이벤트 병합
               const mergedTodos = [...alwaysPlanTodos, ...newGoogleEvents];
 
-              // 최종적으로 모든 일정에서 중복 제거 (제목+날짜+시간 기준)
+              // 최종적으로 ID 기반 중복 제거만 수행 (제목+날짜+시간 기반은 제거)
               const finalUniqueTodos: any[] = [];
-              const finalSeenKeys = new Set<string>();
+              const finalSeenIds = new Set<string>();
 
               for (const todo of mergedTodos) {
-                const dateStr = todo.date || '';
-                const timeStr = todo.startTime || (todo.isAllDay ? 'all_day' : '');
-                const key = `${todo.title}_${dateStr}_${timeStr}`.toLowerCase().trim();
-
-                if (!finalSeenKeys.has(key)) {
-                  finalSeenKeys.add(key);
+                // ID가 있으면 ID로, 없으면 생성
+                const todoId = todo.id || `temp_${Date.now()}_${Math.random()}`;
+                
+                if (!finalSeenIds.has(todoId)) {
+                  finalSeenIds.add(todoId);
                   finalUniqueTodos.push(todo);
                 } else {
-                  console.log(`[최종 중복 제거] ${todo.title} ${dateStr} ${timeStr}`);
+                  console.log(`[최종 중복 제거] ID: ${todoId} (${todo.title})`);
                 }
               }
 
@@ -450,12 +468,21 @@ export function CalendarHomeScreen() {
 
               return finalUniqueTodos;
             });
+
+            // 동기화 성공
+            setSyncStatus('success');
+            setLastSyncTime(new Date());
+            setSyncError(null);
           } else {
             console.warn('[Google Calendar] 이벤트가 없거나 실패:', eventsResponse.data);
+            setSyncStatus('error');
+            setSyncError('이벤트 데이터를 받지 못했습니다.');
           }
         } catch (error: any) {
           console.error('[Google Calendar] 이벤트 가져오기 실패:', error);
           console.error('[Google Calendar] 에러 상세:', error.response?.data || error.message);
+          setSyncStatus('error');
+          setSyncError(error.response?.data?.detail || error.message || '동기화에 실패했습니다.');
         }
       } else {
         console.log('[Google Calendar] 연동 비활성화됨 또는 연결 안됨');
@@ -480,11 +507,14 @@ export function CalendarHomeScreen() {
           return filteredTodos;
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('[Google Calendar] 상태 확인 실패:', error);
-      // 에러가 발생해도 앱은 정상 동작
+      setSyncStatus('error');
+      setSyncError(error.response?.data?.detail || error.message || '상태 확인에 실패했습니다.');
+    } finally {
+      isSyncInFlightRef.current = false;
     }
-  }, []);
+  }, []); // 의존성 배열 비움 - ref 사용하므로 재생성 불필요
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -754,7 +784,7 @@ export function CalendarHomeScreen() {
       }
 
       // 5. Google Calendar 연동 상태 확인 및 이벤트 가져오기
-      await loadGoogleCalendarEvents();
+      await loadGoogleCalendarEvents(true); // 초기 로드는 강제 실행
     };
 
     loadInitialData();
@@ -772,9 +802,10 @@ export function CalendarHomeScreen() {
 
         if (googleCalendarEnabled && googleCalendarConnected && googleCalendarImportEnabled) {
           console.log('[Google Calendar] 초기 이벤트 가져오기 시작...');
-          await loadGoogleCalendarEvents();
+          await loadGoogleCalendarEvents(true); // 초기 로드는 강제 실행
         } else {
           console.log('[Google Calendar] 초기 로드 스킵 (토글 비활성화 또는 연결 안됨)');
+          setSyncStatus('disabled');
         }
       } catch (error) {
         console.error('[Google Calendar] 초기 이벤트 가져오기 실패:', error);
@@ -789,7 +820,7 @@ export function CalendarHomeScreen() {
     };
   }, [loadGoogleCalendarEvents]);
 
-  // 화면이 포커스될 때 Google Calendar 이벤트 가져오기
+  // 화면이 포커스될 때 Google Calendar 이벤트 가져오기 (쿨다운 적용)
   useEffect(() => {
     const handleVisibilityChange = async () => {
       if (document.visibilityState === 'visible') {
@@ -801,8 +832,8 @@ export function CalendarHomeScreen() {
           const googleCalendarImportEnabled = calendarStatusResponse.data?.import_enabled || false;
 
           if (googleCalendarEnabled && googleCalendarConnected && googleCalendarImportEnabled) {
-            console.log('[Google Calendar] 화면 포커스 시 이벤트 가져오기 시작...');
-            await loadGoogleCalendarEvents();
+            console.log('[Google Calendar] 화면 포커스 시 이벤트 가져오기 시작... (쿨다운 적용)');
+            await loadGoogleCalendarEvents(false); // 쿨다운 적용
           }
         } catch (error) {
           console.error('[Google Calendar] 화면 포커스 시 이벤트 가져오기 실패:', error);
@@ -2391,8 +2422,53 @@ export function CalendarHomeScreen() {
   // For Todo List tab (Today)
   const displayTodos = getTodosForDate(new Date());
 
+  // 동기화 상태 표시 포맷팅
+  const formatLastSyncTime = () => {
+    if (!lastSyncTime) return '';
+    const now = new Date();
+    const diffMs = now.getTime() - lastSyncTime.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return '방금 전';
+    if (diffMins < 60) return `${diffMins}분 전`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}시간 전`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays}일 전`;
+  };
+
   return (
     <div className="min-h-screen bg-[#FAFAFA] flex flex-col max-w-[375px] mx-auto relative pb-4">
+      {/* Google Calendar 동기화 상태 표시 */}
+      {syncStatus !== 'idle' && (
+        <div className={`px-4 py-2 text-xs flex items-center justify-between ${
+          syncStatus === 'syncing' ? 'bg-[#E0F2FE] text-[#0EA5E9]' :
+          syncStatus === 'success' ? 'bg-[#D1FAE5] text-[#10B981]' :
+          syncStatus === 'disabled' ? 'bg-[#F3F4F6] text-[#6B7280]' :
+          'bg-[#FEE2E2] text-[#EF4444]'
+        }`}>
+          <div className="flex items-center gap-2">
+            {syncStatus === 'syncing' && <Clock size={12} className="animate-spin" />}
+            {syncStatus === 'success' && <Check size={12} />}
+            {syncStatus === 'error' && <X size={12} />}
+            {syncStatus === 'disabled' && <Clock size={12} />}
+            <span>
+              {syncStatus === 'syncing' && '동기화 중...'}
+              {syncStatus === 'success' && `마지막 동기화: ${formatLastSyncTime()}`}
+              {syncStatus === 'error' && `동기화 실패: ${syncError || '알 수 없는 오류'}`}
+              {syncStatus === 'disabled' && '동기화 비활성화'}
+            </span>
+          </div>
+          {syncStatus === 'error' && (
+            <button
+              onClick={() => loadGoogleCalendarEvents(true)}
+              className="text-xs underline hover:no-underline"
+            >
+              다시 시도
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Header - Profile, Search, Notification */}
       <div className="bg-white px-4 py-3 flex items-center gap-3 border-b border-[#F3F4F6]">
         <button
