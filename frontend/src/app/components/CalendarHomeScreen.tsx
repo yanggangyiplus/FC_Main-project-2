@@ -36,7 +36,6 @@ import { RoutineView } from "./RoutineView";
 import { toast } from "sonner";
 import { apiClient } from "@/services/apiClient";
 import { formatDuration } from "@/utils/formatDuration";
-import { pushService } from "@/services/pushService";
 
 export function CalendarHomeScreen() {
   const [showMemberAddSheet, setShowMemberAddSheet] = useState(false);
@@ -76,13 +75,6 @@ export function CalendarHomeScreen() {
   // 기존 호환성을 위한 readNotificationIds (지나간 알림용)
   const readNotificationIds = readPastNotificationIds;
   const [showTodoDetailFromNotification, setShowTodoDetailFromNotification] = useState(false);
-
-  // 푸시 서비스 초기화
-  useEffect(() => {
-    pushService.initialize().catch((error) => {
-      console.error("[PushService] 초기화 실패:", error);
-    });
-  }, []);
 
   // 읽음 상태를 localStorage에 저장
   useEffect(() => {

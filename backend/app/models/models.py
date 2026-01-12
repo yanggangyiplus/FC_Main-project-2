@@ -201,23 +201,6 @@ class Notification(BaseModel):
     )
 
 
-class PushSubscription(BaseModel):
-    """웹 푸시 구독 정보"""
-    __tablename__ = "push_subscriptions"
-    
-    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    endpoint = Column(String(500), nullable=False)  # 푸시 서비스 엔드포인트 URL
-    p256dh = Column(String(200), nullable=False)  # 공개 키
-    auth = Column(String(50), nullable=False)  # 인증 키
-    
-    # 관계
-    user = relationship("User", back_populates="push_subscriptions")
-    
-    __table_args__ = (
-        Index('idx_push_subscriptions_user', 'user_id'),
-    )
-
-
 class Memo(BaseModel):
     """메모 (OCR 텍스트)"""
     __tablename__ = "memos"

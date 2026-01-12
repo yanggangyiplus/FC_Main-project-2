@@ -339,21 +339,6 @@ class APIClient {
   async sendScheduledNotifications() {
     return this.client.post('/notifications/send-scheduled')
   }
-
-  // Push notification endpoints
-  async getPushPublicKey() {
-    return this.client.get('/push/public-key')
-  }
-
-  async subscribePush(subscription: { endpoint: string; p256dh: string; auth: string }) {
-    return this.client.post('/push/subscribe', subscription)
-  }
-
-  async unsubscribePush(endpoint: string) {
-    return this.client.delete('/push/unsubscribe', {
-      params: { endpoint }
-    })
-  }
 }
 
 export const apiClient = new APIClient()

@@ -39,8 +39,7 @@ class User(BaseModel):
     memos = relationship("Memo", back_populates="user", cascade="all, delete-orphan")
     routines = relationship("Routine", back_populates="user", cascade="all, delete-orphan")
     audio_files = relationship("AudioFile", back_populates="user", cascade="all, delete-orphan")
-    image_files = relationship("ImageFile", back_populates="user", cascade="all, delete-orphan")
-    push_subscriptions = relationship("PushSubscription", back_populates="user", cascade="all, delete-orphan") relationship("ImageFile", back_populates="user", cascade="all, delete-orphan")
+    image_files = relationship("ImageFile", back_populates="user", cascade="all, delete-orphan") relationship("ImageFile", back_populates="user", cascade="all, delete-orphan")
     
     # 인덱스
     __table_args__ = (
