@@ -143,8 +143,11 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
   const [hasExtracted, setHasExtracted] = useState(false);
   const [lastExtractedMemo, setLastExtractedMemo] = useState<string>(''); // 마지막으로 추출된 메모 저장
 
-  // initialData가 변경될 때 formData 업데이트
+  // initialData가 변경되거나 모달이 열릴 때 formData 업데이트
   useEffect(() => {
+    // 모달이 닫혀있으면 초기화하지 않음
+    if (!isOpen) return;
+    
     if (initialData) {
       // 하루종일이면 시간 필드를 빈 문자열로 설정
       const isAllDay = initialData.isAllDay || false;
@@ -612,8 +615,9 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData }: AddTodoMo
                     setFormData({
                       ...formData,
                       isAllDay,
-                      startTime: isAllDay ? '00:00' : formData.startTime,
-                      endTime: isAllDay ? '' : formData.endTime,
+                      // 하루종일일 때는 시간을 빈 문자열로 설정
+                      startTime: isAllDay ? '' : (formData.startTime || '09:00'),
+                      endTime: isAllDay ? '' : (formData.endTime || '10:00'),
                     });
                   }}
                   className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-2 focus:ring-[#FF9B82]"

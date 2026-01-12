@@ -1489,9 +1489,10 @@ async def get_google_calendar_events(
     time_min: Optional[str] = None,
     time_max: Optional[str] = None,
     max_results: int = 100,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Google Calendar에서 이벤트 목록 가져오기"""
+    """Google Calendar에서 이벤트 목록 가져오기 (삭제된 일정 제외)"""
     logger.info(f"[GET_GOOGLE_EVENTS] 요청 시작 - 사용자: {current_user.email}, token 존재: {bool(current_user.google_calendar_token)}")
     
     if not current_user.google_calendar_token:
@@ -1500,6 +1501,19 @@ async def get_google_calendar_events(
             status_code=400,
             detail="Google Calendar 연동이 필요합니다. 설정에서 연동해주세요."
         )
+    
+    # 삭제된 일정의 google_calendar_event_id 목록 가져오기 (필터링용)
+    deleted_event_ids = set()
+    try:
+        deleted_todos = db.query(Todo).filter(
+            Todo.user_id == current_user.id,
+            Todo.deleted_at.isnot(None),  # 삭제된 일정만
+            Todo.google_calendar_event_id.isnot(None)  # google_calendar_event_id가 있는 일정만
+        ).all()
+        deleted_event_ids = {todo.google_calendar_event_id for todo in deleted_todos if todo.google_calendar_event_id}
+        logger.info(f"[GET_GOOGLE_EVENTS] 삭제된 일정의 Google Calendar 이벤트 ID: {len(deleted_event_ids)}개")
+    except Exception as e:
+        logger.warning(f"[GET_GOOGLE_EVENTS] 삭제된 일정 조회 실패 (계속 진행): {e}")
     
     try:
         # 시간 범위 파싱
@@ -1771,6 +1785,12 @@ async def get_google_calendar_events(
                     match = re.search(r'AlwaysPlanID:([^\s\n]+)', description)
                     if match:
                         source_id = match.group(1)
+            
+            # 삭제된 일정인지 확인 (삭제된 일정은 제외)
+            event_id = event.get('id')
+            if event_id in deleted_event_ids:
+                logger.info(f"[GET_GOOGLE_EVENTS] 삭제된 일정 제외: event_id={event_id}")
+                continue  # 삭제된 일정은 제외
             
             formatted_events.append({
                 'id': event.get('id'),

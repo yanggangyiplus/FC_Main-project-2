@@ -54,9 +54,14 @@ def clear_all_todos():
         conn.close()
 
 if __name__ == "__main__":
-    confirm = input("⚠️  모든 일정 데이터를 삭제하시겠습니까? (yes/no): ")
-    if confirm.lower() == 'yes':
+    import sys
+    # 명령줄 인자로 --yes가 있으면 확인 없이 실행
+    if len(sys.argv) > 1 and sys.argv[1] == '--yes':
         clear_all_todos()
     else:
-        print("❌ 삭제가 취소되었습니다.")
+        confirm = input("⚠️  모든 일정 데이터를 삭제하시겠습니까? (yes/no): ")
+        if confirm.lower() == 'yes':
+            clear_all_todos()
+        else:
+            print("❌ 삭제가 취소되었습니다.")
 

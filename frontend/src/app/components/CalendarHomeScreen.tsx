@@ -136,6 +136,9 @@ export function CalendarHomeScreen() {
 
   const handleFabMouseUp = () => {
     if (isDragging && !hasMoved) {
+      // 일정 추가 모달을 열 때 이전 입력값 초기화
+      setExtractedText("");
+      setExtractedTodoInfo(null);
       setShowInputMethodModal(true);
     }
     setIsDragging(false);
@@ -166,6 +169,9 @@ export function CalendarHomeScreen() {
 
     const handleMouseUp = () => {
       if (isDragging && !hasMoved) {
+        // 일정 추가 모달을 열 때 이전 입력값 초기화
+        setExtractedText("");
+        setExtractedTodoInfo(null);
         setShowInputMethodModal(true);
       }
       setIsDragging(false);
@@ -173,6 +179,9 @@ export function CalendarHomeScreen() {
 
     const handleTouchEnd = () => {
       if (isDragging && !hasMoved) {
+        // 일정 추가 모달을 열 때 이전 입력값 초기화
+        setExtractedText("");
+        setExtractedTodoInfo(null);
         setShowInputMethodModal(true);
       }
       setIsDragging(false);
@@ -363,6 +372,7 @@ export function CalendarHomeScreen() {
               }
 
               return {
+                // 구글 캘린더 이벤트 ID를 사용 (중복 제거를 위해 중요)
                 id: event.google_calendar_event_id || `google_${event.id}`,
                 title: event.title || '제목 없음',
                 time: isAllDay ? '' : (event.start_time || "09:00"), // 하루종일이면 빈 문자열
@@ -386,7 +396,8 @@ export function CalendarHomeScreen() {
                 memberId: undefined,
                 isRoutine: false,
                 source: 'google_calendar' as const,
-                googleCalendarEventId: event.id,
+                // 구글 캘린더 이벤트 ID (중복 제거의 핵심)
+                googleCalendarEventId: event.id || event.google_calendar_event_id,
                 sourceId: event.source_id, // Always Plan의 Todo ID (중복 제거용)
               };
             });
@@ -414,29 +425,42 @@ export function CalendarHomeScreen() {
                   .map(t => t.googleCalendarEventId!)
               );
 
+              // sourceId로 매칭된 일정 ID 수집 (더 정확한 중복 제거)
+              const alwaysPlanSourceIds = new Set(
+                alwaysPlanTodos
+                  .map(t => t.id)
+              );
+
               // 중복되지 않는 Google Calendar 이벤트만 추가
               // ID 기반 중복 제거 (제목+날짜+시간 기반은 제거 - 사용자 의도 반영)
               const newGoogleEvents = formattedGoogleEvents.filter(
                 (event: any) => {
-                  // 1. ID로 중복 체크 (가장 정확)
+                  // 구글 캘린더 이벤트 ID (중복 제거의 핵심)
+                  const googleEventId = event.googleCalendarEventId || event.id;
+
+                  // 1. 프론트엔드에서 생성한 ID로 중복 체크
                   if (existingIds.has(event.id)) {
-                    console.log(`[Google Calendar] 중복 제거 (ID): ${event.id}`);
+                    console.log(`[Google Calendar] 중복 제거 (프론트엔드 ID): ${event.id}`);
                     return false;
                   }
+
                   // 2. Always Plan 일정과 이미 매칭된 Google Calendar 이벤트는 표시하지 않음
                   // (googleCalendarEventId로 매칭된 일정은 이미 동기화된 것으로 간주)
-                  if (event.googleCalendarEventId && alwaysPlanGoogleEventIds.has(event.googleCalendarEventId)) {
-                    console.log(`[Google Calendar] 중복 제거 (Always Plan과 매칭됨): ${event.googleCalendarEventId}`);
+                  // 이것이 가장 중요한 중복 제거: 내가 만든 일정이 구글에 동기화되면 google_calendar_event_id가 저장됨
+                  if (googleEventId && alwaysPlanGoogleEventIds.has(googleEventId)) {
+                    console.log(`[Google Calendar] 중복 제거 (내가 동기화한 일정 - googleCalendarEventId): ${googleEventId}`);
                     return false;
                   }
+
                   // 3. sourceId로 중복 체크 (extendedProperties 또는 description에서 추출)
+                  // 내가 만든 일정이 구글에 동기화될 때 sourceId가 설정됨
                   if (event.sourceId) {
-                    const existingTodoWithSourceId = alwaysPlanTodos.find(t => t.id === event.sourceId);
-                    if (existingTodoWithSourceId) {
-                      console.log(`[Google Calendar] 중복 제거 (sourceId 매칭): ${event.sourceId}`);
+                    if (alwaysPlanSourceIds.has(event.sourceId)) {
+                      console.log(`[Google Calendar] 중복 제거 (내가 만든 일정 - sourceId): ${event.sourceId}`);
                       return false;
                     }
                   }
+
                   // 4. 제목+날짜+시간 기반 중복 제거는 제거 (사용자가 비슷한 일정을 만들 수 있도록)
                   return true;
                 }
@@ -455,7 +479,7 @@ export function CalendarHomeScreen() {
               for (const todo of mergedTodos) {
                 // ID가 있으면 ID로, 없으면 생성
                 const todoId = todo.id || `temp_${Date.now()}_${Math.random()}`;
-                
+
                 if (!finalSeenIds.has(todoId)) {
                   finalSeenIds.add(todoId);
                   finalUniqueTodos.push(todo);
@@ -656,14 +680,15 @@ export function CalendarHomeScreen() {
             return {
               id: todo.id,
               title: todo.title,
-              time: todo.start_time || "09:00",
+              // 하루종일 일정은 time을 빈 문자열로 설정
+              time: todo.all_day ? '' : (todo.start_time || "09:00"),
               duration: duration > 0 ? duration : 60,
               completed: todo.status === 'completed',
               category: todo.category || "기타",
               date: todoDate,
               endDate: todoEndDate,  // 종료 날짜 추가
-              startTime: todo.start_time,
-              endTime: todo.end_time,
+              startTime: todo.all_day ? undefined : todo.start_time,
+              endTime: todo.all_day ? undefined : todo.end_time,
               isAllDay: todo.all_day || false,
               memo: todo.memo || todo.description || "",
               location: todo.location || "",
@@ -1260,7 +1285,12 @@ export function CalendarHomeScreen() {
     };
 
     setTodos((prev) =>
-      [...prev, newTodo].sort((a, b) => a.time.localeCompare(b.time))
+      [...prev, newTodo].sort((a, b) => {
+        // 하루종일 일정은 맨 위에 (빈 문자열이 먼저 오도록)
+        if (!a.time && b.time) return -1;
+        if (a.time && !b.time) return 1;
+        return (a.time || '').localeCompare(b.time || '');
+      })
     );
     toast.success("일정이 추가되었습니다.");
   };
@@ -1384,14 +1414,15 @@ export function CalendarHomeScreen() {
             const updatedTodo = {
               id: editingTodoId,
               title: formData.title,
-              time: formData.startTime || "09:00",
+              // 하루종일 일정은 time을 빈 문자열로 설정
+              time: formData.isAllDay ? '' : (formData.startTime || "09:00"),
               duration: duration > 0 ? duration : 60,
               completed: response.data.status === 'completed' || todos.find(t => t.id === editingTodoId)?.completed || false,
               category: formData.category,
               date: normalizedDate,
               endDate: normalizedEndDate || undefined,  // 종료 날짜 추가
-              startTime: formData.startTime,
-              endTime: formData.endTime,
+              startTime: formData.isAllDay ? undefined : formData.startTime,
+              endTime: formData.isAllDay ? undefined : formData.endTime,
               isAllDay: formData.isAllDay,
               memo: formData.memo || "",
               location: formData.location || "",
@@ -1546,7 +1577,10 @@ export function CalendarHomeScreen() {
                     if (a.date !== b.date) {
                       return (a.date || '').localeCompare(b.date || '');
                     }
-                    return a.time.localeCompare(b.time);
+                    // 하루종일 일정은 맨 위에 (빈 문자열이 먼저 오도록)
+                    if (!a.time && b.time) return -1;
+                    if (a.time && !b.time) return 1;
+                    return (a.time || '').localeCompare(b.time || '');
                   })
               );
               toast.success("일정이 수정되었습니다.");
@@ -1592,8 +1626,9 @@ export function CalendarHomeScreen() {
           location: formData.location || "",
           date: startDate,  // 시작 날짜
           end_date: endDate,  // 종료 날짜 (기간 일정인 경우)
-          start_time: formData.startTime || null,
-          end_time: formData.endTime || null,
+          // 하루종일 일정은 start_time과 end_time을 null로 설정
+          start_time: formData.isAllDay ? null : (formData.startTime || null),
+          end_time: formData.isAllDay ? null : (formData.endTime || null),
           all_day: formData.isAllDay,
           category: formData.category,
           status: 'pending',
@@ -1710,14 +1745,15 @@ export function CalendarHomeScreen() {
             const newTodo = {
               id: response.data.id,
               title: formData.title,
-              time: formData.startTime || "09:00",
+              // 하루종일 일정은 time을 빈 문자열로 설정
+              time: formData.isAllDay ? '' : (formData.startTime || "09:00"),
               duration: duration > 0 ? duration : 60,
               completed: false,
               category: formData.category,
               date: todoDate,
               endDate: todoEndDate,  // 종료 날짜 추가
-              startTime: formData.startTime,
-              endTime: formData.endTime,
+              startTime: formData.isAllDay ? undefined : formData.startTime,
+              endTime: formData.isAllDay ? undefined : formData.endTime,
               isAllDay: formData.isAllDay,
               memo: formData.memo || "",
               location: formData.location || "",
@@ -1743,7 +1779,10 @@ export function CalendarHomeScreen() {
                 if (a.date !== b.date) {
                   return (a.date || '').localeCompare(b.date || '');
                 }
-                return a.time.localeCompare(b.time);
+                // 하루종일 일정은 맨 위에 (빈 문자열이 먼저 오도록)
+                if (!a.time && b.time) return -1;
+                if (a.time && !b.time) return 1;
+                return (a.time || '').localeCompare(b.time || '');
               });
               console.log('[일정 추가] 상태 업데이트 후 todos 개수:', sorted.length);
               console.log('[일정 추가] 새로 추가된 일정:', sorted.find(t => t.id === newTodo.id));
@@ -1897,8 +1936,10 @@ export function CalendarHomeScreen() {
           toast.error(`일정 추가에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
         }
 
-        // 모달 닫기
+        // 모달 닫기 및 입력값 초기화
         setEditingTodoId(null);
+        setExtractedText("");
+        setExtractedTodoInfo(null);
       }
     } catch (error: any) {
       console.error("일정 추가 API 에러:", error);
@@ -2373,12 +2414,17 @@ export function CalendarHomeScreen() {
       toast.info('이미지 촬영을 시작합니다.');
     } else {
       // 텍스트 입력 또는 STT/OCR로 추출된 텍스트와 일정 정보가 있으면 설정
+      // 새로운 입력이 있으면 기존 값 초기화 후 설정
       if (extractedText) {
         setExtractedText(extractedText);
+      } else {
+        setExtractedText(""); // 새로운 입력이 없으면 초기화
       }
       if (todoInfo) {
         console.log("일정 정보 받음:", todoInfo);
         setExtractedTodoInfo(todoInfo);
+      } else {
+        setExtractedTodoInfo(null); // 새로운 일정 정보가 없으면 초기화
       }
       setShowAddTodoModal(true);
     }
@@ -2418,7 +2464,12 @@ export function CalendarHomeScreen() {
       return false;
     });
 
-    return regularTodos.sort((a, b) => a.time.localeCompare(b.time));
+    return regularTodos.sort((a, b) => {
+      // 하루종일 일정은 맨 위에 (빈 문자열이 먼저 오도록)
+      if (!a.time && b.time) return -1;
+      if (a.time && !b.time) return 1;
+      return (a.time || '').localeCompare(b.time || '');
+    });
   };
 
   const filteredRoutines = routines.filter(r => selectedMembers.includes(r.memberId));
@@ -2443,12 +2494,11 @@ export function CalendarHomeScreen() {
     <div className="min-h-screen bg-[#FAFAFA] flex flex-col max-w-[375px] mx-auto relative pb-4">
       {/* Google Calendar 동기화 상태 표시 */}
       {syncStatus !== 'idle' && (
-        <div className={`px-4 py-2 text-xs flex items-center justify-between ${
-          syncStatus === 'syncing' ? 'bg-[#E0F2FE] text-[#0EA5E9]' :
+        <div className={`px-4 py-2 text-xs flex items-center justify-between ${syncStatus === 'syncing' ? 'bg-[#E0F2FE] text-[#0EA5E9]' :
           syncStatus === 'success' ? 'bg-[#D1FAE5] text-[#10B981]' :
-          syncStatus === 'disabled' ? 'bg-[#F3F4F6] text-[#6B7280]' :
-          'bg-[#FEE2E2] text-[#EF4444]'
-        }`}>
+            syncStatus === 'disabled' ? 'bg-[#F3F4F6] text-[#6B7280]' :
+              'bg-[#FEE2E2] text-[#EF4444]'
+          }`}>
           <div className="flex items-center gap-2">
             {syncStatus === 'syncing' && <Clock size={12} className="animate-spin" />}
             {syncStatus === 'success' && <Check size={12} />}
@@ -2960,13 +3010,15 @@ export function CalendarHomeScreen() {
                               </div>
                               <div className="flex items-center gap-2 mt-1 ml-6">
                                 <span className="text-xs text-[#6B7280]">
-                                  {todo.endDate && todo.endDate !== todo.date
-                                    ? `${todo.date} ~ ${todo.endDate}`
-                                    : todo.startTime && todo.endTime
-                                      ? `${todo.startTime} ~ ${todo.endTime}`
-                                      : todo.time
-                                        ? `${todo.time} • ${formatDuration(todo.duration || 0)}`
-                                        : ''}
+                                  {todo.isAllDay
+                                    ? '하루종일'
+                                    : todo.endDate && todo.endDate !== todo.date
+                                      ? `${todo.date} ~ ${todo.endDate}`
+                                      : todo.startTime && todo.endTime
+                                        ? `${todo.startTime} ~ ${todo.endTime}`
+                                        : todo.time
+                                          ? `${todo.time} • ${formatDuration(todo.duration || 0)}`
+                                          : ''}
                                 </span>
                                 <span className="text-xs text-[#9CA3AF] bg-white px-2 py-0.5 rounded-full">
                                   {todo.category}
@@ -3052,13 +3104,15 @@ export function CalendarHomeScreen() {
                           </div>
                           <div className="flex items-center gap-2 mt-2 ml-7">
                             <span className="text-xs text-[#6B7280]">
-                              {todo.endDate && todo.endDate !== todo.date
-                                ? `${todo.date} ~ ${todo.endDate}`
-                                : todo.startTime && todo.endTime
-                                  ? `${todo.startTime} ~ ${todo.endTime}`
-                                  : todo.time
-                                    ? `${todo.time} • ${formatDuration(todo.duration || 0)}`
-                                    : ''}
+                              {todo.isAllDay
+                                ? '하루종일'
+                                : todo.endDate && todo.endDate !== todo.date
+                                  ? `${todo.date} ~ ${todo.endDate}`
+                                  : todo.startTime && todo.endTime
+                                    ? `${todo.startTime} ~ ${todo.endTime}`
+                                    : todo.time
+                                      ? `${todo.time} • ${formatDuration(todo.duration || 0)}`
+                                      : ''}
                             </span>
                             <span className="text-xs text-[#9CA3AF] bg-white px-2 py-0.5 rounded-full">
                               {todo.category}
@@ -3447,6 +3501,7 @@ export function CalendarHomeScreen() {
                   <button
                     onClick={() => {
                       setEditingTodoId(todo.id);
+                      // 수정 모드로 열 때는 입력값 초기화하지 않음 (기존 일정 데이터 사용)
                       setShowAddTodoModal(true);
                       setSelectedTodoForDetail(null);
                     }}
@@ -3481,7 +3536,12 @@ export function CalendarHomeScreen() {
       {showInputMethodModal && (
         <InputMethodModal
           isOpen={showInputMethodModal}
-          onClose={() => setShowInputMethodModal(false)}
+          onClose={() => {
+            setShowInputMethodModal(false);
+            // InputMethodModal을 닫을 때도 입력값 초기화
+            setExtractedText("");
+            setExtractedTodoInfo(null);
+          }}
           onSelect={handleInputMethodSelect}
         />
       )}
@@ -3494,6 +3554,7 @@ export function CalendarHomeScreen() {
             setShowAddTodoModal(false);
             setEditingTodoId(null);
             setExtractedText(""); // 모달 닫을 때 추출된 텍스트 초기화
+            setExtractedTodoInfo(null); // 모달 닫을 때 추출된 일정 정보 초기화
           }}
           onSave={handleSaveDetailedTodo}
           initialData={

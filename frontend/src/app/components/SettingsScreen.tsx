@@ -156,34 +156,43 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar }: SettingsS
         {/* Google Calendar Integration */}
         <div className="bg-white p-6">
           <h3 className="font-medium text-[#1F2937] mb-4">캘린더 연동</h3>
-          <div className="flex items-center justify-between py-3">
-            <div className="flex-1">
-              <div className="font-medium text-[#1F2937]">Google Calendar</div>
-              <div className="text-sm text-[#6B7280] mt-1">
-                {googleCalendarConnected
-                  ? "Google Calendar 동기화"
-                  : "구글 캘린더와 동기화하기"}
+          
+          {/* Google Calendar 연동이 활성화되지 않았을 때만 연동 토글 표시 */}
+          {(!googleCalendarConnected || !googleCalendarEnabled) && (
+            <>
+              {/* Google Calendar 연동 토글 */}
+              <div className="flex items-center justify-between py-3 border-b border-[#F3F4F6]">
+                <div className="flex-1">
+                  <div className="font-medium text-[#1F2937]">Google Calendar</div>
+                  <div className="text-sm text-[#6B7280] mt-1">
+                    {googleCalendarConnected
+                      ? "Google Calendar 동기화"
+                      : "구글 캘린더와 동기화하기"}
+                  </div>
+                </div>
+                <button
+                  onClick={handleGoogleCalendarToggle}
+                  disabled={isLoading}
+                  className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${googleCalendarEnabled ? "bg-[#FF9B82]" : "bg-[#D1D5DB]"
+                    } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  <div
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-200 ${googleCalendarEnabled ? "translate-x-6" : "translate-x-0"
+                      }`}
+                  />
+                </button>
               </div>
-            </div>
-            <button
-              onClick={handleGoogleCalendarToggle}
-              disabled={isLoading}
-              className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${googleCalendarEnabled ? "bg-[#FF9B82]" : "bg-[#D1D5DB]"
-                } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
-            >
-              <div
-                className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-200 ${googleCalendarEnabled ? "translate-x-6" : "translate-x-0"
-                  }`}
-              />
-            </button>
-          </div>
-          {!googleCalendarConnected && (
-            <div className="text-xs text-[#6B7280] bg-[#F3F4F6] p-2 rounded mt-2">
-              Google 로그인 후 사용할 수 있습니다.
-            </div>
+              {!googleCalendarConnected && (
+                <div className="text-xs text-[#6B7280] bg-[#F3F4F6] p-2 rounded mt-2">
+                  Google 로그인 후 사용할 수 있습니다.
+                </div>
+              )}
+            </>
           )}
+          
+          {/* Google Calendar 연동이 활성화되면 바로 세부 옵션만 표시 */}
           {googleCalendarConnected && googleCalendarEnabled && (
-            <div className="mt-4 space-y-4">
+            <>
               {/* Google Calendar 가져오기 토글 */}
               <div className="flex items-center justify-between py-3 border-b border-[#F3F4F6]">
                 <div className="flex-1">
@@ -259,7 +268,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar }: SettingsS
                       setGoogleCalendarExportEnabled(newState);
 
                       if (!newState) {
-                        // 토글을 끌 때: bulk_synced가 아닌 일정들의 Google Calendar 이벤트가 삭제됨 (설정 페이지에 머물기)
+                        // 토글을 끌 때: bulk_synced가 아닌 일정들의 Google Calendar 이벤트가 삭제됨
                         const deletedCount = response.data?.deleted_count || 0;
                         if (deletedCount > 0) {
                           toast.success(`Always Plan 일정 내보내기가 비활성화되었습니다. ${deletedCount}개 이벤트가 Google Calendar에서 삭제되었습니다. (동기화 후 저장한 일정은 유지됩니다)`);
@@ -267,6 +276,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar }: SettingsS
                           toast.success("Always Plan 일정 내보내기가 비활성화되었습니다. (동기화 후 저장한 일정은 유지됩니다)");
                         }
                       } else {
+                        // 토글을 켤 때: 바로 동기화 실행
                         const syncedCount = response.data?.synced_count || 0;
                         const matchedCount = response.data?.matched_count || 0;
                         if (syncedCount > 0 || matchedCount > 0) {
@@ -326,24 +336,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar }: SettingsS
                   Google Calendar에서 최신 일정을 가져옵니다.
                 </p>
               </div>
-
-              {/* 디버그 버튼 */}
-              <button
-                onClick={async () => {
-                  try {
-                    const response = await apiClient.debugListCalendars();
-                    console.log("[Google Calendar] 캘린더 목록:", response.data);
-                    toast.success("캘린더 목록을 콘솔에서 확인하세요");
-                  } catch (error) {
-                    console.error("[Google Calendar] 캘린더 목록 가져오기 실패:", error);
-                    toast.error("캘린더 목록 가져오기 실패");
-                  }
-                }}
-                className="text-xs text-[#FF9B82] hover:underline"
-              >
-                캘린더 목록 확인 (디버그)
-              </button>
-            </div>
+            </>
           )}
         </div>
 
