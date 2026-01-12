@@ -3,7 +3,7 @@ Todo endpoints for CRUD operations and automation
 """
 import json
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, date
@@ -15,6 +15,7 @@ from app.schemas import (
     TodoCreate, TodoUpdate, TodoResponse, TodoStatsResponse
 )
 from app.api.routes.auth import get_current_user
+from app.api.routes.notifications import send_scheduled_emails
 
 router = APIRouter(
     prefix="/todos",
@@ -188,6 +189,7 @@ async def get_todo(
 @router.post("/", response_model=TodoResponse, status_code=status.HTTP_201_CREATED)
 async def create_todo(
     todo: TodoCreate,  # FastAPI가 자동으로 JSON 파싱 및 검증
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -257,6 +259,8 @@ async def create_todo(
     # end_date 저장 확인
     logger.info(f"[CREATE_TODO] Todo 저장 완료 - id: {db_todo.id}, date: {db_todo.date}, end_date: {db_todo.end_date}, all_day: {db_todo.all_day}")
     logger.info(f"[CREATE_TODO] 첫 번째 일정 생성 완료: ID={db_todo.id}, repeat_type={db_todo.repeat_type}, todo_group_id={db_todo.todo_group_id}")
+    
+    # 알림은 스케줄러에서 주기적으로 확인하여 발송하므로 여기서는 호출하지 않음
     
     # 체크리스트 항목 추가
     if todo.checklist_items:

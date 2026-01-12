@@ -23,10 +23,18 @@ interface InputMethodModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelect: (method: 'voice' | 'camera' | 'text', extractedText?: string, todoInfo?: ExtractedTodoInfo) => void;
+  initialMethod?: 'voice' | 'camera' | null;
 }
 
-export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModalProps) {
-  const [activeMethod, setActiveMethod] = useState<'voice' | 'camera' | null>(null);
+export function InputMethodModal({ isOpen, onClose, onSelect, initialMethod }: InputMethodModalProps) {
+  const [activeMethod, setActiveMethod] = useState<'voice' | 'camera' | null>(initialMethod || 'voice');
+
+  // initialMethod가 변경되면 activeMethod 업데이트
+  useEffect(() => {
+    if (isOpen && initialMethod !== undefined) {
+      setActiveMethod(initialMethod);
+    }
+  }, [isOpen, initialMethod]);
   const [isRecording, setIsRecording] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
 
@@ -57,6 +65,8 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
   useEffect(() => {
     console.log("transcribedText 상태 변경됨:", transcribedText);
   }, [transcribedText]);
+
+  // 모달이 열릴 때는 마이크 화면만 표시 (녹음은 시작하지 않음)
 
   // 비디오 스트림이 설정되면 재생 시도
   useEffect(() => {
@@ -135,12 +145,29 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
   if (!isOpen) return null;
 
   // --- Voice Logic (Preserved) ---
-  const handleVoiceClick = async () => {
+  const handleVoiceClick = () => {
     setActiveMethod('voice');
     setAudioBlob(null);
     setAudioUrl(null);
     audioChunksRef.current = [];
+  };
 
+  // 녹음 재시작 함수 (기존 녹음본 및 텍스트 초기화)
+  const handleRestartRecording = () => {
+    setAudioBlob(null);
+    setAudioUrl(null);
+    setTranscribedText("");
+    setExtractedTodoInfo(null);
+    audioChunksRef.current = [];
+    setIsPlaying(false);
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+      audioPlayerRef.current = null;
+    }
+  };
+
+  // 녹음 시작 함수
+  const handleStartRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
@@ -234,7 +261,7 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
 
     } catch (error) {
       console.error("Error accessing microphone:", error);
-      alert("마이크 접근 권한이 필요합니다.");
+      toast.error("마이크 접근 권한이 필요합니다.");
       setActiveMethod(null);
     }
   };
@@ -578,261 +605,301 @@ export function InputMethodModal({ isOpen, onClose, onSelect }: InputMethodModal
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="w-full max-w-[375px] min-h-screen bg-[#F5F5F5] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-4 bg-white border-b border-[#E5E7EB]">
-          <h2 className="font-semibold text-[#1F2937]">일정 추가</h2>
-          <button
-            onClick={handleClose}
-            className="p-2 hover:bg-[#F3F4F6] rounded-lg transition-colors"
-          >
-            <X size={24} className="text-[#6B7280]" />
-          </button>
-        </div>
+    <>
+      {/* 배경 오버레이 */}
+      <div
+        className="fixed inset-0 bg-black/30 z-40 transition-opacity duration-200"
+        onClick={handleClose}
+      />
 
-        {/* Content */}
-        <div className="flex-1 flex flex-col items-center justify-center px-6 py-8">
-          <div className="text-center mb-8">
-            <h3 className="text-xl font-semibold text-[#1F2937] border-b-2 border-[#D1D5DB] inline-block pb-2">
-              일정 작성
-            </h3>
+      {/* 팝업 컨테이너 */}
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div
+          className="bg-white rounded-2xl shadow-2xl max-w-[400px] w-full max-h-[85vh] flex flex-col pointer-events-auto transform transition-all duration-200 overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            animation: 'slideUp 0.2s ease-out'
+          }}
+        >
+          {/* Header */}
+          <div className="bg-gradient-to-r from-[#FF9B82] to-[#FFB499] px-6 py-4 text-white rounded-t-2xl relative">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-white">일정 추가</h2>
+            </div>
+            {/* 우측 상단 닫기 버튼 */}
+            <button
+              onClick={handleClose}
+              className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
+              aria-label="닫기"
+            >
+              <X size={16} className="text-white" />
+            </button>
           </div>
 
-          {/* 텍스트 입력 영역 */}
-          <div className="w-full bg-white rounded-2xl p-4 mb-4 shadow-sm">
-            <textarea
-              value={transcribedText}
-              onChange={(e) => {
-                if (e.target.value.length <= 1000) {
-                  setTranscribedText(e.target.value);
-                }
-              }}
-              placeholder="텍스트를 작성해주세요. (최대 1000자)"
-              className="w-full min-h-[120px] p-3 border border-[#E5E7EB] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[#FF9B82] text-sm text-[#1F2937]"
-              maxLength={1000}
-            />
-            <div className="flex items-center justify-between mt-2">
-              <span className="text-xs text-[#9CA3AF]">
-                {transcribedText.length}/1000자
-              </span>
-              {transcribedText.trim().length > 0 && (
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto px-6 py-6 bg-[#F5F5F5]">
+            <div className="space-y-6">
+              {/* 마이크/카메라/문서 버튼 - 상단에 배치 */}
+              <div className="flex justify-between items-center px-6 mb-6">
                 <button
-                  onClick={() => {
-                    onSelect('text', transcribedText, extractedTodoInfo || undefined);
-                    setTranscribedText("");
-                    setExtractedTodoInfo(null);
-                    setActiveMethod(null);
-                  }}
-                  disabled={isExtracting}
-                  className="px-4 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={handleVoiceClick}
+                  className={`w-16 h-16 rounded-full border-2 flex items-center justify-center shadow-md active:scale-95 transition-all ${activeMethod === 'voice'
+                    ? 'bg-[#FF9B82] border-[#FF9B82]'
+                    : 'bg-white border-[#E5E7EB] hover:bg-[#FFF5F0] hover:border-[#FF9B82]'
+                    }`}
                 >
-                  {isExtracting ? '일정 정보 추출 중...' : extractedTodoInfo ? '일정 추가하기' : '저장'}
+                  <Mic size={24} className={activeMethod === 'voice' ? 'text-white' : 'text-[#FF9B82]'} />
                 </button>
+                <button
+                  onClick={handleCameraClick}
+                  className={`w-16 h-16 rounded-full border-2 flex items-center justify-center shadow-md active:scale-95 transition-all ${activeMethod === 'camera'
+                    ? 'bg-[#FF9B82] border-[#FF9B82]'
+                    : 'bg-white border-[#E5E7EB] hover:bg-[#FFF5F0] hover:border-[#FF9B82]'
+                    }`}
+                >
+                  <Camera size={24} className={activeMethod === 'camera' ? 'text-white' : 'text-[#FF9B82]'} />
+                </button>
+                <button
+                  onClick={handleTextClick}
+                  className={`w-16 h-16 rounded-full border-2 flex items-center justify-center shadow-md active:scale-95 transition-all ${activeMethod === null || activeMethod === undefined
+                    ? 'bg-[#FF9B82] border-[#FF9B82]'
+                    : 'bg-white border-[#E5E7EB] hover:bg-[#FFF5F0] hover:border-[#FF9B82]'
+                    }`}
+                >
+                  <FileText size={24} className={activeMethod === null || activeMethod === undefined ? 'text-white' : 'text-[#FF9B82]'} />
+                </button>
+              </div>
+
+              {/* 텍스트 입력 영역 */}
+              <div className="w-full bg-white rounded-2xl p-4 mb-4 shadow-sm">
+                <textarea
+                  value={transcribedText}
+                  onChange={(e) => {
+                    if (e.target.value.length <= 1000) {
+                      setTranscribedText(e.target.value);
+                    }
+                  }}
+                  placeholder="텍스트를 작성해주세요. (최대 1000자)"
+                  className="w-full min-h-[120px] p-3 border border-[#E5E7EB] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[#FF9B82] text-sm text-[#1F2937]"
+                  maxLength={1000}
+                />
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-xs text-[#9CA3AF]">
+                    {transcribedText.length}/1000자
+                  </span>
+                  {transcribedText.trim().length > 0 && (
+                    <button
+                      onClick={() => {
+                        onSelect('text', transcribedText, extractedTodoInfo || undefined);
+                        setTranscribedText("");
+                        setExtractedTodoInfo(null);
+                        setActiveMethod(null);
+                      }}
+                      disabled={isExtracting}
+                      className="px-4 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isExtracting ? '일정 정보 추출 중...' : extractedTodoInfo ? '일정 추가하기' : '저장'}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Voice UI */}
+              {activeMethod === 'voice' && (
+                <div className="w-full bg-white rounded-2xl p-6 mb-4 shadow-sm">
+                  <div className="flex flex-col items-center gap-6">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-3 h-3 rounded-full bg-[#FF9B82] ${isRecording || isTranscribing ? 'animate-pulse' : ''}`} />
+                      <span className="text-sm text-[#6B7280]">
+                        {isRecording
+                          ? '녹음 중... (최대 30초)'
+                          : isTranscribing
+                            ? '음성을 텍스트로 변환 중...'
+                            : isExtracting
+                              ? '일정 정보 추출 중...'
+                              : audioUrl
+                                ? '녹음 완료'
+                                : '녹음 버튼을 눌러 시작하세요'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-center gap-1 h-20">
+                      {isRecording ? (
+                        [...Array(20)].map((_, i) => (
+                          <div key={i} className="w-1 bg-[#FF9B82] rounded-full" style={{ height: `${Math.random() * 48 + 8}px`, animation: `wave 0.5s ease-in-out infinite ${i * 0.05}s` }} />
+                        ))
+                      ) : (
+                        <div className="h-1 bg-gray-200 w-full rounded" />
+                      )}
+                      <style>{`@keyframes wave { 0%, 100% { height: 8px; } 50% { height: ${Math.random() * 40 + 16}px; } }`}</style>
+                    </div>
+
+                    <div className="flex gap-3">
+                      {!isRecording && !audioUrl && (
+                        <button
+                          onClick={handleStartRecording}
+                          className="px-6 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] flex items-center gap-2"
+                        >
+                          <Mic size={18} /> 녹음 시작
+                        </button>
+                      )}
+                      {isRecording && (
+                        <button onClick={handleStopRecording} className="px-6 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg hover:bg-[#E5E7EB] flex items-center gap-2">
+                          <Square size={16} fill="currentColor" /> 중지
+                        </button>
+                      )}
+                      {!isRecording && audioUrl && (
+                        <>
+                          <button onClick={() => setActiveMethod(null)} className="px-6 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg hover:bg-[#E5E7EB]">
+                            취소
+                          </button>
+                          <button
+                            onClick={() => {
+                              handleRestartRecording();
+                              handleStartRecording();
+                            }}
+                            className="px-6 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] flex items-center gap-2"
+                          >
+                            <Mic size={18} /> 녹음 재시작
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Camera UI */}
+              {activeMethod === 'camera' && (
+                <div className="w-full bg-white rounded-2xl p-6 mb-4 shadow-sm">
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="w-full aspect-video bg-[#1F2937] rounded-lg overflow-hidden flex items-center justify-center relative">
+                      {capturedImage ? (
+                        <div className="w-full h-full relative">
+                          <img
+                            src={capturedImage}
+                            alt="Captured"
+                            className="w-full h-full object-contain bg-black"
+                          />
+                          {(isUploading || isExtracting) && (
+                            <div className="absolute inset-0 bg-black/70 flex items-center justify-center text-white text-sm">
+                              <div className="text-center">
+                                <div className="mb-2">{isUploading ? '텍스트 추출 중...' : '일정 정보 추출 중...'}</div>
+                                <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin mx-auto"></div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : stream ? (
+                        <div className="w-full h-full relative">
+                          <video
+                            ref={videoRef}
+                            autoPlay
+                            playsInline
+                            muted
+                            className="w-full h-full object-cover"
+                            style={{
+                              backgroundColor: '#000',
+                              minHeight: '200px'
+                            }}
+                          />
+                          {!isCameraReady && (
+                            <div className="absolute inset-0 bg-black/70 flex items-center justify-center text-white text-sm">
+                              <div className="text-center">
+                                <div className="mb-2">카메라 로딩 중...</div>
+                                <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin mx-auto"></div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-white text-sm">
+                          사진을 첨부해 주세요.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 숨겨진 파일 input */}
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      accept="image/*"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+
+                    <div className="flex gap-2 w-full justify-between">
+                      {capturedImage ? (
+                        <>
+                          <button onClick={handleCapture} disabled className="flex-1 py-2 bg-gray-200 text-gray-400 rounded-lg flex items-center justify-center gap-1 cursor-not-allowed">
+                            <Camera size={18} /> 촬영
+                          </button>
+                          <button
+                            onClick={handleExtractText}
+                            disabled={isUploading || isExtracting || !currentImageBlob}
+                            className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${extractionFailed || !transcribedText
+                              ? 'bg-[#6366F1] text-white hover:bg-[#5558E3]'
+                              : 'bg-[#10B981] text-white hover:bg-[#059669]'
+                              }`}
+                          >
+                            <FileSearch size={18} />
+                            {isUploading || isExtracting
+                              ? '추출 중...'
+                              : extractionFailed || !transcribedText
+                                ? '텍스트 추출'
+                                : '다시 추출'}
+                          </button>
+                          <button onClick={handleRetake} className="flex-1 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg hover:bg-[#E5E7EB] flex items-center justify-center gap-1">
+                            <RotateCcw size={18} /> 다시 선택
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={async () => {
+                              if (!stream) {
+                                // 첫 번째 클릭: 카메라 켜기
+                                await startCamera();
+                              } else {
+                                // 두 번째 클릭: 사진 촬영
+                                await handleCapture();
+                              }
+                            }}
+                            className="flex-1 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={isUploading || isExtracting}
+                          >
+                            <Camera size={18} /> {stream ? '촬영' : '카메라'}
+                          </button>
+                          <button
+                            onClick={() => fileInputRef.current?.click()}
+                            className="flex-1 py-2 bg-[#6366F1] text-white rounded-lg hover:bg-[#5558E3] flex items-center justify-center gap-1"
+                            disabled={isUploading || isExtracting}
+                          >
+                            <Upload size={18} /> 업로드
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (stream) {
+                                stream.getTracks().forEach(track => track.stop());
+                                setStream(null);
+                              }
+                              setActiveMethod(null);
+                            }}
+                            className="flex-1 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg hover:bg-[#E5E7EB] flex items-center justify-center gap-1"
+                            disabled={isUploading || isExtracting}
+                          >
+                            취소
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           </div>
-
-          {/* Voice UI */}
-          {activeMethod === 'voice' && (
-            <div className="w-full bg-white rounded-2xl p-6 mb-4 shadow-sm">
-              <div className="flex flex-col items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <div className={`w-3 h-3 rounded-full bg-[#FF9B82] ${isRecording || isTranscribing ? 'animate-pulse' : ''}`} />
-                  <span className="text-sm text-[#6B7280]">
-                    {isRecording
-                      ? '녹음 중... (최대 30초)'
-                      : isTranscribing
-                        ? '음성을 텍스트로 변환 중...'
-                        : isExtracting
-                          ? '일정 정보 추출 중...'
-                          : '녹음 완료'}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-center gap-1 h-16">
-                  {isRecording ? (
-                    [...Array(20)].map((_, i) => (
-                      <div key={i} className="w-1 bg-[#FF9B82] rounded-full" style={{ height: `${Math.random() * 48 + 8}px`, animation: `wave 0.5s ease-in-out infinite ${i * 0.05}s` }} />
-                    ))
-                  ) : (
-                    <div className="h-1 bg-gray-200 w-full rounded" />
-                  )}
-                  <style>{`@keyframes wave { 0%, 100% { height: 8px; } 50% { height: ${Math.random() * 40 + 16}px; } }`}</style>
-                </div>
-
-                <div className="flex gap-3">
-                  {isRecording ? (
-                    <button onClick={handleStopRecording} className="px-6 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg hover:bg-[#E5E7EB] flex items-center gap-2">
-                      <Square size={16} fill="currentColor" /> 중지
-                    </button>
-                  ) : (
-                    <button onClick={() => setActiveMethod(null)} className="px-6 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg hover:bg-[#E5E7EB]">
-                      취소
-                    </button>
-                  )}
-                  {!isRecording && audioUrl && (
-                    <button onClick={isPlaying ? handlePauseAudio : handlePlayAudio} className="px-6 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] flex items-center gap-2">
-                      {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-                      {isPlaying ? "일시정지" : "재생"}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Camera UI */}
-          {activeMethod === 'camera' && (
-            <div className="w-full bg-white rounded-2xl p-6 mb-4 shadow-sm">
-              <div className="flex flex-col items-center gap-4">
-                <div className="w-full aspect-video bg-[#1F2937] rounded-lg overflow-hidden flex items-center justify-center relative">
-                  {capturedImage ? (
-                    <div className="w-full h-full relative">
-                      <img
-                        src={capturedImage}
-                        alt="Captured"
-                        className="w-full h-full object-contain bg-black"
-                      />
-                      {(isUploading || isExtracting) && (
-                        <div className="absolute inset-0 bg-black/70 flex items-center justify-center text-white text-sm">
-                          <div className="text-center">
-                            <div className="mb-2">{isUploading ? '텍스트 추출 중...' : '일정 정보 추출 중...'}</div>
-                            <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin mx-auto"></div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : stream ? (
-                    <div className="w-full h-full relative">
-                      <video
-                        ref={videoRef}
-                        autoPlay
-                        playsInline
-                        muted
-                        className="w-full h-full object-cover"
-                        style={{
-                          backgroundColor: '#000',
-                          minHeight: '200px'
-                        }}
-                      />
-                      {!isCameraReady && (
-                        <div className="absolute inset-0 bg-black/70 flex items-center justify-center text-white text-sm">
-                          <div className="text-center">
-                            <div className="mb-2">카메라 로딩 중...</div>
-                            <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin mx-auto"></div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-white text-sm">
-                      사진을 첨부해 주세요.
-                    </div>
-                  )}
-                </div>
-
-                {/* 숨겨진 파일 input */}
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept="image/*"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
-
-                <div className="flex gap-2 w-full justify-between">
-                  {capturedImage ? (
-                    <>
-                      <button onClick={handleCapture} disabled className="flex-1 py-2 bg-gray-200 text-gray-400 rounded-lg flex items-center justify-center gap-1 cursor-not-allowed">
-                        <Camera size={18} /> 촬영
-                      </button>
-                      <button
-                        onClick={handleExtractText}
-                        disabled={isUploading || isExtracting || !currentImageBlob}
-                        className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${extractionFailed || !transcribedText
-                          ? 'bg-[#6366F1] text-white hover:bg-[#5558E3]'
-                          : 'bg-[#10B981] text-white hover:bg-[#059669]'
-                          }`}
-                      >
-                        <FileSearch size={18} />
-                        {isUploading || isExtracting
-                          ? '추출 중...'
-                          : extractionFailed || !transcribedText
-                            ? '텍스트 추출'
-                            : '다시 추출'}
-                      </button>
-                      <button onClick={handleRetake} className="flex-1 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg hover:bg-[#E5E7EB] flex items-center justify-center gap-1">
-                        <RotateCcw size={18} /> 다시 선택
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        onClick={async () => {
-                          if (!stream) {
-                            // 첫 번째 클릭: 카메라 켜기
-                            await startCamera();
-                          } else {
-                            // 두 번째 클릭: 사진 촬영
-                            await handleCapture();
-                          }
-                        }}
-                        className="flex-1 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                        disabled={isUploading || isExtracting}
-                      >
-                        <Camera size={18} /> {stream ? '촬영' : '카메라'}
-                      </button>
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="flex-1 py-2 bg-[#6366F1] text-white rounded-lg hover:bg-[#5558E3] flex items-center justify-center gap-1"
-                        disabled={isUploading || isExtracting}
-                      >
-                        <Upload size={18} /> 업로드
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (stream) {
-                            stream.getTracks().forEach(track => track.stop());
-                            setStream(null);
-                          }
-                          setActiveMethod(null);
-                        }}
-                        className="flex-1 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg hover:bg-[#E5E7EB] flex items-center justify-center gap-1"
-                        disabled={isUploading || isExtracting}
-                      >
-                        취소
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="text-center mb-6">
-            <p className="text-[#6B7280]">
-              {activeMethod === 'camera'
-                ? '텍스트 추출을 시작합니다.'
-                : activeMethod === 'voice'
-                  ? '녹음을 시작합니다.'
-                  : '일정을 작성해주세요.'}
-            </p>
-          </div>
-
-          <div className="flex justify-center gap-6">
-            <button onClick={handleVoiceClick} className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95">
-              <Mic size={32} className="text-[#FF9B82]" />
-            </button>
-            <button onClick={handleCameraClick} className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95">
-              <Camera size={32} className="text-[#FF9B82]" />
-            </button>
-            <button onClick={handleTextClick} className="w-20 h-20 rounded-full bg-white border-2 border-[#E5E7EB] flex items-center justify-center hover:bg-[#FFF5F0] hover:border-[#FF9B82] shadow-md active:scale-95">
-              <FileText size={32} className="text-[#FF9B82]" />
-            </button>
-          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

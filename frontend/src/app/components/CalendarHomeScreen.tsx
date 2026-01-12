@@ -46,6 +46,52 @@ export function CalendarHomeScreen() {
   const [showMyPageScreen, setShowMyPageScreen] = useState(false);
   const [showSettingsScreen, setShowSettingsScreen] = useState(false);
   const [showNotificationPanel, setShowNotificationPanel] = useState(false);
+  // 읽음 상태를 localStorage에서 불러오기
+  // 예정된 알림과 지나간 알림의 읽음 상태를 분리하여 관리
+  const [readUpcomingNotificationIds, setReadUpcomingNotificationIds] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('readUpcomingNotificationIds');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return new Set(Array.isArray(parsed) ? parsed : []);
+      }
+    } catch (error) {
+      console.error("읽음 예정 알림 상태 불러오기 실패:", error);
+    }
+    return new Set();
+  });
+  const [readPastNotificationIds, setReadPastNotificationIds] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('readPastNotificationIds');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return new Set(Array.isArray(parsed) ? parsed : []);
+      }
+    } catch (error) {
+      console.error("읽음 지나간 알림 상태 불러오기 실패:", error);
+    }
+    return new Set();
+  });
+  // 기존 호환성을 위한 readNotificationIds (지나간 알림용)
+  const readNotificationIds = readPastNotificationIds;
+  const [showTodoDetailFromNotification, setShowTodoDetailFromNotification] = useState(false);
+
+  // 읽음 상태를 localStorage에 저장
+  useEffect(() => {
+    try {
+      localStorage.setItem('readUpcomingNotificationIds', JSON.stringify(Array.from(readUpcomingNotificationIds)));
+    } catch (error) {
+      console.error("읽음 예정 알림 상태 저장 실패:", error);
+    }
+  }, [readUpcomingNotificationIds]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('readPastNotificationIds', JSON.stringify(Array.from(readPastNotificationIds)));
+    } catch (error) {
+      console.error("읽음 지나간 알림 상태 저장 실패:", error);
+    }
+  }, [readPastNotificationIds]);
   const [calendarView, setCalendarView] = useState<"month" | "week" | "day">("month");
   const [userEmail, setUserEmail] = useState("always-plan@email.com");
   const [userName, setUserName] = useState("나");
@@ -104,6 +150,7 @@ export function CalendarHomeScreen() {
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [hasMoved, setHasMoved] = useState(false);
   const [showInputMethodModal, setShowInputMethodModal] = useState(false);
+  const [inputMethodInitialMode, setInputMethodInitialMode] = useState<'voice' | 'camera' | null>('voice');
   const [showAddTodoModal, setShowAddTodoModal] = useState(false);
   const [selectedTodoForDetail, setSelectedTodoForDetail] = useState<string | null>(null);
   const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
@@ -542,6 +589,25 @@ export function CalendarHomeScreen() {
       isSyncInFlightRef.current = false;
     }
   }, []); // 의존성 배열 비움 - ref 사용하므로 재생성 불필요
+
+  // 알림 발송 주기적 체크 (5분마다)
+  useEffect(() => {
+    const checkNotifications = async () => {
+      try {
+        await apiClient.sendScheduledNotifications();
+      } catch (error) {
+        console.error("알림 발송 체크 실패:", error);
+      }
+    };
+
+    // 즉시 한 번 실행
+    checkNotifications();
+
+    // 5분마다 실행
+    const interval = setInterval(checkNotifications, 5 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -1342,6 +1408,13 @@ export function CalendarHomeScreen() {
           : null;
 
         // all_day가 true일 때는 start_time과 end_time을 null로 설정
+        // 알림 설정값: 수정하지 않으면 기존 값 유지, 수정하면 새 값 사용
+        const notificationReminders = formData.hasNotification && formData.notificationReminders && formData.notificationReminders.length > 0
+          ? formData.notificationReminders.map(r => ({ value: r.value, unit: r.unit }))
+          : (formData.hasNotification && existingTodo?.notificationReminders && existingTodo.notificationReminders.length > 0
+            ? existingTodo.notificationReminders.map((r: any) => ({ value: r.value, unit: r.unit }))
+            : []);
+
         const todoData: any = {
           title: formData.title,
           description: formData.memo || "",
@@ -1354,9 +1427,7 @@ export function CalendarHomeScreen() {
           status: existingTodo?.completed ? 'completed' : 'pending',
           has_notification: formData.hasNotification,
           notification_times: formData.alarmTimes || [], // 구버전 호환
-          notification_reminders: formData.notificationReminders && formData.notificationReminders.length > 0
-            ? formData.notificationReminders.map(r => ({ value: r.value, unit: r.unit }))
-            : [],
+          notification_reminders: notificationReminders,
           repeat_type: formData.repeatType || "none",
           repeat_end_date: formData.repeatType === 'custom'
             ? (formData.customRepeatEndType === 'date' ? formData.customRepeatEndDate :
@@ -1411,6 +1482,29 @@ export function CalendarHomeScreen() {
               }
             }
 
+            // 응답에서 알림 정보 가져오기
+            let notificationReminders: Array<{ value: number; unit: 'minutes' | 'hours' | 'days' | 'weeks' }> = [];
+            if (response.data.notification_reminders) {
+              try {
+                const parsed = typeof response.data.notification_reminders === 'string'
+                  ? JSON.parse(response.data.notification_reminders)
+                  : response.data.notification_reminders;
+                if (Array.isArray(parsed)) {
+                  notificationReminders = parsed.map((r: any) => ({
+                    value: Number(r.value) || 30,
+                    unit: r.unit || 'minutes'
+                  }));
+                }
+              } catch (e) {
+                console.error('Failed to parse notification_reminders from response:', e);
+                // 파싱 실패 시 formData 사용
+                notificationReminders = formData.notificationReminders || [];
+              }
+            } else {
+              // 응답에 없으면 formData 사용
+              notificationReminders = formData.notificationReminders || [];
+            }
+
             const updatedTodo = {
               id: editingTodoId,
               title: formData.title,
@@ -1426,8 +1520,9 @@ export function CalendarHomeScreen() {
               isAllDay: formData.isAllDay,
               memo: formData.memo || "",
               location: formData.location || "",
-              hasNotification: formData.hasNotification,
-              alarmTimes: formData.alarmTimes,
+              hasNotification: response.data.has_notification !== undefined ? response.data.has_notification : formData.hasNotification,
+              alarmTimes: response.data.notification_times ? (typeof response.data.notification_times === 'string' ? JSON.parse(response.data.notification_times) : response.data.notification_times) : formData.alarmTimes,
+              notificationReminders: notificationReminders, // 응답에서 가져온 알림 리마인더
               repeatType: formData.repeatType,
               checklistItems: formData.checklistItems.filter(item => item.trim() !== ''),
               postponeToNextDay: formData.postponeToNextDay,
@@ -2631,8 +2726,148 @@ export function CalendarHomeScreen() {
             </div>
           )}
         </div>
-        <button className="p-2 flex-shrink-0" onClick={() => setShowNotificationPanel(true)}>
+        <button className="p-2 flex-shrink-0 relative" onClick={() => setShowNotificationPanel(true)}>
           <Bell size={20} className="text-[#6B7280]" />
+          {/* 알림 상태 점 */}
+          {(() => {
+            const now = new Date();
+            const currentDate = now.toISOString().split('T')[0];
+            const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+
+            // 알림이 설정된 일정만 필터링
+            const notifications = todos.filter(todo => {
+              if (!todo.date) return false;
+              // hasNotification과 notificationReminders 모두 확인
+              const hasNotification = todo.hasNotification || false;
+              const notificationReminders = todo.notificationReminders || [];
+              const hasValidNotification = hasNotification && Array.isArray(notificationReminders) && notificationReminders.length > 0;
+
+              // 디버깅: 알림이 있는데 필터링되지 않는 경우 로그
+              if (hasNotification && notificationReminders.length > 0 && !hasValidNotification) {
+                console.log("[알림 점] 알림 필터링 실패:", {
+                  id: todo.id,
+                  title: todo.title,
+                  hasNotification,
+                  notificationReminders,
+                  isArray: Array.isArray(notificationReminders)
+                });
+              }
+
+              return hasValidNotification && !todo.completed;
+            });
+
+            // 디버깅: 알림이 설정된 일정 개수 확인
+            if (notifications.length > 0) {
+              console.log("[알림 점] 알림이 설정된 일정:", notifications.length, "개");
+            }
+
+            // 알림 시간 기준으로 지나간/예정된 알림 분리
+            const allPastNotifications: typeof notifications = [];
+            const allUpcomingNotifications: typeof notifications = [];
+
+            notifications.forEach(todo => {
+              if (!todo.date) return;
+              const reminders = todo.notificationReminders || [];
+              if (reminders.length === 0) return;
+
+              const todoDate = todo.date;
+              const todoTime = todo.time || todo.startTime || "00:00";
+              const [hours, minutes] = todoTime.split(':').map(Number);
+
+              // 일정 날짜/시간 계산
+              const todoDateTime = new Date(todoDate);
+              todoDateTime.setHours(hours, minutes, 0, 0);
+
+              // 각 알림 리마인더에 대해 알림 시간 계산
+              reminders.forEach((reminder: { value: number; unit: string }) => {
+                const value = reminder.value || 30;
+                const unit = reminder.unit || 'minutes';
+
+                // 알림 시간 계산
+                let notificationDateTime = new Date(todoDateTime);
+                if (unit === 'minutes') {
+                  notificationDateTime.setMinutes(notificationDateTime.getMinutes() - value);
+                } else if (unit === 'hours') {
+                  notificationDateTime.setHours(notificationDateTime.getHours() - value);
+                } else if (unit === 'days') {
+                  notificationDateTime.setDate(notificationDateTime.getDate() - value);
+                } else if (unit === 'weeks') {
+                  notificationDateTime.setDate(notificationDateTime.getDate() - (value * 7));
+                }
+
+                const notificationDate = notificationDateTime.toISOString().split('T')[0];
+                const notificationTime = `${notificationDateTime.getHours().toString().padStart(2, "0")}:${notificationDateTime.getMinutes().toString().padStart(2, "0")}`;
+
+                // 알림 시간 기준으로 분류
+                if (notificationDate < currentDate || (notificationDate === currentDate && notificationTime < currentTime)) {
+                  allPastNotifications.push(todo);
+                } else {
+                  allUpcomingNotifications.push(todo);
+                }
+              });
+            });
+
+            // 확인 안된 지나간 알림만 필터링 (지나간 알림 읽음 상태 사용)
+            const pastNotifications = allPastNotifications.filter(todo => !readPastNotificationIds.has(todo.id));
+            // 예정된 알림 중 읽지 않은 것만 필터링 (예정된 알림 읽음 상태 사용)
+            const unreadUpcomingNotifications = allUpcomingNotifications.filter(todo => !readUpcomingNotificationIds.has(todo.id));
+
+            const hasUnreadPast = pastNotifications.length > 0;
+            const hasNewUpcoming = unreadUpcomingNotifications.length > 0;
+
+            // 디버깅: 점 표시 상태 확인
+            if (notifications.length > 0 || hasUnreadPast || hasNewUpcoming) {
+              console.log("[알림 점] 상태:", {
+                전체알림: notifications.length,
+                지나간알림전체: allPastNotifications.length,
+                확인안된지나간알림: pastNotifications.length,
+                예정된알림전체: allUpcomingNotifications.length,
+                확인안된예정된알림: unreadUpcomingNotifications.length,
+                읽음상태크기_지나간: readPastNotificationIds.size,
+                읽음상태크기_예정: readUpcomingNotificationIds.size,
+                읽음상태_지나간: Array.from(readPastNotificationIds),
+                읽음상태_예정: Array.from(readUpcomingNotificationIds),
+                빨간점표시: hasUnreadPast,
+                초록점표시: hasNewUpcoming,
+                현재시간: `${currentDate} ${currentTime}`
+              });
+            }
+
+            // 디버깅: 실제 렌더링 여부 확인
+            if (hasNewUpcoming || hasUnreadPast) {
+              console.log("[알림 점] 렌더링:", {
+                hasNewUpcoming,
+                hasUnreadPast,
+                newUpcomingCount: unreadUpcomingNotifications.length,
+                unreadPastCount: pastNotifications.length
+              });
+            }
+
+            return (
+              <>
+                {hasNewUpcoming && (
+                  <div
+                    className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-[#10B981] rounded-full z-50"
+                    style={{
+                      minWidth: '8px',
+                      minHeight: '8px'
+                    }}
+                    title={`${unreadUpcomingNotifications.length}개의 예정된 알림`}
+                  />
+                )}
+                {hasUnreadPast && (
+                  <div
+                    className={`absolute -top-0.5 rounded-full w-2 h-2 bg-[#EF4444] z-50 ${hasNewUpcoming ? 'right-2' : '-right-0.5'}`}
+                    style={{
+                      minWidth: '8px',
+                      minHeight: '8px'
+                    }}
+                    title={`${pastNotifications.length}개의 확인 안된 알림`}
+                  />
+                )}
+              </>
+            );
+          })()}
         </button>
       </div>
 
@@ -2744,9 +2979,26 @@ export function CalendarHomeScreen() {
 
       {/* Notification Panel */}
       <NotificationPanel
-        isOpen={showNotificationPanel}
-        onClose={() => setShowNotificationPanel(false)}
+        isOpen={showNotificationPanel && !showTodoDetailFromNotification}
+        onClose={() => {
+          setShowNotificationPanel(false);
+          setShowTodoDetailFromNotification(false);
+        }}
         todos={todos}
+        readNotificationIds={readNotificationIds}
+        readUpcomingNotificationIds={readUpcomingNotificationIds}
+        readPastNotificationIds={readPastNotificationIds}
+        onMarkAsRead={(todoId, notificationType) => {
+          if (notificationType === 'upcoming') {
+            setReadUpcomingNotificationIds(prev => new Set([...prev, todoId]));
+          } else {
+            setReadPastNotificationIds(prev => new Set([...prev, todoId]));
+          }
+        }}
+        onTodoClick={(todoId) => {
+          setShowTodoDetailFromNotification(true);
+          setSelectedTodoForDetail(todoId);
+        }}
       />
 
       {/* Timeline ToDo List */}
@@ -3172,22 +3424,38 @@ export function CalendarHomeScreen() {
             {/* Backdrop */}
             <div
               className="fixed inset-0 bg-black/20 z-40"
-              onClick={() => setSelectedTodoForDetail(null)}
+              onClick={() => {
+                setSelectedTodoForDetail(null);
+                if (showTodoDetailFromNotification) {
+                  setShowTodoDetailFromNotification(false);
+                  setShowNotificationPanel(true);
+                }
+              }}
             />
 
             {/* Detail Box */}
-            <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 max-w-[90vw] max-h-[80vh] bg-white rounded-xl shadow-2xl z-50 border-2 border-[#E5E7EB] overflow-y-auto">
-              <div className="p-5">
-                <div className="flex items-start justify-between mb-4">
-                  <h3 className="font-semibold text-[#1F2937] flex-1">일정 상세</h3>
-                  <button
-                    onClick={() => setSelectedTodoForDetail(null)}
-                    className="p-1 hover:bg-[#F3F4F6] rounded transition-colors"
-                  >
-                    <X size={20} className="text-[#6B7280]" />
-                  </button>
+            <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 max-w-[90vw] max-h-[80vh] bg-white rounded-2xl shadow-2xl z-50 overflow-hidden flex flex-col">
+              {/* 상단 색상 헤더 - 다른 팝업들과 동일한 스타일 */}
+              <div className="bg-gradient-to-r from-[#FF9B82] to-[#FFB499] px-6 py-4 text-white rounded-t-2xl relative">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-white flex-1">일정 상세</h3>
                 </div>
-
+                {/* 우측 상단 닫기 버튼 */}
+                <button
+                  onClick={() => {
+                    setSelectedTodoForDetail(null);
+                    if (showTodoDetailFromNotification) {
+                      setShowTodoDetailFromNotification(false);
+                      setShowNotificationPanel(true);
+                    }
+                  }}
+                  className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
+                  aria-label="닫기"
+                >
+                  <X size={16} className="text-white" />
+                </button>
+              </div>
+              <div className="p-5 overflow-y-auto flex-1">
                 <div className="space-y-4">
                   <div className="bg-[#FAFAFA] rounded-lg p-4">
                     <h4 className="font-medium text-[#1F2937] mb-4 text-lg">{todo.title}</h4>
@@ -3237,6 +3505,35 @@ export function CalendarHomeScreen() {
                         <div className="flex items-center gap-3 text-sm text-[#6B7280]">
                           <MapPin size={18} className="text-[#9CA3AF]" />
                           <span>{todo.location}</span>
+                        </div>
+                      )}
+
+                      {/* 체크리스트 항목 표시 */}
+                      {checklistItems.length > 0 && (
+                        <div className="pt-3 border-t border-[#E5E7EB]">
+                          <h5 className="text-xs font-medium text-[#9CA3AF] uppercase mb-2">체크리스트</h5>
+                          <div className="space-y-2">
+                            {checklistItems.map((itemText, index) => {
+                              const itemKey = `item-${index}`;
+                              const isCompleted = todoChecklistStates[itemKey] || false;
+                              return (
+                                <div key={index} className="flex items-center gap-3">
+                                  <button
+                                    onClick={() => toggleChecklistItem(index)}
+                                    className={`
+                                      w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors
+                                      ${isCompleted ? 'bg-[#FF9B82] border-[#FF9B82]' : 'border-[#D1D5DB] hover:border-[#FF9B82]'}
+                                    `}
+                                  >
+                                    {isCompleted && <Check size={14} className="text-white" />}
+                                  </button>
+                                  <span className={`text-sm text-[#1F2937] ${isCompleted ? 'line-through text-[#9CA3AF]' : ''}`}>
+                                    {itemText}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
 
@@ -3400,35 +3697,6 @@ export function CalendarHomeScreen() {
                         </label>
                       </div>
 
-                      {/* 체크리스트 항목 표시 */}
-                      {checklistItems.length > 0 && (
-                        <div className="pt-3 border-t border-[#E5E7EB]">
-                          <h5 className="text-xs font-medium text-[#9CA3AF] uppercase mb-2">체크리스트</h5>
-                          <div className="space-y-2">
-                            {checklistItems.map((itemText, index) => {
-                              const itemKey = `item-${index}`;
-                              const isCompleted = todoChecklistStates[itemKey] || false;
-                              return (
-                                <div key={index} className="flex items-center gap-3">
-                                  <button
-                                    onClick={() => toggleChecklistItem(index)}
-                                    className={`
-                                      w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors
-                                      ${isCompleted ? 'bg-[#FF9B82] border-[#FF9B82]' : 'border-[#D1D5DB] hover:border-[#FF9B82]'}
-                                    `}
-                                  >
-                                    {isCompleted && <Check size={14} className="text-white" />}
-                                  </button>
-                                  <span className={`text-sm text-[#1F2937] ${isCompleted ? 'line-through text-[#9CA3AF]' : ''}`}>
-                                    {itemText}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
                       {/* 메모 */}
                       {todo.memo && (
                         <div className="pt-3 border-t border-[#E5E7EB]">
@@ -3455,17 +3723,38 @@ export function CalendarHomeScreen() {
                         <div className="pt-3 border-t border-[#E5E7EB]">
                           <div className="flex items-center gap-3 text-sm text-[#6B7280] mb-2">
                             <Bell size={18} className="text-[#9CA3AF]" />
-                            <span>알림 설정됨</span>
+                            <span className="font-medium">알림</span>
                           </div>
-                          {todo.alarmTimes && todo.alarmTimes.length > 0 && (
-                            <div className="ml-7 space-y-1">
-                              {todo.alarmTimes.map((alarmTime, index) => (
-                                <div key={index} className="text-xs text-[#6B7280]">
-                                  • {alarmTime}
+                          {(() => {
+                            const reminders = todo.notificationReminders || [];
+                            if (reminders.length > 0) {
+                              return (
+                                <div className="ml-7 space-y-1">
+                                  {reminders.map((reminder: { value: number; unit: string }, index: number) => {
+                                    const unitText = reminder.unit === 'minutes' ? '분' :
+                                      reminder.unit === 'hours' ? '시간' :
+                                        reminder.unit === 'days' ? '일' : '주';
+                                    return (
+                                      <div key={index} className="text-xs text-[#6B7280]">
+                                        • {reminder.value}{unitText} 전
+                                      </div>
+                                    );
+                                  })}
                                 </div>
-                              ))}
-                            </div>
-                          )}
+                              );
+                            } else if (todo.alarmTimes && todo.alarmTimes.length > 0) {
+                              return (
+                                <div className="ml-7 space-y-1">
+                                  {todo.alarmTimes.map((alarmTime, index) => (
+                                    <div key={index} className="text-xs text-[#6B7280]">
+                                      • {alarmTime}
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       )}
 
@@ -3491,6 +3780,10 @@ export function CalendarHomeScreen() {
                         console.log("일정 상세 모달에서 삭제 버튼 클릭:", todo.id);
                         await deleteTodo(todo.id);
                         setSelectedTodoForDetail(null);
+                        if (showTodoDetailFromNotification) {
+                          setShowTodoDetailFromNotification(false);
+                          setShowNotificationPanel(true);
+                        }
                       }
                     }}
                     className="flex-1 px-4 py-3 bg-[#EF4444] text-white rounded-lg hover:bg-[#DC2626] transition-colors font-medium flex items-center justify-center gap-2"
@@ -3504,6 +3797,9 @@ export function CalendarHomeScreen() {
                       // 수정 모드로 열 때는 입력값 초기화하지 않음 (기존 일정 데이터 사용)
                       setShowAddTodoModal(true);
                       setSelectedTodoForDetail(null);
+                      if (showTodoDetailFromNotification) {
+                        setShowTodoDetailFromNotification(false);
+                      }
                     }}
                     className="flex-1 px-4 py-3 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] transition-colors font-medium flex items-center justify-center gap-2"
                   >
@@ -3541,8 +3837,10 @@ export function CalendarHomeScreen() {
             // InputMethodModal을 닫을 때도 입력값 초기화
             setExtractedText("");
             setExtractedTodoInfo(null);
+            setInputMethodInitialMode('voice'); // 기본값으로 리셋
           }}
           onSelect={handleInputMethodSelect}
+          initialMethod={inputMethodInitialMode}
         />
       )}
 
@@ -3557,6 +3855,10 @@ export function CalendarHomeScreen() {
             setExtractedTodoInfo(null); // 모달 닫을 때 추출된 일정 정보 초기화
           }}
           onSave={handleSaveDetailedTodo}
+          onOpenInputMethod={(method) => {
+            setInputMethodInitialMode(method);
+            setShowInputMethodModal(true);
+          }}
           initialData={
             editingTodoId
               ? todos.find(t => t.id === editingTodoId)

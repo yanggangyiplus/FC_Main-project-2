@@ -328,6 +328,17 @@ class APIClient {
   async toggleCalendarExport() {
     return this.client.post('/calendar/toggle-export')
   }
+
+  // Notification endpoints
+  async getNotifications(skip: number = 0, limit: number = 100) {
+    return this.client.get('/notifications', {
+      params: { skip, limit }
+    })
+  }
+
+  async sendScheduledNotifications() {
+    return this.client.post('/notifications/send-scheduled')
+  }
 }
 
 export const apiClient = new APIClient()

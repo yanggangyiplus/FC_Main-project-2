@@ -93,7 +93,7 @@ async def health_check():
 
 
 # 라우터 포함
-from app.api.routes import auth, todos, receipts, ai, family, routines, files, calendar
+from app.api.routes import auth, todos, receipts, ai, family, routines, files, calendar, notifications
 
 app.include_router(auth.router)
 app.include_router(todos.router)
@@ -103,6 +103,7 @@ app.include_router(family.router)
 app.include_router(routines.router)
 app.include_router(files.router)
 app.include_router(calendar.router)
+app.include_router(notifications.router)
 
 from app.api.routes import memos
 app.include_router(memos.router)
@@ -110,6 +111,24 @@ app.include_router(memos.router)
 # 데이터베이스 초기화
 from app.database import init_db
 init_db()
+
+# 알림 스케줄러 시작 (선택사항)
+import os
+if os.getenv("ENABLE_EMAIL_SCHEDULER", "false").lower() == "true":
+    from app.services.scheduler_service import scheduler
+    import asyncio
+    
+    @app.on_event("startup")
+    async def startup_event():
+        """앱 시작 시 알림 스케줄러 시작"""
+        await scheduler.start()
+        logger.info("알림 스케줄러가 시작되었습니다.")
+    
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        """앱 종료 시 알림 스케줄러 중지"""
+        await scheduler.stop()
+        logger.info("알림 스케줄러가 중지되었습니다.")
 
 logger.info("Always Plan API initialized successfully")
 
