@@ -511,39 +511,8 @@ export function RoutineView({
         <div className="flex items-center justify-between mb-2">
           <h4 className="font-semibold text-[#1F2937] px-1">시간표 항목</h4>
         </div>
-        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
-          {routines
-            .filter(r => selectedMemberIds.includes(r.memberId))
-            .map((routine) => (
-              <button
-                key={routine.id}
-                onClick={() => handleEditClick(routine)}
-                className="px-3 py-2 rounded-full text-sm font-medium text-white shadow-sm flex items-center gap-1 hover:opacity-90 transition-opacity flex-shrink-0"
-                style={{
-                  backgroundColor: (() => {
-                    const member = familyMembers.find(m => m.id === routine.memberId);
-                    if (member?.color && member.color.trim()) {
-                      if (member.color.startsWith('#')) {
-                        return hexToRgba(member.color, 1.0);
-                      } else if (member.color.startsWith('rgba')) {
-                        return member.color.replace(/,\s*[\d.]+\)$/, ', 1.0)');
-                      } else {
-                        return hexToRgba('#FF9B82', 1.0);
-                      }
-                    }
-                    return routine.color ? routine.color.replace("0.6", "1").replace("CC", "FF") : hexToRgba('#FF9B82', 1.0);
-                  })()
-                }}
-              >
-                {/* Show member emoji if multiple selected? */}
-                {selectedMemberIds.length > 1 && (
-                  <span className="text-xs bg-white/20 px-1 rounded">
-                    {familyMembers.find(m => m.id === routine.memberId)?.emoji}
-                  </span>
-                )}
-                {routine.name}
-              </button>
-            ))}
+        <div className="flex gap-2 items-center">
+          {/* 추가 버튼을 제일 앞에 고정 (스크롤되지 않음) */}
           <button
             onClick={() => {
               setEditingRoutineId(null);
@@ -555,11 +524,46 @@ export function RoutineView({
               setSelectedRoutineMemberIds([]); // 빈 배열로 초기화 (사용자가 팝업에서 직접 선택하도록)
               setShowAddRoutine(true);
             }}
-            className="px-3 py-2 rounded-full text-sm font-medium bg-[#F3F4F6] text-[#6B7280] hover:bg-[#E5E7EB] transition-colors flex items-center gap-1 flex-shrink-0"
+            className="px-3 py-2 h-[32px] rounded-full text-sm font-medium bg-[#F3F4F6] text-[#6B7280] hover:bg-[#E5E7EB] transition-colors flex items-center justify-center gap-1 flex-shrink-0"
           >
             <Plus size={16} />
             추가
           </button>
+          {/* 생성된 항목들 (스크롤 가능, 드래그 가능) */}
+          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6] flex-1 items-center pt-0.5">
+            {routines
+              .filter(r => selectedMemberIds.includes(r.memberId))
+              .map((routine) => (
+                <button
+                  key={routine.id}
+                  onClick={() => handleEditClick(routine)}
+                  className="px-3 py-2 h-[32px] rounded-full text-sm font-medium text-white shadow-sm flex items-center justify-center gap-1 hover:opacity-90 transition-opacity flex-shrink-0"
+                  style={{
+                    backgroundColor: (() => {
+                      const member = familyMembers.find(m => m.id === routine.memberId);
+                      if (member?.color && member.color.trim()) {
+                        if (member.color.startsWith('#')) {
+                          return hexToRgba(member.color, 1.0);
+                        } else if (member.color.startsWith('rgba')) {
+                          return member.color.replace(/,\s*[\d.]+\)$/, ', 1.0)');
+                        } else {
+                          return hexToRgba('#FF9B82', 1.0);
+                        }
+                      }
+                      return routine.color ? routine.color.replace("0.6", "1").replace("CC", "FF") : hexToRgba('#FF9B82', 1.0);
+                    })()
+                  }}
+                >
+                  {/* Show member emoji if multiple selected? */}
+                  {selectedMemberIds.length > 1 && (
+                    <span className="text-xs bg-white/20 px-1 rounded">
+                      {familyMembers.find(m => m.id === routine.memberId)?.emoji}
+                    </span>
+                  )}
+                  {routine.name}
+                </button>
+              ))}
+          </div>
         </div>
       </div>
 
