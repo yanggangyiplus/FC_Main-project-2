@@ -6,9 +6,10 @@ import { apiClient } from "@/services/apiClient";
 interface SettingsScreenProps {
   isOpen: boolean;
   onClose: () => void;
+  onRefreshCalendar?: (force?: boolean) => Promise<void>; // 동기화 새로고침 함수
 }
 
-export function SettingsScreen({ isOpen, onClose }: SettingsScreenProps) {
+export function SettingsScreen({ isOpen, onClose, onRefreshCalendar }: SettingsScreenProps) {
   const [notificationEnabled, setNotificationEnabled] = useState(true);
   const [googleCalendarEnabled, setGoogleCalendarEnabled] = useState(false);
   const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false);
@@ -201,10 +202,26 @@ export function SettingsScreen({ isOpen, onClose }: SettingsScreenProps) {
                       setGoogleCalendarImportEnabled(newState);
 
                       if (!newState) {
-                        // 토글을 끌 때: Google Calendar 이벤트가 제거됨 (설정 페이지에 머물기)
+                        // 토글을 끌 때: Google Calendar 이벤트가 제거됨
                         toast.success("Google Calendar 가져오기가 비활성화되었습니다. Google Calendar 일정이 제거됩니다.");
+                        // 토글을 끌 때: 바로 동기화 상태 업데이트 (Google Calendar 이벤트 제거)
+                        if (onRefreshCalendar) {
+                          try {
+                            await onRefreshCalendar(true);
+                          } catch (syncError) {
+                            console.error("동기화 상태 업데이트 실패:", syncError);
+                          }
+                        }
                       } else {
                         toast.success("Google Calendar 가져오기가 활성화되었습니다.");
+                        // 토글을 켤 때: 바로 동기화 실행
+                        if (onRefreshCalendar) {
+                          try {
+                            await onRefreshCalendar(true);
+                          } catch (syncError) {
+                            console.error("동기화 실행 실패:", syncError);
+                          }
+                        }
                       }
                     } catch (error: any) {
                       console.error("Google Calendar 가져오기 토글 실패:", error);
@@ -276,36 +293,23 @@ export function SettingsScreen({ isOpen, onClose }: SettingsScreenProps) {
                 </button>
               </div>
 
-              {/* 동기화 후 저장 버튼 */}
+              {/* 동기화 새로고침 버튼 */}
               <div className="pt-2">
                 <button
                   onClick={async () => {
                     if (isSyncLoading) return;
                     setIsSyncLoading(true);
                     try {
-                      toast.info("저장되지 않은 모든 일정을 동기화 후 저장하는 중...");
-                      const response = await apiClient.syncAllTodosToGoogleCalendar();
-                      console.log("[Google Calendar] 동기화 후 저장 응답:", response.data);
-                      if (response.data?.success) {
-                        const failedCount = response.data.failed_count || 0;
-                        const totalSaved = response.data.total_saved || 0;
-
-                        if (totalSaved > 0) {
-                          // 백엔드에서 보낸 메시지 사용
-                          const message = response.data.message || `${totalSaved}개 일정이 저장되었습니다. 동기화 해제해도 Google Calendar에 일정이 남아있습니다.`;
-                          toast.success(message);
-                          // 상태만 업데이트하고 설정 화면에 머물기
-                        } else if (failedCount > 0) {
-                          toast.warning(`저장할 일정이 없거나 일부 실패했습니다. (실패: ${failedCount}개)`);
-                        } else {
-                          toast.info("저장할 일정이 없습니다. 모든 일정이 이미 저장되어 있습니다.");
-                        }
+                      toast.info("Google Calendar 동기화 중...");
+                      if (onRefreshCalendar) {
+                        await onRefreshCalendar(true);
+                        toast.success("동기화가 완료되었습니다.");
                       } else {
-                        toast.error("동기화 후 저장에 실패했습니다.");
+                        toast.error("동기화 함수를 사용할 수 없습니다.");
                       }
                     } catch (error: any) {
-                      console.error("[Google Calendar] 동기화 후 저장 실패:", error);
-                      toast.error(`동기화 후 저장 실패: ${error.response?.data?.detail || error.message}`);
+                      console.error("[Google Calendar] 동기화 실패:", error);
+                      toast.error(`동기화 실패: ${error.response?.data?.detail || error.message}`);
                     } finally {
                       setIsSyncLoading(false);
                     }
@@ -316,10 +320,10 @@ export function SettingsScreen({ isOpen, onClose }: SettingsScreenProps) {
                     : "bg-[#FF9B82] text-white hover:bg-[#FF8A6D]"
                     }`}
                 >
-                  {isSyncLoading ? "저장 중..." : "동기화 후 저장"}
+                  {isSyncLoading ? "동기화 중..." : "동기화 새로고침"}
                 </button>
                 <p className="text-xs text-[#6B7280] mt-2">
-                  저장되지 않은 모든 일정을 동기화 후 저장합니다. 동기화 해제해도 각 캘린더에 일정이 남아있습니다.
+                  Google Calendar에서 최신 일정을 가져옵니다.
                 </p>
               </div>
 

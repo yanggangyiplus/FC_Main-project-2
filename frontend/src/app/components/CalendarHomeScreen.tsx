@@ -506,6 +506,9 @@ export function CalendarHomeScreen() {
           }
           return filteredTodos;
         });
+
+        // 동기화 상태를 비활성화로 설정
+        setSyncStatus('disabled');
       }
     } catch (error: any) {
       console.error('[Google Calendar] 상태 확인 실패:', error);
@@ -3578,6 +3581,7 @@ export function CalendarHomeScreen() {
       <SettingsScreen
         isOpen={showSettingsScreen}
         onClose={() => setShowSettingsScreen(false)}
+        onRefreshCalendar={loadGoogleCalendarEvents}
       />
     </div>
   );
