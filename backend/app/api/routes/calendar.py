@@ -7,8 +7,9 @@ import secrets
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from pydantic import BaseModel
+from zoneinfo import ZoneInfo
 
 from app.database import get_db
 from app.models.user import User
@@ -110,12 +111,14 @@ async def sync_all_todos_to_google_calendar(
             logger.warning(f"[SYNC_ALL] Google Calendar 이벤트 목록 가져오기 실패 (계속 진행): {e}")
         
         # 기존 이벤트를 제목+날짜+시간으로 매칭하기 위한 맵 생성
+        # 시간대를 Asia/Seoul로 통일하여 비교
+        seoul_tz = ZoneInfo('Asia/Seoul')
         existing_events_map = {}
         for event in existing_events:
             title = event.get('summary', '').strip()
             start = event.get('start', {})
-            
-            # 날짜/시간 추출
+
+            # 날짜/시간 추출 (Asia/Seoul 기준으로 변환)
             event_date = None
             event_time = None
             if 'date' in start:
@@ -123,16 +126,18 @@ async def sync_all_todos_to_google_calendar(
                 event_date = start['date']
                 event_time = None
             elif 'dateTime' in start:
-                # 시간 지정 이벤트
+                # 시간 지정 이벤트 - UTC를 Asia/Seoul로 변환
                 dt = datetime.fromisoformat(start['dateTime'].replace('Z', '+00:00'))
-                event_date = dt.date().isoformat()
-                event_time = dt.strftime('%H:%M')
-            
+                dt_seoul = dt.astimezone(seoul_tz)
+                event_date = dt_seoul.date().isoformat()
+                event_time = dt_seoul.strftime('%H:%M')
+
             if event_date and title:
                 # 키: 제목_날짜_시간 (시간이 없으면 종일 이벤트)
                 key = f"{title}_{event_date}_{event_time or 'all_day'}"
                 existing_events_map[key] = event.get('id')
-        
+                logger.debug(f"[SYNC_ALL] 이벤트 맵 추가: key={key}, event_id={event.get('id')}")
+
         logger.info(f"[SYNC_ALL] 기존 이벤트 맵 생성 완료: {len(existing_events_map)}개")
         
         # 2단계: Google Calendar에 동기화되지 않은 모든 일정 조회
@@ -996,25 +1001,30 @@ async def toggle_calendar_export(
             logger.warning(f"[TOGGLE_EXPORT] Google Calendar 이벤트 목록 가져오기 실패 (계속 진행): {e}")
         
         # 기존 이벤트를 제목+날짜+시간으로 매칭하기 위한 맵 생성
+        # 시간대를 Asia/Seoul로 통일하여 비교 (중복 생성 방지)
+        seoul_tz = ZoneInfo('Asia/Seoul')
         existing_events_map = {}
         for event in existing_events:
             title = event.get('summary', '').strip()
             start = event.get('start', {})
-            
+
             event_date = None
             event_time = None
             if 'date' in start:
                 event_date = start['date']
                 event_time = None
             elif 'dateTime' in start:
+                # UTC를 Asia/Seoul로 변환하여 로컬 시간과 비교
                 dt = datetime.fromisoformat(start['dateTime'].replace('Z', '+00:00'))
-                event_date = dt.date().isoformat()
-                event_time = dt.strftime('%H:%M')
-            
+                dt_seoul = dt.astimezone(seoul_tz)
+                event_date = dt_seoul.date().isoformat()
+                event_time = dt_seoul.strftime('%H:%M')
+
             if event_date and title:
                 key = f"{title}_{event_date}_{event_time or 'all_day'}"
                 existing_events_map[key] = event.get('id')
-        
+                logger.debug(f"[TOGGLE_EXPORT] 이벤트 맵 추가: key={key}, event_id={event.get('id')}")
+
         logger.info(f"[TOGGLE_EXPORT] 기존 이벤트 맵 생성 완료: {len(existing_events_map)}개")
         
         # 2단계: Google Calendar에 동기화되지 않은 모든 일정 조회
