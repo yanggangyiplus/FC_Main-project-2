@@ -1,7 +1,13 @@
 import { useState, useRef, useEffect } from "react";
 import { ChevronLeft, ChevronRight, X, Clock, Tag, FileText } from "lucide-react";
-import { RoutineItem } from "./RoutineView";
 import { formatDuration } from "@/utils/formatDuration";
+
+interface FamilyMember {
+  id: string;
+  name: string;
+  emoji: string;
+  color: string;
+}
 
 interface WeekCalendarProps {
   todos: Array<{
@@ -14,13 +20,16 @@ interface WeekCalendarProps {
     date?: string;
     endDate?: string; // 종료 날짜 (기간 일정)
     memo?: string;
+    memberId?: string; // 담당 프로필 ID
+    isAllDay?: boolean; // 하루종일 일정 여부
   }>;
-  routines?: RoutineItem[];
+  familyMembers?: FamilyMember[]; // 프로필 목록
+  selectedMembers?: string[]; // 선택된 프로필 ID 목록
   onTodoUpdate?: (id: string, updates: { time: string; duration: number }) => void;
   onTodoClick?: (todoId: string) => void;
 }
 
-export function WeekCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }: WeekCalendarProps) {
+export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], onTodoUpdate, onTodoClick }: WeekCalendarProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [draggedTodo, setDraggedTodo] = useState<string | null>(null);
   const [resizeMode, setResizeMode] = useState<'top' | 'bottom' | null>(null);
@@ -72,6 +81,22 @@ export function WeekCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }
     let regularTodos = todos.filter((todo) => {
       if (!todo.date) return false;
 
+      // 프로필 필터링
+      if (selectedMembers.length > 0) {
+        // 프로필이 선택되어 있는 경우:
+        // - 담당 프로필이 있는 일정: 선택된 프로필에 포함되어야 함
+        // - 담당 프로필이 없는 일정: 표시 (프로필이 선택되어 있어도 담당 프로필 없는 일정은 표시)
+        if (todo.memberId && !selectedMembers.includes(todo.memberId)) {
+          return false;
+        }
+        // todo.memberId가 없으면 (담당 프로필이 없으면) 표시
+      } else {
+        // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+        if (todo.memberId) {
+          return false;
+        }
+      }
+
       // 시작일과 동일한 경우
       if (todo.date === dateStr) return true;
 
@@ -94,36 +119,78 @@ export function WeekCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }
 
     // Fallback for "Today's" mock todos that might not have a date
     if (dateStr === todayStr) {
-      const todayMockTodos = todos.filter(t => !t.date || t.date === todayStr);
+      const todayMockTodos = todos.filter(t => {
+        // 프로필 필터링 적용
+        if (selectedMembers.length > 0) {
+          if (t.memberId && !selectedMembers.includes(t.memberId)) {
+            return false;
+          }
+          // t.memberId가 없으면 표시
+        } else {
+          // 모든 프로필이 꺼져 있으면 담당 프로필이 없는 일정만 표시
+          if (t.memberId) {
+            return false;
+          }
+        }
+        return !t.date || t.date === todayStr;
+      });
       // Merge unique
       regularTodos = [...regularTodos, ...todayMockTodos.filter(t => !regularTodos.find(rt => rt.id === t.id))];
     }
 
-    // 시간표는 캘린더에 표시하지 않음 (체크박스로 선택했을 때만 일정으로 추가됨)
     return regularTodos;
   };
 
   const getTimePosition = (time: string) => {
+    // 하루종일 일정은 시간 그리드 시작 부분에 표시 (0% 위치)
+    if (!time || time === '') {
+      return 0; // 시간 그리드의 맨 위 (0시 0분 위치)
+    }
     const [hours, minutes] = time.split(":").map(Number);
     const totalMinutes = hours * 60 + minutes;
     return (totalMinutes / (24 * 60)) * 100;
   };
 
-  const getDurationHeight = (duration: number) => {
+  const getDurationHeight = (duration: number, isAllDay: boolean = false) => {
+    // 하루종일 일정은 고정 높이
+    if (isAllDay) {
+      return 6; // 약 6% 높이
+    }
     return (duration / (24 * 60)) * 100;
   };
 
   const getCategoryColor = (category: string) => {
     const colors: { [key: string]: string } = {
-      공부: "bg-[#0EA5E9] text-white",
-      업무: "bg-[#A855F7] text-white",
-      약속: "bg-[#EC4899] text-white",
-      생활: "bg-[#10B981] text-white",
-      건강: "bg-[#FF9B82] text-white",
-      구글: "bg-[#00085c] text-white",
-      기타: "bg-[#F59E0B] text-white",
+      공부: "#0EA5E9",
+      업무: "#A855F7",
+      약속: "#EC4899",
+      생활: "#10B981",
+      건강: "#FF9B82",
+      구글: "#00085c",
+      기타: "#F59E0B",
     };
     return colors[category] || colors["기타"];
+  };
+
+  // 프로필 색상 가져오기
+  const getMemberColor = (memberId?: string): string | undefined => {
+    if (!memberId) return undefined;
+    const member = familyMembers.find(m => m.id === memberId);
+    if (!member) return undefined;
+    
+    // rgba 형식인 경우 opacity 제거하고 hex로 변환
+    if (member.color.startsWith('rgba')) {
+      const rgbaMatch = member.color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      if (rgbaMatch) {
+        const r = parseInt(rgbaMatch[1]);
+        const g = parseInt(rgbaMatch[2]);
+        const b = parseInt(rgbaMatch[3]);
+        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+      }
+    }
+    
+    // hex 형식인 경우 그대로 반환
+    return member.color.startsWith('#') ? member.color : `#${member.color}`;
   };
 
   const handleMouseDown = (e: React.MouseEvent, todoId: string, time: string, duration: number) => {
@@ -285,8 +352,36 @@ export function WeekCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }
           <div className="grid grid-cols-8">
             {/* Time Labels */}
             <div className="border-r border-[#F3F4F6]">
+              {/* 일정을 위한 공간 - 동적 높이 계산 */}
+              {(() => {
+                // 모든 날짜의 하루종일 일정 개수 중 최대값 찾기
+                let maxAllDayCount = 0;
+                weekDates.forEach((date) => {
+                  const dayTodos = getTodosForDate(date);
+                  const allDayCount = dayTodos.filter(todo => {
+                    const isAllDay = todo.isAllDay || !todo.time || todo.time === '';
+                    return isAllDay;
+                  }).length;
+                  if (allDayCount > maxAllDayCount) {
+                    maxAllDayCount = allDayCount;
+                  }
+                });
+                // 최소 높이 48px (h-12), 일정이 많을수록 높이 증가 (각 일정당 약 28px)
+                const minHeight = 48;
+                const perItemHeight = 28;
+                const dynamicHeight = Math.max(minHeight, minHeight + (maxAllDayCount > 1 ? (maxAllDayCount - 1) * perItemHeight : 0));
+                
+                return (
+                  <div 
+                    className="border-b border-[#F3F4F6] px-2 py-1 text-xs text-[#9CA3AF] flex items-center"
+                    style={{ height: `${dynamicHeight}px` }}
+                  >
+                    일정
+                  </div>
+                );
+              })()}
               {timeSlots.map((time) => (
-                <div key={time} className="h-20 border-b border-[#F3F4F6] px-2 py-1 text-xs text-[#6B7280]">
+                <div key={time} className="h-16 border-b border-[#F3F4F6] px-2 py-1 text-xs text-[#6B7280]">
                   {time}
                 </div>
               ))}
@@ -295,46 +390,150 @@ export function WeekCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }
             {/* Day Columns */}
             {weekDates.map((date, dayIndex) => {
               const dayTodos = getTodosForDate(date);
+              const allDayTodos = dayTodos.filter(todo => {
+                const isAllDay = todo.isAllDay || !todo.time || todo.time === '';
+                return isAllDay;
+              });
+              
+              // 하루종일 일정 개수에 따라 높이 계산
+              const minHeight = 48; // 최소 높이 (h-12 = 48px)
+              const perItemHeight = 28; // 각 일정당 높이
+              const allDayHeight = Math.max(minHeight, minHeight + (allDayTodos.length > 1 ? (allDayTodos.length - 1) * perItemHeight : 0));
+              
               return (
                 <div key={dayIndex} className="relative border-r border-[#F3F4F6]">
+                  {/* 일정을 위한 공간 - 동적 높이 */}
+                  <div 
+                    className="border-b border-[#F3F4F6] hover:bg-[#FAFAFA] transition-colors relative"
+                    style={{ height: `${allDayHeight}px` }}
+                  >
+                    {allDayTodos.map((todo, index) => {
+                      const memberColor = getMemberColor(todo.memberId);
+                      const categoryColor = getCategoryColor(todo.category);
+                      const backgroundColor = memberColor || categoryColor;
+
+                      const getBackgroundColorWithOpacity = (color: string | undefined): string | undefined => {
+                        if (!color) return undefined;
+                        if (color.startsWith('#')) {
+                          const hex = color.replace('#', '');
+                          const r = parseInt(hex.substring(0, 2), 16);
+                          const g = parseInt(hex.substring(2, 4), 16);
+                          const b = parseInt(hex.substring(4, 6), 16);
+                          // 하루종일 일정: 색상을 더 진하게 (80% 밝기)하고 불투명하게
+                          const darkerR = Math.floor(r * 0.8);
+                          const darkerG = Math.floor(g * 0.8);
+                          const darkerB = Math.floor(b * 0.8);
+                          return `rgba(${darkerR}, ${darkerG}, ${darkerB}, 1.0)`;
+                        }
+                        return color;
+                      };
+
+                      // 각 일정의 위치 계산 (위에서부터 순서대로 배치)
+                      const itemTop = 4 + (index * perItemHeight); // 첫 번째는 4px 아래, 이후는 각각 28px씩 아래
+
+                      return (
+                        <div
+                          key={todo.id}
+                          className="absolute left-1 right-1 rounded px-1.5 py-0.5 cursor-pointer shadow-sm hover:shadow-md transition-shadow flex items-center"
+                          style={{
+                            top: `${itemTop}px`,
+                            height: `${perItemHeight - 4}px`, // 각 일정의 높이 (여백 제외)
+                            backgroundColor: getBackgroundColorWithOpacity(backgroundColor),
+                            color: backgroundColor ? 'white' : undefined,
+                          }}
+                          onMouseEnter={(e) => handleMouseEnter(e, todo.id)}
+                          onMouseLeave={() => setHoveredTodo(null)}
+                          onClick={() => handleItemClick(todo.id)}
+                        >
+                          <div className="text-xs font-medium truncate pointer-events-none flex-1">
+                            {todo.title}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                   {timeSlots.map((time) => (
-                    <div key={time} className="h-20 border-b border-[#F3F4F6] hover:bg-[#FAFAFA] transition-colors" />
+                    <div key={time} className="h-16 border-b border-[#F3F4F6] hover:bg-[#FAFAFA] transition-colors" />
                   ))}
 
-                  {/* Todo Items */}
-                  {dayTodos.map((todo) => {
+                  {/* Todo Items (일반 일정만, 하루종일 일정 제외) */}
+                  {dayTodos.filter(todo => {
+                    const isAllDay = todo.isAllDay || !todo.time || todo.time === '';
+                    return !isAllDay; // 하루종일 일정은 위에서 이미 표시했으므로 제외
+                  }).map((todo) => {
+                    const isAllDay = false; // 필터링 후이므로 항상 false
                     const top = getTimePosition(todo.time);
-                    const height = getDurationHeight(todo.duration);
+                    const height = getDurationHeight(todo.duration, isAllDay);
+                    
+                    // 프로필 색상 또는 카테고리 색상 결정
+                    const memberColor = getMemberColor(todo.memberId);
+                    const categoryColor = getCategoryColor(todo.category);
+                    const backgroundColor = memberColor || categoryColor;
+
+                    // 배경색에 opacity 적용 (hex 색상을 rgba로 변환)
+                    // 하루종일 일정은 불투명하고 진하게 (opacity 1.0, 색상 더 진하게)
+                    const getBackgroundColorWithOpacity = (color: string | undefined, isAllDay: boolean = false): string | undefined => {
+                      if (!color) return undefined;
+                      // hex 색상을 rgba로 변환
+                      if (color.startsWith('#')) {
+                        const hex = color.replace('#', '');
+                        const r = parseInt(hex.substring(0, 2), 16);
+                        const g = parseInt(hex.substring(2, 4), 16);
+                        const b = parseInt(hex.substring(4, 6), 16);
+                        
+                        if (isAllDay) {
+                          // 하루종일 일정: 색상을 더 진하게 (80% 밝기)하고 불투명하게
+                          const darkerR = Math.floor(r * 0.8);
+                          const darkerG = Math.floor(g * 0.8);
+                          const darkerB = Math.floor(b * 0.8);
+                          return `rgba(${darkerR}, ${darkerG}, ${darkerB}, 1.0)`;
+                        } else {
+                          // 일반 일정: 투명도 적용
+                          return `rgba(${r}, ${g}, ${b}, 0.7)`;
+                        }
+                      }
+                      return color;
+                    };
 
                     return (
                       <div
                         key={todo.id}
-                        className={`absolute left-1 right-1 ${getCategoryColor(todo.category)} rounded px-1 py-1 cursor-pointer shadow-sm hover:shadow-md transition-shadow group ${draggedTodo === todo.id ? "opacity-70 ring-2 ring-white z-20" : "z-10"
+                        className={`absolute left-1 right-1 rounded px-1 py-1 cursor-pointer shadow-sm hover:shadow-md transition-shadow group ${draggedTodo === todo.id ? "opacity-70 ring-2 ring-white z-20" : "z-10"
                           } ${activeTodoId === todo.id ? "ring-2 ring-yellow-400" : ""}`}
                         style={{
                           top: `${top}%`,
                           height: `${Math.max(height, 3)}%`,
+                          backgroundColor: getBackgroundColorWithOpacity(backgroundColor, isAllDay),
+                          color: backgroundColor ? 'white' : undefined,
                         }}
-                        onMouseDown={(e) => handleMouseDown(e, todo.id, todo.time, todo.duration)}
+                        onMouseDown={!isAllDay ? (e) => handleMouseDown(e, todo.id, todo.time, todo.duration) : undefined}
                         onMouseEnter={(e) => handleMouseEnter(e, todo.id)}
                         onMouseLeave={() => setHoveredTodo(null)}
                         onMouseUp={() => handleItemClick(todo.id)}
                       >
-                        {/* RESIZE HANDLE - TOP */}
-                        <div
-                          className="absolute top-0 left-0 right-0 h-3 cursor-n-resize hover:bg-black/10 z-30"
-                          onMouseDown={(e) => handleResizeStart(e, todo.id, todo.time, todo.duration, 'top')}
-                        />
+                        {/* RESIZE HANDLE - TOP (하루종일 일정은 리사이즈 불가) */}
+                        {!isAllDay && (
+                          <div
+                            className="absolute top-0 left-0 right-0 h-3 cursor-n-resize hover:bg-black/10 z-30"
+                            onMouseDown={(e) => handleResizeStart(e, todo.id, todo.time, todo.duration, 'top')}
+                          />
+                        )}
 
                         {/* Content */}
-                        <div className="text-xs font-medium truncate pointer-events-none">{todo.title}</div>
-                        <div className="text-xs opacity-90 pointer-events-none">{todo.time}</div>
+                        <div className="text-xs font-medium truncate pointer-events-none">
+                          {todo.title}
+                        </div>
+                        <div className={`text-xs opacity-90 pointer-events-none ${backgroundColor ? 'text-white' : ''}`}>
+                          {isAllDay ? '하루종일' : todo.time}
+                        </div>
 
-                        {/* RESIZE HANDLE - BOTTOM */}
-                        <div
-                          className="absolute bottom-0 left-0 right-0 h-3 cursor-s-resize hover:bg-black/10 z-30"
-                          onMouseDown={(e) => handleResizeStart(e, todo.id, todo.time, todo.duration, 'bottom')}
-                        />
+                        {/* RESIZE HANDLE - BOTTOM (하루종일 일정은 리사이즈 불가) */}
+                        {!isAllDay && (
+                          <div
+                            className="absolute bottom-0 left-0 right-0 h-3 cursor-s-resize hover:bg-black/10 z-30"
+                            onMouseDown={(e) => handleResizeStart(e, todo.id, todo.time, todo.duration, 'bottom')}
+                          />
+                        )}
                       </div>
                     );
                   })}
@@ -373,7 +572,7 @@ export function WeekCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }
                       <Clock size={12} /> <span>{todo.time} ({formatDuration(todo.duration)})</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Tag size={12} /> <span className={`px-1.5 py-0.5 rounded ${getCategoryColor(todo.category)}`}>{todo.category}</span>
+                      <Tag size={12} /> <span className="px-1.5 py-0.5 rounded text-white" style={{ backgroundColor: getCategoryColor(todo.category) }}>{todo.category}</span>
                     </div>
                     {todo.memo && (
                       <div className="pt-2 mt-2 border-t border-[#E5E7EB] flex items-start gap-1">

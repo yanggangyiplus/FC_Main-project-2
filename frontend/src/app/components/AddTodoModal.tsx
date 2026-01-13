@@ -3,11 +3,33 @@ import { useState, useEffect } from "react";
 import { apiClient } from "@/services/apiClient";
 import { toast } from "sonner";
 
+interface FamilyMember {
+  id: string;
+  name: string;
+  emoji: string;
+  color: string;
+}
+
+interface RoutineItem {
+  id: string;
+  memberId: string;
+  name: string;
+  color: string;
+  category?: string;
+  memo?: string;
+  timeSlots: {
+    day: number;
+    startTime: string;
+    duration: number;
+  }[];
+}
+
 interface AddTodoModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (todo: TodoFormData) => void;
   onOpenInputMethod?: (method: 'voice' | 'camera') => void;
+  familyMembers?: FamilyMember[];
   initialData?: {
     id?: string;
     title?: string;
@@ -28,6 +50,7 @@ interface AddTodoModalProps {
     repeatType?: 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'weekdays' | 'weekends' | 'custom';
     repeatEndDate?: string; // 반복 종료 날짜
     repeatPattern?: any; // 반복 패턴 JSON
+    assignedMemberIds?: string[]; // 담당 프로필 ID 목록
   };
 }
 
@@ -61,6 +84,7 @@ export interface TodoFormData {
   customRepeatEndType?: 'never' | 'date' | 'count'; // 맞춤 반복 종료 타입
   customRepeatEndDate?: string; // 맞춤 반복 종료 날짜
   customRepeatCount?: number; // 맞춤 반복 횟수
+  assignedMemberIds?: string[]; // 담당 프로필 ID 목록
 }
 
 // 로컬 날짜를 YYYY-MM-DD 형식으로 변환하는 헬퍼 함수
@@ -71,7 +95,7 @@ const formatLocalDate = (date: Date): string => {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 };
 
-export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInputMethod }: AddTodoModalProps) {
+export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInputMethod, familyMembers = [] }: AddTodoModalProps) {
   // 초기값 계산: 하루종일이면 시간 필드를 빈 문자열로 설정
   const isAllDayInitial = initialData?.isAllDay || false;
   const startTimeInitial = isAllDayInitial ? '' : (initialData?.startTime || initialData?.time || '09:00');
@@ -137,6 +161,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
     customRepeatEndType: initialData?.repeatPattern?.endType || 'never',
     customRepeatEndDate: initialData?.repeatPattern?.endDate,
     customRepeatCount: initialData?.repeatPattern?.count || 10,
+    assignedMemberIds: initialData?.assignedMemberIds || [],
   });
 
   // 추출 상태 관리
@@ -190,6 +215,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
             (initialData?.repeatPattern?.count ? 'count' : 'never')),
         customRepeatEndDate: initialData?.repeatPattern?.endDate,
         customRepeatCount: initialData?.repeatPattern?.count || 10,
+        assignedMemberIds: initialData?.assignedMemberIds || [], // 담당 프로필 ID 배열 업데이트
       });
     } else {
       // 초기화
@@ -216,6 +242,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
         customRepeatDays: [],
         customRepeatEndType: 'never',
         customRepeatCount: 10,
+        assignedMemberIds: [], // 초기화 시 빈 배열
       });
     }
   }, [initialData, isOpen]);
@@ -500,6 +527,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
       alarmTimes: [],
       notificationReminders: [],
       repeatType: 'none',
+      assignedMemberIds: [],
       repeatEndDate: undefined,
       repeatPattern: undefined,
     });
@@ -582,6 +610,46 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                   <FileText size={24} className="text-white" />
                 </button>
               </div>
+
+              {/* 담당 프로필 선택 */}
+              {familyMembers.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-[#1F2937] mb-2">
+                    담당 프로필
+                  </label>
+                  <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
+                    {familyMembers.map((member) => {
+                      const isSelected = formData.assignedMemberIds?.includes(member.id) || false;
+                      return (
+                        <button
+                          key={member.id}
+                          type="button"
+                          onClick={() => {
+                            setFormData(prev => {
+                              const currentIds = prev.assignedMemberIds || [];
+                              const newIds = isSelected
+                                ? currentIds.filter(id => id !== member.id)
+                                : [...currentIds, member.id];
+                              return {
+                                ...prev,
+                                assignedMemberIds: newIds,
+                              };
+                            });
+                          }}
+                          className={`px-3 py-2 rounded-full text-sm font-medium flex items-center justify-center gap-1 flex-shrink-0 transition-all ${
+                            isSelected
+                              ? 'bg-[#FF9B82] text-white shadow-sm'
+                              : 'bg-[#F3F4F6] text-[#6B7280] hover:bg-[#E5E7EB]'
+                          }`}
+                        >
+                          <span className="text-base">{member.emoji}</span>
+                          <span>{member.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* 일정 제목 */}
               <div>

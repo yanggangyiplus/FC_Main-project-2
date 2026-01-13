@@ -220,6 +220,10 @@ class APIClient {
     return this.client.delete(`/routines/${id}`)
   }
 
+  async deleteAllRoutines() {
+    return this.client.delete('/routines/all')
+  }
+
   // Family endpoints
   async getFamilyMembers() {
     return this.client.get('/family/members')

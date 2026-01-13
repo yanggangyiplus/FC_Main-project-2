@@ -182,6 +182,27 @@ async def update_routine(
     }
 
 
+@router.delete("/all", status_code=status.HTTP_200_OK)
+async def delete_all_routines(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """사용자의 모든 시간표 삭제"""
+    routines = db.query(Routine).filter(
+        Routine.user_id == current_user.id
+    ).all()
+    
+    count = len(routines)
+    if count == 0:
+        return {"message": "삭제할 시간표가 없습니다.", "deleted_count": 0}
+    
+    for routine in routines:
+        db.delete(routine)
+    
+    db.commit()
+    return {"message": f"{count}개의 시간표가 삭제되었습니다.", "deleted_count": count}
+
+
 @router.delete("/{routine_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_routine(
     routine_id: str,

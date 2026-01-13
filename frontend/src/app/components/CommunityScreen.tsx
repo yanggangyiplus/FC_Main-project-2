@@ -26,7 +26,7 @@ export function CommunityScreen({ isOpen, onClose }: CommunityScreenProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-40 max-w-[375px] mx-auto bg-white animate-in slide-in-from-bottom duration-300">
+    <div className="fixed inset-0 z-[60] max-w-[375px] mx-auto bg-white animate-in slide-in-from-bottom duration-300">
       {/* Header */}
       <div className="bg-white px-4 py-4 flex items-center justify-between border-b border-[#F3F4F6]">
         <h2 className="font-bold text-[#1F2937]">커뮤니티</h2>

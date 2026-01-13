@@ -20,19 +20,20 @@ import {
   Repeat,
   Trash2,
   MapPin,
+  Plus,
 } from "lucide-react";
 import { MemberAddSheet } from "./MemberAddSheet";
 import { WorkContactAddSheet } from "./WorkContactAddSheet";
 import { CommunityScreen } from "./CommunityScreen";
 import { MyPageScreen } from "./MyPageScreen";
 import { SettingsScreen } from "./SettingsScreen";
+import { ProfileManagementScreen } from "./ProfileManagementScreen";
 import { NotificationPanel } from "./NotificationPanel";
 import { InputMethodModal } from "./InputMethodModal";
 import { AddTodoModal, TodoFormData } from "./AddTodoModal";
 import { MonthCalendar } from "./MonthCalendar";
 import { WeekCalendar } from "./WeekCalendar";
 import { DayCalendar } from "./DayCalendar";
-import { RoutineView } from "./RoutineView";
 import { toast } from "sonner";
 import { apiClient } from "@/services/apiClient";
 import { formatDuration } from "@/utils/formatDuration";
@@ -41,10 +42,11 @@ export function CalendarHomeScreen() {
   const [showMemberAddSheet, setShowMemberAddSheet] = useState(false);
   const [showWorkContactAddSheet, setShowWorkContactAddSheet] = useState(false);
   const [showCommunityScreen, setShowCommunityScreen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"todo" | "calendar" | "routine">("todo");
+  const [activeTab, setActiveTab] = useState<"todo" | "calendar">("todo");
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showMyPageScreen, setShowMyPageScreen] = useState(false);
   const [showSettingsScreen, setShowSettingsScreen] = useState(false);
+  const [showProfileManagementScreen, setShowProfileManagementScreen] = useState(false);
   const [showNotificationPanel, setShowNotificationPanel] = useState(false);
   // 읽음 상태를 localStorage에서 불러오기
   // 예정된 알림과 지나간 알림의 읽음 상태를 분리하여 관리
@@ -705,14 +707,22 @@ export function CalendarHomeScreen() {
 
             // family_member_ids 파싱
             let memberId: string | undefined;
+            let assignedMemberIds: string[] = [];
             if (todo.family_member_ids) {
               try {
                 const memberIds = typeof todo.family_member_ids === 'string'
                   ? JSON.parse(todo.family_member_ids)
                   : todo.family_member_ids;
-                memberId = Array.isArray(memberIds) ? memberIds[0] : memberIds;
+                if (Array.isArray(memberIds)) {
+                  assignedMemberIds = memberIds;
+                  memberId = memberIds.length > 0 ? memberIds[0] : undefined;
+                } else {
+                  assignedMemberIds = memberIds ? [memberIds] : [];
+                  memberId = memberIds || undefined;
+                }
               } catch (e) {
                 memberId = undefined;
+                assignedMemberIds = [];
               }
             }
 
@@ -766,6 +776,7 @@ export function CalendarHomeScreen() {
               repeatPattern: repeatPattern, // 반복 패턴
               checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
               memberId: memberId,
+              assignedMemberIds: assignedMemberIds, // 담당 프로필 ID 배열 저장
               isRoutine: false,
               source: 'always_plan' as const, // 기존 일정임을 명시
               googleCalendarEventId: todo.google_calendar_event_id || undefined, // Google Calendar 이벤트 ID 추가
@@ -802,26 +813,7 @@ export function CalendarHomeScreen() {
         console.error("일정 로드 실패:", error);
       }
 
-      // 3. 시간표 로드
-      try {
-        const routinesResponse = await apiClient.getRoutines();
-        if (routinesResponse.data && Array.isArray(routinesResponse.data)) {
-          const formattedRoutines = routinesResponse.data.map((routine: any) => ({
-            id: routine.id,
-            memberId: routine.member_id,
-            name: routine.name,
-            color: routine.color || "rgba(255, 155, 130, 0.6)",
-            memo: routine.memo || "",
-            category: routine.category || "기타",
-            timeSlots: routine.time_slots || [],
-          }));
-          setRoutines(formattedRoutines);
-        }
-      } catch (error) {
-        console.error("시간표 로드 실패:", error);
-      }
-
-      // 4. 가족 구성원 로드 (사용자 정보 로드 후 실행)
+      // 3. 가족 구성원 로드 (사용자 정보 로드 후 실행)
       try {
         const familyResponse = await apiClient.getFamilyMembers();
         if (familyResponse.data && Array.isArray(familyResponse.data)) {
@@ -939,323 +931,7 @@ export function CalendarHomeScreen() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [loadGoogleCalendarEvents]);
 
-  // Routine Item Interface
-  interface RoutineItem {
-    id: string;
-    memberId: string;
-    name: string;
-    color: string;
-    memo?: string;
-    category?: string;
-    timeSlots: {
-      day: number;
-      startTime: string;
-      duration: number;
-    }[];
-    addToCalendar?: boolean; // 캘린더에 일정으로 추가 여부
-    endDate?: string; // 스케줄 종료 날짜 (선택사항)
-    hasEndDate?: boolean; // 종료 날짜 사용 여부
-  }
 
-  const [routines, setRoutines] = useState<RoutineItem[]>([]);
-
-  const handleRoutineAdd = async (routine: RoutineItem) => {
-    try {
-      console.log("시간표 추가 시작:", routine);
-      // API로 저장
-      const routineData = {
-        name: routine.name,
-        member_id: routine.memberId,
-        color: routine.color,
-        category: routine.category || "기타",
-        memo: routine.memo || "",
-        time_slots: routine.timeSlots.map(slot => ({
-          day: slot.day,
-          startTime: slot.startTime,
-          duration: slot.duration
-        })),
-        add_to_calendar: routine.addToCalendar || false // 체크박스 상태 사용
-      };
-
-      console.log("시간표 데이터:", routineData);
-      const response = await apiClient.createRoutine(routineData);
-      console.log("시간표 저장 응답:", response);
-
-      if (response && response.data) {
-        const savedRoutine = {
-          ...routine,
-          id: response.data.id,
-          addToCalendar: routine.addToCalendar || false, // 체크박스 상태 유지
-        };
-        setRoutines(prev => [...prev, savedRoutine]);
-        toast.success("시간표가 저장되었습니다.");
-      } else {
-        console.error("응답 데이터 없음:", response);
-        toast.error("시간표 저장에 실패했습니다. 응답 데이터가 없습니다.");
-      }
-    } catch (error: any) {
-      console.error("시간표 저장 실패:", error);
-      console.error("에러 상세:", error.response?.data || error.message);
-      toast.error(`시간표 저장에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
-    }
-  };
-
-  // 시간표를 캘린더 일정으로 추가/제거하는 함수
-  const handleToggleRoutineInCalendar = async (routine: RoutineItem, addToCalendar: boolean) => {
-    if (addToCalendar) {
-      // 시간표의 각 요일별로 일정 생성
-      const today = new Date();
-      today.setHours(0, 0, 0, 0); // 오늘 날짜의 시작 (00:00:00)
-
-      // 종료 날짜 설정 (hasEndDate가 true이고 endDate가 있으면 사용, 없으면 1년 후)
-      let endDate: Date;
-      if (routine.hasEndDate && routine.endDate) {
-        endDate = new Date(routine.endDate);
-        endDate.setHours(23, 59, 59, 999); // 종료 날짜의 끝 (23:59:59)
-      } else {
-        // 기본값: 1년 후
-        endDate = new Date(today);
-        endDate.setFullYear(endDate.getFullYear() + 1);
-        endDate.setHours(23, 59, 59, 999);
-      }
-
-      let addedCount = 0;
-      let failedCount = 0;
-
-      // 각 요일별로 일정 생성
-      for (const slot of routine.timeSlots) {
-        console.log(`시간표 요일 처리: slot.day = ${slot.day} (${['일', '월', '화', '수', '목', '금', '토'][slot.day]})`);
-
-        // 오늘부터 종료 날짜까지 모든 해당 요일에 일정 생성
-        let currentDate = new Date(today);
-
-        // 오늘 이후의 첫 번째 해당 요일 찾기
-        while (currentDate <= endDate) {
-          const dayOfWeek = currentDate.getDay(); // 0(일) ~ 6(토)
-
-          // 해당 요일인 경우에만 일정 추가
-          if (dayOfWeek === slot.day) {
-            // 로컬 날짜를 직접 포맷팅 (UTC 변환으로 인한 날짜 밀림 방지)
-            const year = currentDate.getFullYear();
-            const month = currentDate.getMonth() + 1;
-            const day = currentDate.getDate();
-            const dateString = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-
-            // 이 요일에 이미 일정이 있는지 확인 (중복 방지) - memberId도 확인
-            const existingTodo = todos.find(t =>
-              t.title === routine.name &&
-              t.date === dateString &&
-              t.startTime === slot.startTime &&
-              t.memberId === routine.memberId
-            );
-            if (existingTodo) {
-              // 다음 주로 이동
-              currentDate.setDate(currentDate.getDate() + 7);
-              continue;
-            }
-
-            // 시작 시간과 종료 시간 계산
-            const [startHours, startMinutes] = slot.startTime.split(':').map(Number);
-            const startTotalMinutes = startHours * 60 + startMinutes;
-            const endTotalMinutes = startTotalMinutes + slot.duration;
-            const endHours = Math.floor(endTotalMinutes / 60) % 24;
-            const endMins = endTotalMinutes % 60;
-            const endTime = `${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}`;
-
-            // 백엔드에 일정 저장
-            try {
-              const todoData = {
-                title: routine.name,
-                description: routine.memo || "",
-                memo: routine.memo || "",
-                location: "",
-                date: dateString,
-                start_time: slot.startTime,
-                end_time: endTime,
-                all_day: false,
-                category: routine.category || "기타",
-                status: 'pending',
-                has_notification: false,
-                notification_times: [],
-                repeat_type: "none",
-                checklist_items: [],
-                member_id: routine.memberId, // 구성원 ID 추가
-              };
-
-              const response = await apiClient.createTodo(todoData);
-              console.log("시간표 일정 추가 응답:", response);
-
-              if (response && response.data) {
-                const newTodo: TodoItem = {
-                  id: response.data.id, // 백엔드에서 생성한 실제 ID 사용
-                  title: routine.name,
-                  time: slot.startTime,
-                  duration: slot.duration,
-                  completed: false,
-                  category: routine.category || "기타",
-                  date: dateString,
-                  startTime: slot.startTime,
-                  endTime: endTime,
-                  isAllDay: false,
-                  memo: routine.memo || "",
-                  location: "",
-                  hasNotification: false,
-                  alarmTimes: [],
-                  repeatType: "none",
-                  checklistItems: [],
-                  memberId: routine.memberId,
-                  isRoutine: false,
-                };
-
-                setTodos(prev => {
-                  // 이미 존재하는지 확인
-                  const exists = prev.some(t => t.id === newTodo.id);
-                  if (exists) return prev;
-                  addedCount++;
-                  return [...prev, newTodo];
-                });
-              }
-            } catch (error: any) {
-              console.error("시간표 일정 추가 실패:", error);
-              failedCount++;
-            }
-
-            // 다음 주로 이동
-            currentDate.setDate(currentDate.getDate() + 7);
-          } else {
-            // 다음 날로 이동
-            currentDate.setDate(currentDate.getDate() + 1);
-          }
-        }
-      }
-
-      if (addedCount > 0) {
-        toast.success(`${routine.name}이(가) 캘린더에 ${addedCount}개의 일정으로 추가되었습니다.`);
-      }
-      if (failedCount > 0) {
-        toast.error(`${routine.name}의 일정 ${failedCount}개 추가에 실패했습니다.`);
-      }
-      if (addedCount === 0 && failedCount === 0) {
-        toast.info(`${routine.name}의 일정이 이미 캘린더에 존재합니다.`);
-      }
-    } else {
-      // 체크박스 해제 시 해당 시간표로 생성된 모든 일정 제거 (백엔드에서도 삭제) - memberId도 확인
-      const routineTodos = todos.filter(t =>
-        t.title === routine.name &&
-        t.startTime &&
-        t.memberId === routine.memberId &&
-        routine.timeSlots.some(slot => slot.startTime === t.startTime)
-      );
-
-      let deletedCount = 0;
-      let failedCount = 0;
-
-      for (const todo of routineTodos) {
-        try {
-          // 백엔드에서 일정 삭제
-          await apiClient.deleteTodo(todo.id);
-          deletedCount++;
-        } catch (error: any) {
-          console.error("시간표 일정 삭제 실패:", error);
-          failedCount++;
-        }
-      }
-
-      // 프론트엔드 상태 업데이트 - memberId도 확인
-      setTodos(prev => {
-        const filtered = prev.filter(t =>
-          !(t.title === routine.name &&
-            t.startTime &&
-            t.memberId === routine.memberId &&
-            routine.timeSlots.some(slot => slot.startTime === t.startTime))
-        );
-        return filtered;
-      });
-
-      if (deletedCount > 0) {
-        toast.success(`${routine.name}의 캘린더 일정 ${deletedCount}개가 제거되었습니다.`);
-      }
-      if (failedCount > 0) {
-        toast.error(`${routine.name}의 일정 ${failedCount}개 삭제에 실패했습니다.`);
-      }
-    }
-  };
-
-  const handleRoutineUpdate = async (updatedRoutine: RoutineItem) => {
-    try {
-      console.log("시간표 수정 시작:", updatedRoutine);
-      // API로 업데이트
-      const routineData = {
-        name: updatedRoutine.name,
-        member_id: updatedRoutine.memberId,
-        color: updatedRoutine.color,
-        category: updatedRoutine.category || "기타",
-        memo: updatedRoutine.memo || "",
-        time_slots: updatedRoutine.timeSlots.map(slot => ({
-          day: slot.day,
-          startTime: slot.startTime,
-          duration: slot.duration
-        })),
-        add_to_calendar: updatedRoutine.addToCalendar || false, // 체크박스 상태 사용
-      };
-
-      console.log("시간표 수정 데이터:", routineData);
-      try {
-        const response = await apiClient.updateRoutine(updatedRoutine.id, routineData);
-        console.log("시간표 수정 응답:", response);
-        console.log("시간표 수정 응답 데이터:", response?.data);
-        console.log("시간표 수정 응답 상태:", response?.status);
-
-        if (response && response.data) {
-          // 응답 데이터로 업데이트된 시간표 구성
-          const updatedRoutineFromResponse: RoutineItem = {
-            ...updatedRoutine,
-            id: response.data.id,
-            name: response.data.name || updatedRoutine.name,
-            memberId: response.data.member_id || updatedRoutine.memberId,
-            color: response.data.color || updatedRoutine.color,
-            category: response.data.category || updatedRoutine.category,
-            memo: response.data.memo || updatedRoutine.memo,
-            timeSlots: response.data.time_slots?.map((slot: any) => ({
-              day: slot.day,
-              startTime: slot.startTime,
-              duration: slot.duration
-            })) || updatedRoutine.timeSlots
-          };
-          setRoutines(prev => prev.map(r => r.id === updatedRoutine.id ? updatedRoutineFromResponse : r));
-          toast.success("시간표가 수정되었습니다.");
-        } else {
-          console.error("응답 데이터 없음:", response);
-          toast.error("시간표 수정에 실패했습니다. 응답 데이터가 없습니다.");
-        }
-      } catch (apiError: any) {
-        console.error("시간표 수정 API 에러:", apiError);
-        console.error("에러 응답:", apiError.response);
-        console.error("에러 데이터:", apiError.response?.data);
-        throw apiError; // 상위 catch로 전달
-      }
-    } catch (error: any) {
-      console.error("시간표 수정 실패:", error);
-      console.error("에러 상세:", error.response?.data || error.message);
-      console.error("에러 스택:", error.stack);
-      toast.error(`시간표 수정에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
-    }
-  };
-
-  const handleRoutineDelete = async (id: string) => {
-    try {
-      console.log("시간표 삭제 시작:", id);
-      // API로 삭제
-      const response = await apiClient.deleteRoutine(id);
-      console.log("시간표 삭제 응답:", response);
-      setRoutines(prev => prev.filter(r => r.id !== id));
-      toast.success("시간표가 삭제되었습니다.");
-    } catch (error: any) {
-      console.error("시간표 삭제 실패:", error);
-      console.error("에러 상세:", error.response?.data || error.message);
-      toast.error(`시간표 삭제에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
-    }
-  };
 
   // Todo Item Interface
   interface TodoItem {
@@ -1287,8 +963,8 @@ export function CalendarHomeScreen() {
     postponeMinutes?: number;
     postponeToNextDay?: boolean;
     memberId?: string;
+    assignedMemberIds?: string[]; // 담당 프로필 ID 배열
     isRoutine?: boolean;
-    routineId?: string;
   }
 
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -1442,6 +1118,7 @@ export function CalendarHomeScreen() {
             count: formData.customRepeatEndType === 'count' ? formData.customRepeatCount : undefined,
           } : (formData.repeatPattern || undefined),
           checklist_items: formData.checklistItems.filter(item => item.trim() !== ''),
+          family_member_ids: formData.assignedMemberIds && formData.assignedMemberIds.length > 0 ? formData.assignedMemberIds : undefined,
         };
 
         // all_day가 false일 때만 start_time과 end_time 설정
@@ -1505,6 +1182,31 @@ export function CalendarHomeScreen() {
               notificationReminders = formData.notificationReminders || [];
             }
 
+            // family_member_ids 파싱
+            let memberId: string | undefined;
+            let assignedMemberIds: string[] = [];
+            if (response.data.family_member_ids) {
+              try {
+                const memberIds = typeof response.data.family_member_ids === 'string'
+                  ? JSON.parse(response.data.family_member_ids)
+                  : response.data.family_member_ids;
+                if (Array.isArray(memberIds)) {
+                  assignedMemberIds = memberIds;
+                  memberId = memberIds.length > 0 ? memberIds[0] : undefined;
+                } else {
+                  assignedMemberIds = memberIds ? [memberIds] : [];
+                  memberId = memberIds || undefined;
+                }
+              } catch (e) {
+                console.error('Failed to parse family_member_ids from response:', e);
+                assignedMemberIds = formData.assignedMemberIds || [];
+                memberId = formData.assignedMemberIds && formData.assignedMemberIds.length > 0 ? formData.assignedMemberIds[0] : undefined;
+              }
+            } else {
+              assignedMemberIds = formData.assignedMemberIds || [];
+              memberId = formData.assignedMemberIds && formData.assignedMemberIds.length > 0 ? formData.assignedMemberIds[0] : undefined;
+            }
+
             const updatedTodo = {
               id: editingTodoId,
               title: formData.title,
@@ -1526,6 +1228,8 @@ export function CalendarHomeScreen() {
               repeatType: formData.repeatType,
               checklistItems: formData.checklistItems.filter(item => item.trim() !== ''),
               postponeToNextDay: formData.postponeToNextDay,
+              memberId: memberId, // 담당 프로필 ID
+              assignedMemberIds: assignedMemberIds, // 담당 프로필 ID 배열 저장
               source: 'always_plan' as const, // 수정된 일정임을 명시
             };
 
@@ -1609,13 +1313,18 @@ export function CalendarHomeScreen() {
 
                       // family_member_ids 파싱
                       let memberId: string | undefined;
+                      let assignedMemberIds: string[] = [];
                       if (todo.family_member_ids) {
                         try {
                           const memberIds = typeof todo.family_member_ids === 'string'
                             ? JSON.parse(todo.family_member_ids)
                             : todo.family_member_ids;
-                          if (Array.isArray(memberIds) && memberIds.length > 0) {
-                            memberId = memberIds[0];
+                          if (Array.isArray(memberIds)) {
+                            assignedMemberIds = memberIds;
+                            memberId = memberIds.length > 0 ? memberIds[0] : undefined;
+                          } else {
+                            assignedMemberIds = memberIds ? [memberIds] : [];
+                            memberId = memberIds || undefined;
                           }
                         } catch (e) {
                           console.error('Failed to parse family_member_ids:', e);
@@ -1644,6 +1353,7 @@ export function CalendarHomeScreen() {
                         repeatPattern: repeatPattern,
                         checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
                         memberId: memberId,
+                        assignedMemberIds: assignedMemberIds, // 담당 프로필 ID 배열 저장
                         isRoutine: false,
                         source: 'always_plan' as const,
                         googleCalendarEventId: todo.google_calendar_event_id || undefined,
@@ -1746,6 +1456,7 @@ export function CalendarHomeScreen() {
             count: formData.customRepeatEndType === 'count' ? formData.customRepeatCount : undefined,
           } : (formData.repeatPattern || null),
           checklist_items: formData.checklistItems.filter(item => item.trim() !== ''),
+          family_member_ids: formData.assignedMemberIds && formData.assignedMemberIds.length > 0 ? formData.assignedMemberIds : undefined,
         };
 
         console.log(`일정 추가: ${startDate}${endDate ? ` ~ ${endDate}` : ''} (하나의 일정으로 생성)`);
@@ -1837,6 +1548,31 @@ export function CalendarHomeScreen() {
               repeatPattern = formData.repeatPattern;
             }
 
+            // family_member_ids 파싱
+            let memberId: string | undefined;
+            let assignedMemberIds: string[] = [];
+            if (response.data.family_member_ids) {
+              try {
+                const memberIds = typeof response.data.family_member_ids === 'string'
+                  ? JSON.parse(response.data.family_member_ids)
+                  : response.data.family_member_ids;
+                if (Array.isArray(memberIds)) {
+                  assignedMemberIds = memberIds;
+                  memberId = memberIds.length > 0 ? memberIds[0] : undefined;
+                } else {
+                  assignedMemberIds = memberIds ? [memberIds] : [];
+                  memberId = memberIds || undefined;
+                }
+              } catch (e) {
+                console.error('Failed to parse family_member_ids from response:', e);
+                assignedMemberIds = formData.assignedMemberIds || [];
+                memberId = formData.assignedMemberIds && formData.assignedMemberIds.length > 0 ? formData.assignedMemberIds[0] : undefined;
+              }
+            } else {
+              assignedMemberIds = formData.assignedMemberIds || [];
+              memberId = formData.assignedMemberIds && formData.assignedMemberIds.length > 0 ? formData.assignedMemberIds[0] : undefined;
+            }
+
             const newTodo = {
               id: response.data.id,
               title: formData.title,
@@ -1860,6 +1596,8 @@ export function CalendarHomeScreen() {
               repeatPattern: repeatPattern, // 반복 패턴
               checklistItems: formData.checklistItems.filter(item => item.trim() !== ''),
               postponeToNextDay: formData.postponeToNextDay,
+              memberId: memberId, // 담당 프로필 ID 추가
+              assignedMemberIds: assignedMemberIds, // 담당 프로필 ID 배열 저장
               isRoutine: false,
               source: 'always_plan' as const,
               todoGroupId: response.data.todo_group_id, // 그룹 ID 저장
@@ -2441,51 +2179,6 @@ export function CalendarHomeScreen() {
     }
 
     // Routine 인스턴스 처리
-    if (id.startsWith('routine-')) {
-      const parts = id.split('-');
-      // Format: routine-{id}-{yyyy}-{mm}-{dd}
-      const routineId = parts[1];
-      const dateStr = parts.slice(2).join('-');
-
-      const routine = routines.find(r => r.id === routineId);
-
-      if (routine) {
-        // Create a new "Exception" Todo
-        setTodos((prev) => {
-          const existingException = prev.find(t => t.id === id);
-          if (existingException) {
-            return prev.map((todo) =>
-              todo.id === id
-                ? {
-                  ...todo,
-                  time: updates.time,
-                  startTime: updates.time,
-                  endTime: endTime,
-                  duration: updates.duration
-                }
-                : todo
-            );
-          } else {
-            const newExceptionTodo: TodoItem = {
-              id: id, // Maintain the same ID to shadow the routine instance
-              title: routine.name,
-              time: updates.time, // New time
-              startTime: updates.time,
-              endTime: endTime,
-              duration: updates.duration, // New duration
-              completed: false,
-              category: routine.category || "기타",
-              date: dateStr,
-              memberId: routine.memberId,
-              isRoutine: true, // Mark as detached routine
-              routineId: routine.id,
-              memo: routine.memo,
-            };
-            return [...prev, newExceptionTodo];
-          }
-        });
-      }
-    }
   };
 
   // STT/OCR로 추출된 텍스트 및 일정 정보 상태
@@ -2567,7 +2260,6 @@ export function CalendarHomeScreen() {
     });
   };
 
-  const filteredRoutines = routines.filter(r => selectedMembers.includes(r.memberId));
   // For Todo List tab (Today)
   const displayTodos = getTodosForDate(new Date());
 
@@ -2892,90 +2584,9 @@ export function CalendarHomeScreen() {
           >
             캘린더
           </button>
-          <button
-            onClick={() => setActiveTab("routine")}
-            className={`flex-1 py-2.5 rounded-lg font-medium transition-colors ${activeTab === "routine"
-              ? "bg-[#FF9B82] text-white"
-              : "bg-[#F9FAFB] text-[#6B7280] hover:bg-[#F3F4F6]"
-              }`}
-          >
-            시간표
-          </button>
         </div>
       </div>
 
-      {/* 시간표 탭 아래에 사용자 선택 영역을 배치 (UX 개선: 탭 → 필터 순서) */}
-      {activeTab === "routine" && (
-        <div className="bg-white px-4 pt-6 pb-3 border-b border-[#F3F4F6]">
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="font-semibold text-[#1F2937]">시간표 보기</h4>
-            <button
-              onClick={() => setShowMemberAddSheet(true)}
-              className="px-3 py-1.5 text-sm font-medium bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] transition-colors flex items-center gap-1"
-            >
-              <Users size={16} />
-              추가
-            </button>
-          </div>
-          {/* 가로 스크롤 가능한 사용자 목록 */}
-          <div className="flex gap-3 overflow-x-auto pt-2 pb-2 -mx-4 px-4 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
-            {familyMembers.map((member) => {
-              const isSelected = selectedMembers.includes(member.id);
-              return (
-                <div key={member.id} className="flex-shrink-0 relative group">
-                  <button
-                    onClick={() => toggleMemberSelection(member.id)}
-                    className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all min-w-[80px] ${isSelected
-                      ? "bg-[#FF9B82] shadow-md scale-100"
-                      : "bg-[#F9FAFB] hover:bg-[#F3F4F6]"
-                      }`}
-                  >
-                    <div
-                      className={`w-10 h-10 rounded-full flex items-center justify-center text-xl transition-all relative ${isSelected
-                        ? "bg-white"
-                        : "bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82]"
-                        }`}
-                    >
-                      {member.emoji}
-                    </div>
-                    <span
-                      className={`text-xs font-medium ${isSelected ? "text-white" : "text-[#6B7280]"
-                        }`}
-                    >
-                      {member.name}
-                    </span>
-                  </button>
-                  {/* 편집 버튼 (호버 시 표시) */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingMemberId(member.id);
-                      setShowMemberAddSheet(true);
-                    }}
-                    className="absolute -top-1 -right-1 w-6 h-6 bg-[#6366F1] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-[#5558E3] z-10"
-                    title="수정"
-                  >
-                    <Edit2 size={12} />
-                  </button>
-                  {/* 삭제 버튼 (호버 시 표시, "나"는 제외) */}
-                  {member.id !== "1" && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteMember(member.id);
-                      }}
-                      className="absolute -bottom-1 -right-1 w-6 h-6 bg-[#EF4444] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-[#DC2626] z-10"
-                      title="삭제"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Notification Panel */}
       <NotificationPanel
@@ -3049,6 +2660,20 @@ export function CalendarHomeScreen() {
                 <div className="flex items-center gap-3">
                   <User size={20} className="text-[#6B7280]" />
                   <span className="text-[#1F2937]">마이페이지</span>
+                </div>
+                <ChevronRight size={18} className="text-[#9CA3AF]" />
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowProfileMenu(false);
+                  setShowProfileManagementScreen(true);
+                }}
+                className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <Users size={20} className="text-[#6B7280]" />
+                  <span className="text-[#1F2937]">프로필 관리</span>
                 </div>
                 <ChevronRight size={18} className="text-[#9CA3AF]" />
               </button>
@@ -3287,11 +2912,52 @@ export function CalendarHomeScreen() {
 
               {/* Week Calendar */}
               {calendarView === "week" && (
-                <WeekCalendar
-                  todos={todos}
-                  onTodoUpdate={handleTodoUpdate}
-                  onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
-                />
+                <>
+                  {/* 프로필 선택 영역 */}
+                  <div className="bg-white px-4 pt-4 pb-3 border-b border-[#F3F4F6]">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-semibold text-[#1F2937]">프로필</h4>
+                    </div>
+                    {/* 가로 스크롤 가능한 프로필 목록 */}
+                    <div className="flex gap-3 overflow-x-auto pt-2 pb-2 -mx-4 px-4 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
+                      {familyMembers.map((member) => {
+                        const isSelected = selectedMembers.includes(member.id);
+                        return (
+                          <button
+                            key={member.id}
+                            onClick={() => toggleMemberSelection(member.id)}
+                            className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all min-w-[80px] flex-shrink-0 ${isSelected
+                              ? "bg-[#FF9B82] shadow-md scale-100"
+                              : "bg-[#F9FAFB] hover:bg-[#F3F4F6]"
+                              }`}
+                          >
+                            <div
+                              className={`w-10 h-10 rounded-full flex items-center justify-center text-xl transition-all relative ${isSelected
+                                ? "bg-white"
+                                : "bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82]"
+                                }`}
+                            >
+                              {member.emoji}
+                            </div>
+                            <span
+                              className={`text-xs font-medium ${isSelected ? "text-white" : "text-[#6B7280]"
+                                }`}
+                            >
+                              {member.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <WeekCalendar
+                    todos={todos}
+                    familyMembers={familyMembers}
+                    selectedMembers={selectedMembers}
+                    onTodoUpdate={handleTodoUpdate}
+                    onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
+                  />
+                </>
               )}
 
               {/* Day Calendar */}
@@ -3380,21 +3046,6 @@ export function CalendarHomeScreen() {
             </>
           )}
 
-          {/* Routine View */}
-          {activeTab === "routine" && (
-            <RoutineView
-              currentUserEmoji={selectedEmoji}
-              currentUserName="나"
-              selectedMemberIds={selectedMembers}
-              familyMembers={familyMembers}
-              routines={routines}
-              onAddRoutine={handleRoutineAdd}
-              onUpdateRoutine={handleRoutineUpdate}
-              onDeleteRoutine={handleRoutineDelete}
-              onToggleRoutineInCalendar={handleToggleRoutineInCalendar}
-              todos={todos}
-            />
-          )}
         </div>
       </div>
 
@@ -3859,6 +3510,7 @@ export function CalendarHomeScreen() {
             setInputMethodInitialMode(method);
             setShowInputMethodModal(true);
           }}
+          familyMembers={familyMembers}
           initialData={
             editingTodoId
               ? todos.find(t => t.id === editingTodoId)
@@ -3940,12 +3592,69 @@ export function CalendarHomeScreen() {
         }}
       />
 
+      {/* Profile Management Screen */}
+      <ProfileManagementScreen
+        isOpen={showProfileManagementScreen}
+        onClose={() => setShowProfileManagementScreen(false)}
+        onProfileUpdate={async () => {
+          // 프로필 업데이트 시 프로필 목록 다시 로드
+          try {
+            const familyResponse = await apiClient.getFamilyMembers();
+            if (familyResponse.data && Array.isArray(familyResponse.data)) {
+              const defaultColors = [
+                "#9B82FF",
+                "#9ae3a9",
+                "#FFD482",
+                "#82D4FF",
+                "#FF82D4",
+                "#FF9B82",
+              ];
+
+              const formattedMembers = familyResponse.data.map((member: any, index: number) => {
+                let memberColor = member.color_code || member.color;
+                if (!memberColor || memberColor.trim() === '') {
+                  memberColor = defaultColors[index % defaultColors.length];
+                }
+
+                return {
+                  id: member.id,
+                  name: member.name,
+                  emoji: member.emoji || "🐼",
+                  color: memberColor,
+                  phone: member.phone_number,
+                  memo: member.notes,
+                };
+              });
+
+              // 현재 사용자 정보 다시 로드
+              const userResponse = await apiClient.getCurrentUser();
+              const currentUserName = userResponse?.data?.name || "나";
+              const currentUserEmoji = userResponse?.data?.avatar_emoji || "🐼";
+
+              formattedMembers.unshift({
+                id: "me",
+                name: currentUserName,
+                emoji: currentUserEmoji,
+                color: "rgba(255, 155, 130, 0.6)",
+                phone: undefined,
+                memo: undefined,
+              });
+
+              setFamilyMembers(formattedMembers);
+            }
+          } catch (error) {
+            console.error("프로필 목록 다시 로드 실패:", error);
+          }
+        }}
+      />
+
       {/* Settings Screen */}
       <SettingsScreen
         isOpen={showSettingsScreen}
         onClose={() => setShowSettingsScreen(false)}
         onRefreshCalendar={loadGoogleCalendarEvents}
       />
+
     </div>
   );
 }
