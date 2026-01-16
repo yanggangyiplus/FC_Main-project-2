@@ -26,15 +26,15 @@ export function CommunityScreen({ isOpen, onClose }: CommunityScreenProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-[60] max-w-[375px] mx-auto bg-white animate-in slide-in-from-bottom duration-300">
+    <div className="w-full h-full flex flex-col">
       {/* Header */}
-      <div className="bg-white px-4 py-4 flex items-center justify-between border-b border-[#F3F4F6]">
-        <h2 className="font-bold text-[#1F2937]">커뮤니티</h2>
+      <div className="flex items-center justify-between p-6 border-b border-[#F3F4F6]">
+        <h2 className="text-lg font-bold text-[#1F2937]">커뮤니티</h2>
         <button
           onClick={onClose}
           className="p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
         >
-          <X size={24} className="text-[#6B7280]" />
+          <X size={20} className="text-[#6B7280]" />
         </button>
       </div>
 

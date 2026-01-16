@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { RoutineItem } from "./RoutineView";
 import { formatDuration } from "@/utils/formatDuration";
@@ -15,12 +15,21 @@ interface DayCalendarProps {
     endDate?: string; // 종료 날짜 (기간 일정)
   }>;
   routines?: RoutineItem[];
+  selectedDate?: string | null; // 선택된 날짜
+  onDateChange?: (date: string) => void; // 날짜 변경 콜백
   onTodoUpdate?: (id: string, updates: { time: string; duration: number }) => void;
   onTodoClick?: (todoId: string) => void;
 }
 
-export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }: DayCalendarProps) {
-  const [currentDate, setCurrentDate] = useState(new Date());
+export function DayCalendar({ todos, routines = [], selectedDate, onDateChange, onTodoUpdate, onTodoClick }: DayCalendarProps) {
+  const [currentDate, setCurrentDate] = useState(() => selectedDate ? new Date(selectedDate) : new Date());
+
+  // selectedDate가 변경되면 currentDate도 업데이트
+  useEffect(() => {
+    if (selectedDate) {
+      setCurrentDate(new Date(selectedDate));
+    }
+  }, [selectedDate]);
   const [draggedTodo, setDraggedTodo] = useState<string | null>(null);
   const [resizeMode, setResizeMode] = useState<'top' | 'bottom' | null>(null);
   const [dragStartY, setDragStartY] = useState(0);
@@ -37,12 +46,18 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
     const newDate = new Date(currentDate);
     newDate.setDate(newDate.getDate() - 1);
     setCurrentDate(newDate);
+    if (onDateChange) {
+      onDateChange(newDate.toISOString().split('T')[0]);
+    }
   };
 
   const nextDay = () => {
     const newDate = new Date(currentDate);
     newDate.setDate(newDate.getDate() + 1);
     setCurrentDate(newDate);
+    if (onDateChange) {
+      onDateChange(newDate.toISOString().split('T')[0]);
+    }
   };
 
   const getTodosForDate = () => {
@@ -84,6 +99,9 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
   };
 
   const getTimePosition = (time: string) => {
+    if (!time || typeof time !== 'string' || !time.includes(':')) {
+      return 0; // 기본 위치
+    }
     const [hours, minutes] = time.split(":").map(Number);
     const totalMinutes = hours * 60 + minutes;
     return (totalMinutes / (24 * 60)) * 100;
@@ -130,7 +148,8 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
     // Touch resize implementation omitted for simplicity, keeping basic touch move
     setDraggedTodo(todoId);
     setDragStartY(e.touches[0].clientY);
-    setDragStartTime(time);
+    setDragStartTime(time || '09:00');
+    setDragStartDuration(duration || 60);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -175,16 +194,18 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (!draggedTodo) return;
+    if (!draggedTodo || !dragStartTime) return;
 
     // Basic touch move logic (same as before)
     const deltaY = e.touches[0].clientY - dragStartY;
     const minutesDelta = Math.round((deltaY / window.innerHeight) * (24 * 60));
 
-    const [hours, minutes] = dragStartTime.split(":").map(Number);
+    const [hours, minutes] = (dragStartTime || '09:00').split(":").map(Number);
+    if (isNaN(hours) || isNaN(minutes)) return;
+    
     let newMinutes = hours * 60 + minutes + minutesDelta;
-
-    newMinutes = Math.max(0, Math.min(24 * 60 - 30, newMinutes));
+    const currentDuration = dragStartDuration || 60;
+    newMinutes = Math.max(0, Math.min(24 * 60 - currentDuration, newMinutes));
 
     const newHours = Math.floor(newMinutes / 60);
     const newMins = newMinutes % 60;
@@ -192,7 +213,7 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
 
     const todo = todos.find((t) => t.id === draggedTodo);
     if (todo && onTodoUpdate) {
-      onTodoUpdate(draggedTodo, { time: newTime, duration: todo.duration });
+      onTodoUpdate(draggedTodo, { time: newTime, duration: currentDuration });
     }
   };
 
@@ -219,10 +240,16 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
 
   // Overlap Layout Algorithm
   const getOverlapLayout = (items: typeof dayTodos) => {
+    // 1. Filter out items without valid time and set default time if needed
+    const validItems = items.map(item => ({
+      ...item,
+      time: item.time || '09:00' // 기본 시간 설정
+    })).filter(item => typeof item.time === 'string' && item.time.includes(':'));
+
     // 1. Sort by start time, then duration
-    const sorted = [...items].sort((a, b) => {
-      const [Ah, Am] = a.time.split(':').map(Number);
-      const [Bh, Bm] = b.time.split(':').map(Number);
+    const sorted = [...validItems].sort((a, b) => {
+      const [Ah, Am] = (a.time || '09:00').split(':').map(Number);
+      const [Bh, Bm] = (b.time || '09:00').split(':').map(Number);
       const startA = Ah * 60 + Am;
       const startB = Bh * 60 + Bm;
       if (startA !== startB) return startA - startB;
@@ -235,9 +262,9 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
     let clusterMaxEnd = -1;
 
     sorted.forEach(item => {
-      const [h, m] = item.time.split(':').map(Number);
+      const [h, m] = (item.time || '09:00').split(':').map(Number);
       const start = h * 60 + m;
-      const end = start + item.duration;
+      const end = start + (item.duration || 60); // 기본 1시간
 
       if (currentCluster.length === 0) {
         currentCluster.push(item);
@@ -262,9 +289,9 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
       const columns: number[] = [];
 
       cluster.forEach(item => {
-        const [h, m] = item.time.split(':').map(Number);
+        const [h, m] = (item.time || '09:00').split(':').map(Number);
         const start = h * 60 + m;
-        const end = start + item.duration;
+        const end = start + (item.duration || 60);
 
         let colIndex = columns.findIndex(colEnd => colEnd <= start);
 
@@ -386,7 +413,7 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
 
                     <div className="font-semibold text-sm pointer-events-none">{todo.title}</div>
                     <div className="text-xs mt-1 opacity-90 pointer-events-none">
-                      {todo.time} - {formatDuration(todo.duration)}
+                      {todo.time} - {formatDuration(todo.duration || 60)}
                     </div>
                     <div className="text-xs mt-1 bg-white/20 inline-block px-2 py-0.5 rounded-full pointer-events-none">
                       {todo.category}

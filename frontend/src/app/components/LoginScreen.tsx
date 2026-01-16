@@ -100,7 +100,7 @@ export function LoginScreen() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#FFE8E0] to-[#FFF5F2] flex flex-col items-center justify-center px-6 relative max-w-[375px] mx-auto">
+    <div className="min-h-screen bg-gradient-to-b from-[#FFE8E0] to-[#FFF5F2] flex flex-col items-center justify-center px-4 sm:px-6 relative w-full max-w-full md:max-w-md mx-auto">
       {/* Back Button */}
       <button
         onClick={handleBack}
@@ -110,18 +110,18 @@ export function LoginScreen() {
         <ArrowLeft size={24} className="text-[#6B7280]" />
       </button>
 
-      <div className="w-full max-w-[320px]">
+      <div className="w-full max-w-[320px] sm:max-w-[400px]">
         {/* Logo */}
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] rounded-2xl flex items-center justify-center mb-4 shadow-lg">
-            <Calendar size={32} className="text-white" strokeWidth={2.5} />
+        <div className="flex flex-col items-center mb-6 sm:mb-8">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] rounded-2xl flex items-center justify-center mb-3 sm:mb-4 shadow-lg">
+            <Calendar size={28} className="text-white sm:size-8" strokeWidth={2.5} />
           </div>
-          <h1 className="mb-2 text-2xl font-bold text-[#1F2937]">ALWAYS PLAN</h1>
-          <p className="text-[#6B7280] text-center">부모들을 위한 손쉬운 일정 관리 & 소통</p>
+          <h1 className="mb-2 text-xl sm:text-2xl font-bold text-[#1F2937]">ALWAYS PLAN</h1>
+          <p className="text-sm sm:text-base text-[#6B7280] text-center">부모들을 위한 손쉬운 일정 관리 & 소통</p>
         </div>
 
         {/* Login Card */}
-        <div className="bg-white rounded-3xl p-6 shadow-lg">
+        <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-6 shadow-lg">
           {/* Error Message */}
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">

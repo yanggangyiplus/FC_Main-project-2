@@ -103,7 +103,7 @@ export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect
         }}
         onMouseEnter={() => setHoveredDate(day)}
         onMouseLeave={() => setHoveredDate(null)}
-        className={`aspect-square flex flex-col items-center justify-center rounded-lg relative transition-all hover:bg-[#FFF0EB] ${
+        className={`aspect-square flex flex-col items-center justify-center rounded-md sm:rounded-lg relative transition-all hover:bg-[#FFF0EB] ${
           isTodayDate
             ? "bg-[#FF9B82] text-white font-bold"
             : isSelectedDate
@@ -111,7 +111,7 @@ export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect
             : "text-[#1F2937]"
         }`}
       >
-        <span className="text-sm">{day}</span>
+        <span className="text-xs sm:text-sm">{day}</span>
         {hasEvent && !isTodayDate && (
           <div className="absolute bottom-1 right-1 w-1.5 h-1.5 bg-[#EF4444] rounded-full" />
         )}
@@ -159,33 +159,33 @@ export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect
 
   return (
     <div className="bg-white">
-      {/* Calendar Header */}
-      <div className="px-4 py-3 flex items-center justify-between border-b border-[#F3F4F6]">
+      {/* Calendar Header - 반응형 */}
+      <div className="px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-between border-b border-[#F3F4F6]">
         <button
           onClick={prevMonth}
-          className="p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
+          className="p-1.5 sm:p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
         >
-          <ChevronLeft size={20} className="text-[#6B7280]" />
+          <ChevronLeft size={18} className="text-[#6B7280] sm:size-5" />
         </button>
-        <h2 className="font-semibold text-[#1F2937]">
+        <h2 className="font-semibold text-sm sm:text-base text-[#1F2937]">
           {year}년 {month + 1}월
         </h2>
         <button
           onClick={nextMonth}
-          className="p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
+          className="p-1.5 sm:p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
         >
-          <ChevronRight size={20} className="text-[#6B7280]" />
+          <ChevronRight size={18} className="text-[#6B7280] sm:size-5" />
         </button>
       </div>
 
-      {/* Calendar Grid */}
-      <div className="px-4 py-3">
+      {/* Calendar Grid - 반응형 */}
+      <div className="px-2 sm:px-4 py-2 sm:py-3">
         {/* Week days */}
-        <div className="grid grid-cols-7 gap-1 mb-2">
+        <div className="grid grid-cols-7 gap-0.5 sm:gap-1 mb-1 sm:mb-2">
           {weekDays.map((day, index) => (
             <div
               key={day}
-              className={`text-center text-xs font-medium py-2 ${index === 0
+              className={`text-center text-[10px] sm:text-xs font-medium py-1 sm:py-2 ${index === 0
                 ? "text-[#EF4444]"
                 : index === 6
                   ? "text-[#3B82F6]"
@@ -198,7 +198,7 @@ export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect
         </div>
 
         {/* Days grid */}
-        <div className="grid grid-cols-7 gap-1">{days}</div>
+        <div className="grid grid-cols-7 gap-0.5 sm:gap-1">{days}</div>
       </div>
     </div>
   );

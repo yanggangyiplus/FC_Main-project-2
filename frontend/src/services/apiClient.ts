@@ -325,6 +325,10 @@ class APIClient {
     return this.client.post('/calendar/sync/all')
   }
 
+  async syncGoogleCalendar() {
+    return this.client.post('/calendar/sync/all')
+  }
+
   async toggleCalendarImport() {
     return this.client.post('/calendar/toggle-import')
   }

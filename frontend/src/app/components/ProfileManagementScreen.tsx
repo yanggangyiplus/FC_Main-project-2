@@ -1,4 +1,4 @@
-import { ArrowLeft, Users, Edit2, Trash2, Plus } from "lucide-react";
+import { ArrowLeft, Users, Edit2, Trash2, Plus, X } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { apiClient } from "@/services/apiClient";
@@ -225,13 +225,16 @@ export function ProfileManagementScreen({ isOpen, onClose, onProfileUpdate }: Pr
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-white z-50 flex flex-col max-w-[375px] mx-auto">
+    <div className="w-full h-full flex flex-col">
       {/* Header */}
-      <div className="bg-white px-4 py-4 flex items-center gap-3 border-b border-[#F3F4F6]">
-        <button onClick={onClose} className="p-1">
-          <ArrowLeft size={24} className="text-[#1F2937]" />
+      <div className="flex items-center justify-between p-6 border-b border-[#F3F4F6]">
+        <h2 className="text-lg font-bold text-[#1F2937]">프로필 관리</h2>
+        <button
+          onClick={onClose}
+          className="p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
+        >
+          <X size={20} className="text-[#6B7280]" />
         </button>
-        <h1 className="flex-1 font-semibold text-[#1F2937]">프로필 관리</h1>
       </div>
 
       {/* Content */}

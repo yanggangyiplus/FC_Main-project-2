@@ -1,4 +1,4 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { apiClient } from "@/services/apiClient";
@@ -89,18 +89,8 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar }: SettingsS
           const deletedCount = response.data?.deleted_count || 0;
           const preservedCount = response.data?.preserved_count || 0;
 
-          // 백엔드에서 보낸 메시지 사용 또는 직접 구성
-          if (response.data?.message) {
-            toast.success(response.data.message);
-          } else if (deletedCount > 0) {
-            let message = `Google Calendar 연동이 비활성화되었습니다. ${deletedCount}개 이벤트가 삭제되었습니다.`;
-            if (preservedCount > 0) {
-              message += ` 동기화 후 저장된 ${preservedCount}개 일정은 Google Calendar에 남아있습니다.`;
-            }
-            toast.success(message);
-          } else {
-            toast.success("Google Calendar 연동이 비활성화되었습니다.");
-          }
+          // 동기화 해제 성공 메시지
+          toast.success("동기화가 해제되었습니다.");
           // 상태만 업데이트하고 설정 화면에 머물기
         } else {
           await apiClient.enableCalendarSync();
@@ -119,13 +109,16 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar }: SettingsS
   };
 
   return (
-    <div className="fixed inset-0 bg-white z-50 flex flex-col max-w-[375px] mx-auto">
+    <div className="w-full h-full flex flex-col">
       {/* Header */}
-      <div className="bg-white px-4 py-4 flex items-center gap-3 border-b border-[#F3F4F6]">
-        <button onClick={onClose} className="p-1">
-          <ArrowLeft size={24} className="text-[#1F2937]" />
+      <div className="flex items-center justify-between p-6 border-b border-[#F3F4F6]">
+        <h2 className="text-lg font-bold text-[#1F2937]">설정</h2>
+        <button
+          onClick={onClose}
+          className="p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
+        >
+          <X size={20} className="text-[#6B7280]" />
         </button>
-        <h1 className="flex-1 font-semibold text-[#1F2937]">설정</h1>
       </div>
 
       {/* Settings Content */}

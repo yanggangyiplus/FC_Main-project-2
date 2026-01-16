@@ -1,4 +1,4 @@
-import { ArrowLeft, Edit2, User, Smile } from "lucide-react";
+import { ArrowLeft, Edit2, User, Smile, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -43,13 +43,16 @@ export function MyPageScreen({ isOpen, onClose, userName, userEmail, selectedEmo
   };
 
   return (
-    <div className="fixed inset-0 bg-white z-50 flex flex-col max-w-[375px] mx-auto">
+    <div className="w-full h-full flex flex-col">
       {/* Header */}
-      <div className="bg-white px-4 py-4 flex items-center gap-3 border-b border-[#F3F4F6]">
-        <button onClick={onClose} className="p-1">
-          <ArrowLeft size={24} className="text-[#1F2937]" />
+      <div className="flex items-center justify-between p-6 border-b border-[#F3F4F6]">
+        <h2 className="text-lg font-bold text-[#1F2937]">마이페이지</h2>
+        <button
+          onClick={onClose}
+          className="p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
+        >
+          <X size={20} className="text-[#6B7280]" />
         </button>
-        <h1 className="flex-1 font-semibold text-[#1F2937]">마이페이지</h1>
       </div>
 
       {/* Profile Section */}

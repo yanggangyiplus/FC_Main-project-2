@@ -594,7 +594,7 @@ export function InputMethodModal({ isOpen, onClose, onSelect, initialMethod }: I
   };
 
   const handleTextClick = () => {
-    onSelect('text');
+    setActiveMethod(null);
   };
 
   const handleClose = () => {
@@ -689,11 +689,45 @@ export function InputMethodModal({ isOpen, onClose, onSelect, initialMethod }: I
                   </span>
                   {transcribedText.trim().length > 0 && (
                     <button
-                      onClick={() => {
-                        onSelect('text', transcribedText, extractedTodoInfo || undefined);
-                        setTranscribedText("");
-                        setExtractedTodoInfo(null);
-                        setActiveMethod(null);
+                      onClick={async () => {
+                        // 텍스트가 있고 extractedTodoInfo가 없으면 AI 일정추출 시도
+                        if (!extractedTodoInfo && transcribedText.trim().length > 0) {
+                          try {
+                            setIsExtracting(true);
+                            const todoInfoResponse = await apiClient.extractTodoInfo(transcribedText);
+                            if (todoInfoResponse && todoInfoResponse.data) {
+                              const info = todoInfoResponse.data;
+                              const extractedInfo: ExtractedTodoInfo = {
+                                title: info.title || '',
+                                date: info.date,
+                                endDate: info.end_date || info.date,
+                                startTime: info.start_time || undefined,
+                                endTime: info.end_time || undefined,
+                                isAllDay: info.all_day || false,
+                                category: info.category || '기타',
+                                checklistItems: info.checklist && info.checklist.length > 0 ? info.checklist : [],
+                                location: info.location || '',
+                                memo: info.memo || transcribedText,
+                                repeatType: info.repeat_type || 'none',
+                                hasNotification: info.has_notification || false,
+                                alarmTimes: info.notification_times || [],
+                              };
+                              setExtractedTodoInfo(extractedInfo);
+                              toast.success("일정 정보가 자동으로 추출되었습니다.");
+                            }
+                          } catch (error: any) {
+                            console.error("일정 정보 추출 실패:", error);
+                            toast.error(`일정 정보 추출 실패: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
+                          } finally {
+                            setIsExtracting(false);
+                          }
+                        } else {
+                          // extractedTodoInfo가 있으면 일정 추가하기
+                          onSelect('text', transcribedText, extractedTodoInfo || undefined);
+                          setTranscribedText("");
+                          setExtractedTodoInfo(null);
+                          setActiveMethod(null);
+                        }
                       }}
                       disabled={isExtracting}
                       className="px-4 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
