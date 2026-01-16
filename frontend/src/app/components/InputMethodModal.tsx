@@ -2,6 +2,7 @@ import { X, Mic, Camera, FileText, Play, Square, Pause, RotateCcw, Upload, FileS
 import { useState, useRef, useEffect } from "react";
 import { apiClient } from "@/services/apiClient";
 import { toast } from "sonner";
+import { AddTodoModal, TodoFormData } from "./AddTodoModal";
 
 interface ExtractedTodoInfo {
   title?: string;
@@ -24,9 +25,16 @@ interface InputMethodModalProps {
   onClose: () => void;
   onSelect: (method: 'voice' | 'camera' | 'text', extractedText?: string, todoInfo?: ExtractedTodoInfo) => void;
   initialMethod?: 'voice' | 'camera' | null;
+  familyMembers?: Array<{
+    id: string;
+    name: string;
+    emoji: string;
+    color: string;
+  }>;
+  onSave?: (formData: any) => Promise<void> | void;
 }
 
-export function InputMethodModal({ isOpen, onClose, onSelect, initialMethod }: InputMethodModalProps) {
+export function InputMethodModal({ isOpen, onClose, onSelect, initialMethod, familyMembers = [], onSave }: InputMethodModalProps) {
   const [activeMethod, setActiveMethod] = useState<'voice' | 'camera' | null>(initialMethod || 'voice');
 
   // initialMethod가 변경되면 activeMethod 업데이트
@@ -594,8 +602,9 @@ export function InputMethodModal({ isOpen, onClose, onSelect, initialMethod }: I
   };
 
   const handleTextClick = () => {
-    // 문서 버튼 클릭 시 AddTodoModal을 열기 위해 'text' 메서드로 onSelect 호출
-    onSelect('text');
+    // 텍스트 입력 탭으로 전환 (activeMethod를 null로 설정)
+    setActiveMethod(null);
+    // 입력값 초기화하지 않음 (사용자가 입력한 내용 유지)
   };
 
   const handleClose = () => {
@@ -671,31 +680,34 @@ export function InputMethodModal({ isOpen, onClose, onSelect, initialMethod }: I
                 </button>
               </div>
 
-              {/* 텍스트 입력 영역 */}
-              <div className="w-full bg-white rounded-2xl p-4 mb-4 shadow-sm">
-                <textarea
-                  value={transcribedText}
-                  onChange={(e) => {
-                    if (e.target.value.length <= 1000) {
-                      setTranscribedText(e.target.value);
-                    }
-                  }}
-                  placeholder="텍스트를 작성해주세요. (최대 1000자)"
-                  className="w-full min-h-[120px] p-3 border border-[#E5E7EB] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[#FF9B82] text-sm text-[#1F2937]"
-                  maxLength={1000}
-                />
-                <div className="flex items-center justify-between mt-2">
-                  <span className="text-xs text-[#9CA3AF]">
-                    {transcribedText.length}/1000자
-                  </span>
-                  {transcribedText.trim().length > 0 && (
-                    <button
-                      onClick={async () => {
-                        // 텍스트가 있고 extractedTodoInfo가 없으면 AI 일정추출 시도
-                        if (!extractedTodoInfo && transcribedText.trim().length > 0) {
+              {/* 텍스트 입력 영역 (STT/OCR 탭에서만 표시) */}
+              {(activeMethod === 'voice' || activeMethod === 'camera') && (
+                <div className="w-full bg-white rounded-2xl p-4 mb-4 shadow-sm">
+                  <textarea
+                    value={transcribedText}
+                    onChange={(e) => {
+                      if (e.target.value.length <= 1000) {
+                        setTranscribedText(e.target.value);
+                      }
+                      // 텍스트 수정 시 extractedTodoInfo 초기화 (다시 추출 가능하도록)
+                      if (extractedTodoInfo) {
+                        setExtractedTodoInfo(null);
+                      }
+                    }}
+                    placeholder="텍스트를 작성하거나 수정해주세요. (최대 1000자)"
+                    className="w-full min-h-[120px] p-3 border border-[#E5E7EB] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-[#FF9B82] text-sm text-[#1F2937]"
+                    maxLength={1000}
+                  />
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-xs text-[#9CA3AF]">
+                      {transcribedText.length}/1000자
+                    </span>
+                    {transcribedText.trim().length > 0 && !extractedTodoInfo && (
+                      <button
+                        onClick={async () => {
                           try {
                             setIsExtracting(true);
-                            const todoInfoResponse = await apiClient.extractTodoInfo(transcribedText);
+                            const todoInfoResponse = await apiClient.extractTodoInfo(transcribedText.trim());
                             if (todoInfoResponse && todoInfoResponse.data) {
                               const info = todoInfoResponse.data;
                               const extractedInfo: ExtractedTodoInfo = {
@@ -708,13 +720,17 @@ export function InputMethodModal({ isOpen, onClose, onSelect, initialMethod }: I
                                 category: info.category || '기타',
                                 checklistItems: info.checklist && info.checklist.length > 0 ? info.checklist : [],
                                 location: info.location || '',
-                                memo: info.memo || transcribedText,
+                                memo: info.memo || transcribedText.trim(),
                                 repeatType: info.repeat_type || 'none',
                                 hasNotification: info.has_notification || false,
                                 alarmTimes: info.notification_times || [],
                               };
                               setExtractedTodoInfo(extractedInfo);
-                              toast.success("일정 정보가 자동으로 추출되었습니다.");
+                              toast.success("일정 정보가 추출되었습니다.");
+                              // 직접 작성 탭으로 자동 전환
+                              setActiveMethod(null);
+                            } else {
+                              toast.error("일정 정보 추출에 실패했습니다.");
                             }
                           } catch (error: any) {
                             console.error("일정 정보 추출 실패:", error);
@@ -722,22 +738,45 @@ export function InputMethodModal({ isOpen, onClose, onSelect, initialMethod }: I
                           } finally {
                             setIsExtracting(false);
                           }
-                        } else {
-                          // extractedTodoInfo가 있으면 일정 추가하기
-                          onSelect('text', transcribedText, extractedTodoInfo || undefined);
-                          setTranscribedText("");
-                          setExtractedTodoInfo(null);
-                          setActiveMethod(null);
-                        }
-                      }}
-                      disabled={isExtracting}
-                      className="px-4 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isExtracting ? '일정 정보 추출 중...' : extractedTodoInfo ? '일정 추가하기' : '저장'}
-                    </button>
-                  )}
+                        }}
+                        disabled={isExtracting}
+                        className="px-4 py-2 bg-[#6366F1] text-white rounded-lg hover:bg-[#5558E3] text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isExtracting ? 'AI 추출 중...' : 'AI로 일정 추출'}
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* 직접 작성 탭: AddTodoModal 폼 표시 - 모달 wrapper 없이 */}
+              {(activeMethod === null || activeMethod === undefined) && onSave && (
+                <AddTodoModal
+                  isOpen={true}
+                  onClose={() => {
+                    setActiveMethod(null);
+                  }}
+                  onSave={async (formData: TodoFormData) => {
+                    await onSave(formData);
+                    setActiveMethod(null);
+                  }}
+                  familyMembers={familyMembers}
+                  hideModalWrapper={true}
+                  initialData={extractedTodoInfo ? {
+                    title: extractedTodoInfo.title,
+                    date: extractedTodoInfo.date,
+                    endDate: extractedTodoInfo.endDate,
+                    startTime: extractedTodoInfo.startTime,
+                    endTime: extractedTodoInfo.endTime,
+                    isAllDay: extractedTodoInfo.isAllDay,
+                    category: extractedTodoInfo.category || '기타',
+                    checklistItems: extractedTodoInfo.checklistItems || [],
+                    location: extractedTodoInfo.location,
+                    memo: extractedTodoInfo.memo,
+                    repeatType: extractedTodoInfo.repeatType || 'none',
+                  } : undefined}
+                />
+              )}
 
               {/* Voice UI */}
               {activeMethod === 'voice' && (
@@ -785,18 +824,32 @@ export function InputMethodModal({ isOpen, onClose, onSelect, initialMethod }: I
                       )}
                       {!isRecording && audioUrl && (
                         <>
-                          <button onClick={() => setActiveMethod(null)} className="px-6 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg hover:bg-[#E5E7EB]">
-                            취소
-                          </button>
-                          <button
-                            onClick={() => {
-                              handleRestartRecording();
-                              handleStartRecording();
-                            }}
-                            className="px-6 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] flex items-center gap-2"
-                          >
-                            <Mic size={18} /> 녹음 재시작
-                          </button>
+                          {extractedTodoInfo ? (
+                            <button
+                              onClick={() => {
+                                // 직접 작성 탭으로 전환
+                                setActiveMethod(null);
+                              }}
+                              className="px-6 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] flex items-center gap-2"
+                            >
+                              저장
+                            </button>
+                          ) : (
+                            <>
+                              <button onClick={() => setActiveMethod(null)} className="px-6 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg hover:bg-[#E5E7EB]">
+                                취소
+                              </button>
+                              <button
+                                onClick={() => {
+                                  handleRestartRecording();
+                                  handleStartRecording();
+                                }}
+                                className="px-6 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] flex items-center gap-2"
+                              >
+                                <Mic size={18} /> 녹음 재시작
+                              </button>
+                            </>
+                          )}
                         </>
                       )}
                     </div>
@@ -866,27 +919,43 @@ export function InputMethodModal({ isOpen, onClose, onSelect, initialMethod }: I
                     <div className="flex gap-2 w-full justify-between">
                       {capturedImage ? (
                         <>
-                          <button onClick={handleCapture} disabled className="flex-1 py-2 bg-gray-200 text-gray-400 rounded-lg flex items-center justify-center gap-1 cursor-not-allowed">
-                            <Camera size={18} /> 촬영
-                          </button>
-                          <button
-                            onClick={handleExtractText}
-                            disabled={isUploading || isExtracting || !currentImageBlob}
-                            className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${extractionFailed || !transcribedText
-                              ? 'bg-[#6366F1] text-white hover:bg-[#5558E3]'
-                              : 'bg-[#10B981] text-white hover:bg-[#059669]'
-                              }`}
-                          >
-                            <FileSearch size={18} />
-                            {isUploading || isExtracting
-                              ? '추출 중...'
-                              : extractionFailed || !transcribedText
-                                ? '텍스트 추출'
-                                : '다시 추출'}
-                          </button>
-                          <button onClick={handleRetake} className="flex-1 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg hover:bg-[#E5E7EB] flex items-center justify-center gap-1">
-                            <RotateCcw size={18} /> 다시 선택
-                          </button>
+                          {extractedTodoInfo ? (
+                            <button
+                              onClick={() => {
+                                // 직접 작성 탭으로 전환
+                                setActiveMethod(null);
+                              }}
+                              className="flex-1 py-2 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] flex items-center justify-center gap-1"
+                            >
+                              저장
+                            </button>
+                          ) : (
+                            <>
+                              <button onClick={handleCapture} disabled className="flex-1 py-2 bg-gray-200 text-gray-400 rounded-lg flex items-center justify-center gap-1 cursor-not-allowed">
+                                <Camera size={18} /> 촬영
+                              </button>
+                              <button
+                                onClick={handleExtractText}
+                                disabled={isUploading || isExtracting || !currentImageBlob}
+                                className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${extractionFailed || !transcribedText
+                                  ? 'bg-[#6366F1] text-white hover:bg-[#5558E3]'
+                                  : 'bg-[#10B981] text-white hover:bg-[#059669]'
+                                  }`}
+                              >
+                                <FileSearch size={18} />
+                                {isUploading || isExtracting
+                                  ? '추출 중...'
+                                  : extractionFailed || !transcribedText
+                                    ? '텍스트 추출'
+                                    : '다시 추출'}
+                              </button>
+                            </>
+                          )}
+                          {!extractedTodoInfo && (
+                            <button onClick={handleRetake} className="flex-1 py-2 bg-[#F3F4F6] text-[#6B7280] rounded-lg hover:bg-[#E5E7EB] flex items-center justify-center gap-1">
+                              <RotateCcw size={18} /> 다시 선택
+                            </button>
+                          )}
                         </>
                       ) : (
                         <>

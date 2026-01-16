@@ -663,7 +663,7 @@ class GoogleCalendarService:
                     all_events.extend(page_events)
                     
                     logger.info(f"[LIST_EVENTS] 페이지 {page_count}: {len(page_events)}개 이벤트 가져옴 (전체: {len(all_events)}개)")
-                    
+                
                     # 다음 페이지가 없으면 종료
                     page_token = events_result.get('nextPageToken')
                     if not page_token:

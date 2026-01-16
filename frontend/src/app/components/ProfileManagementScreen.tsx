@@ -39,9 +39,14 @@ export function ProfileManagementScreen({ isOpen, onClose, onProfileUpdate }: Pr
     try {
       // 현재 사용자 정보 로드
       const userResponse = await apiClient.getCurrentUser();
+      let userName = "나";
+      let userEmoji = "🐼";
+      
       if (userResponse && userResponse.data) {
-        setCurrentUserName(userResponse.data.name || "나");
-        setCurrentUserEmoji(userResponse.data.avatar_emoji || "🐼");
+        userName = userResponse.data.name || "나";
+        userEmoji = userResponse.data.avatar_emoji || "🐼";
+        setCurrentUserName(userName);
+        setCurrentUserEmoji(userEmoji);
       }
 
       // 가족 구성원 로드
@@ -72,11 +77,11 @@ export function ProfileManagementScreen({ isOpen, onClose, onProfileUpdate }: Pr
           };
         });
 
-        // "나" 항목을 맨 앞에 추가
+        // "나" 항목을 맨 앞에 추가 (사용자 정보를 직접 사용)
         formattedMembers.unshift({
           id: "me",
-          name: currentUserName || "나",
-          emoji: currentUserEmoji || "🐼",
+          name: userName,
+          emoji: userEmoji,
           color: "rgba(255, 155, 130, 0.6)",
         });
 

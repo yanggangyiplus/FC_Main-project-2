@@ -149,7 +149,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
         {/* Google Calendar Integration */}
         <div className="bg-white p-6">
           <h3 className="font-medium text-[#1F2937] mb-4">캘린더 연동</h3>
-          
+
           {/* Google Calendar 연동이 활성화되지 않았을 때만 연동 토글 표시 */}
           {(!googleCalendarConnected || !googleCalendarEnabled) && (
             <>
@@ -182,7 +182,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
               )}
             </>
           )}
-          
+
           {/* Google Calendar 연동이 활성화되면 바로 세부 옵션만 표시 */}
           {googleCalendarConnected && googleCalendarEnabled && (
             <>
@@ -261,7 +261,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
                 <div className="flex-1">
                   <div className="font-medium text-[#1F2937]">Always Plan 일정 내보내기</div>
                   <div className="text-sm text-[#6B7280] mt-1">
-                    토글을 켜면 웹앱의 모든 기존 일정을 Google Calendar로 내보냅니다
+                    앱의 일정을 Google Calendar에 표시
                   </div>
                 </div>
                 <button
@@ -272,18 +272,18 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
                       console.log("[토글] Always Plan 일정 내보내기 토글 변경 시작...");
                       const response = await apiClient.toggleCalendarExport();
                       console.log("[토글] 응답:", response.data);
-                      
-                      const newState = response.data?.export_enabled !== undefined 
-                        ? response.data.export_enabled 
-                        : response.data?.success 
+
+                      const newState = response.data?.export_enabled !== undefined
+                        ? response.data.export_enabled
+                        : response.data?.success
                           ? (response.data.export_enabled ?? false)
                           : false;
-                      
+
                       console.log("[토글] 새 상태:", newState, "현재 상태:", googleCalendarExportEnabled);
-                      
+
                       // 상태 업데이트
                       setGoogleCalendarExportEnabled(newState);
-                      
+
                       // 상태 확인을 위해 다시 로드
                       await checkCalendarStatus();
 
@@ -295,7 +295,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
                         } else {
                           toast.success("Always Plan 일정 내보내기가 비활성화되었습니다. (동기화 후 저장한 일정은 유지됩니다)");
                         }
-                        
+
                         // 일정 목록 새로고침 (동기화 해제 반영)
                         if (onRefreshTodos) {
                           await onRefreshTodos();
@@ -304,12 +304,12 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
                         // 토글을 켤 때: 바로 동기화 실행
                         const syncedCount = response.data?.synced_count || 0;
                         const matchedCount = response.data?.matched_count || 0;
-                        
+
                         // 일정 목록 새로고침 (동기화된 일정 반영)
                         if (onRefreshTodos) {
                           await onRefreshTodos();
                         }
-                        
+
                         if (syncedCount > 0 || matchedCount > 0) {
                           toast.success(`Always Plan 일정 내보내기가 활성화되었습니다. ${syncedCount}개 일정 동기화, ${matchedCount}개 일정 매칭됨`);
                         } else {
@@ -342,11 +342,27 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
                     setIsSyncLoading(true);
                     try {
                       toast.info("Google Calendar 동기화 중...");
-                      if (onRefreshCalendar) {
-                        await onRefreshCalendar(true);
-                        toast.success("동기화가 완료되었습니다.");
+                      // 동기화 API 직접 호출
+                      const response = await apiClient.syncAllTodosToGoogleCalendar();
+                      
+                      if (response.data) {
+                        const importedCount = response.data.imported_count || 0;
+                        const syncedCount = response.data.synced_count || 0;
+                        const matchedCount = response.data.matched_count || 0;
+                        
+                        // 일정 목록 새로고침
+                        if (onRefreshTodos) {
+                          await onRefreshTodos();
+                        }
+                        
+                        // 성공 메시지
+                        if (importedCount > 0 || syncedCount > 0 || matchedCount > 0) {
+                          toast.success(`동기화 완료! ${importedCount > 0 ? `가져옴: ${importedCount}개` : ''} ${syncedCount > 0 ? `동기화: ${syncedCount}개` : ''} ${matchedCount > 0 ? `매칭: ${matchedCount}개` : ''}`);
+                        } else {
+                          toast.success("동기화가 완료되었습니다.");
+                        }
                       } else {
-                        toast.error("동기화 함수를 사용할 수 없습니다.");
+                        toast.success("동기화가 완료되었습니다.");
                       }
                     } catch (error: any) {
                       console.error("[Google Calendar] 동기화 실패:", error);
@@ -381,7 +397,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
             </div>
             <div className="flex justify-between items-center py-3 border-b border-[#F3F4F6]">
               <span className="text-[#6B7280]">최근 업데이트</span>
-              <span className="text-[#1F2937]">2024.01.05</span>
+              <span className="text-[#1F2937]">2026.01.15</span>
             </div>
           </div>
         </div>

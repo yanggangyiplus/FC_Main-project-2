@@ -1293,28 +1293,30 @@ async def toggle_calendar_import(
     deleted_count = 0
     
     if new_state == "false":
-        # 토글을 끌 때: Google Calendar에서 가져온 일정들(source='google_calendar')을 삭제
-        logger.info("[TOGGLE_IMPORT] 토글 꺼짐 - Google Calendar에서 가져온 일정 삭제 시작")
+        # 토글을 끌 때: 웹앱에서만 Google Calendar에서 가져온 일정들을 숨김 (소프트 삭제)
+        # 중요: Google Calendar의 실제 이벤트는 삭제하지 않음 (Google Calendar에 그대로 남아있어야 함)
+        logger.info("[TOGGLE_IMPORT] 토글 꺼짐 - 웹앱에서 Google Calendar 일정 숨김 시작 (Google Calendar의 실제 이벤트는 삭제하지 않음)")
         
-        # source='google_calendar'인 일정들만 조회 (bulk_synced와 관계없이 모두 삭제)
+        # source='google_calendar'인 일정들만 조회 (웹앱에서만 숨김 처리)
         todos_to_delete = db.query(Todo).filter(
             Todo.user_id == current_user.id,
             Todo.deleted_at.is_(None),
             Todo.source == 'google_calendar'  # Google Calendar에서 가져온 일정만
         ).all()
         
-        logger.info(f"[TOGGLE_IMPORT] 삭제할 일정: {len(todos_to_delete)}개")
+        logger.info(f"[TOGGLE_IMPORT] 웹앱에서 숨길 일정: {len(todos_to_delete)}개 (Google Calendar의 실제 이벤트는 삭제하지 않음)")
         
         for todo in todos_to_delete:
             try:
-                # 소프트 삭제 (deleted_at 설정)
+                # 웹앱에서만 소프트 삭제 (deleted_at 설정)
+                # Google Calendar API를 호출하지 않으므로 Google Calendar의 실제 이벤트는 유지됨
                 todo.deleted_at = datetime.utcnow()
                 deleted_count += 1
-                logger.info(f"[TOGGLE_IMPORT] 일정 삭제: todo_id={todo.id}, title={todo.title}")
+                logger.info(f"[TOGGLE_IMPORT] 웹앱에서 일정 숨김 (Google Calendar 이벤트는 유지): todo_id={todo.id}, title={todo.title}, google_calendar_event_id={todo.google_calendar_event_id}")
             except Exception as e:
-                logger.error(f"[TOGGLE_IMPORT] 일정 삭제 실패: todo_id={todo.id}, error={e}")
+                logger.error(f"[TOGGLE_IMPORT] 일정 숨김 실패: todo_id={todo.id}, error={e}")
         
-        logger.info(f"[TOGGLE_IMPORT] 총 {deleted_count}개 일정 삭제 완료")
+        logger.info(f"[TOGGLE_IMPORT] 총 {deleted_count}개 일정을 웹앱에서 숨김 완료 (Google Calendar의 실제 이벤트는 삭제하지 않았음)")
     
     db.commit()
     

@@ -30,6 +30,7 @@ interface AddTodoModalProps {
   onSave: (todo: TodoFormData) => Promise<void> | void;
   onOpenInputMethod?: (method: 'voice' | 'camera') => void;
   familyMembers?: FamilyMember[];
+  hideModalWrapper?: boolean; // 모달 wrapper 숨기기 (InputMethodModal 안에서 사용 시)
   initialData?: {
     id?: string;
     title?: string;
@@ -95,7 +96,7 @@ const formatLocalDate = (date: Date): string => {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 };
 
-export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInputMethod, familyMembers = [] }: AddTodoModalProps) {
+export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInputMethod, familyMembers = [], hideModalWrapper = false }: AddTodoModalProps) {
   // 초기값 계산: 하루종일이면 시간 필드를 빈 문자열로 설정
   const isAllDayInitial = initialData?.isAllDay || false;
   const startTimeInitial = isAllDayInitial ? '' : (initialData?.startTime || initialData?.time || '09:00');
@@ -549,42 +550,13 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
     }
   };
 
-  return (
+  const formContent = (
     <>
-      {/* 배경 오버레이 */}
-      <div
-        className="fixed inset-0 bg-black/30 z-40 transition-opacity duration-200"
-        onClick={onClose}
-      />
-
-      {/* 팝업 컨테이너 */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-        <div
-          className="bg-white rounded-2xl shadow-2xl max-w-[400px] w-full max-h-[85vh] flex flex-col pointer-events-auto transform transition-all duration-200 overflow-hidden"
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            animation: 'slideUp 0.2s ease-out'
-          }}
-        >
-          {/* Header */}
-          <div className="bg-gradient-to-r from-[#FF9B82] to-[#FFB499] px-6 py-4 text-white rounded-t-2xl relative">
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold text-white">일정 추가</h2>
-            </div>
-            {/* 우측 상단 닫기 버튼 */}
-            <button
-              onClick={onClose}
-              className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
-              aria-label="닫기"
-            >
-              <X size={16} className="text-white" />
-            </button>
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto px-6 py-6 bg-[#F5F5F5]">
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto px-6 py-6 bg-[#F5F5F5]">
             <div className="space-y-6">
-              {/* 마이크/카메라/문서 버튼 - 상단에 배치 */}
+              {/* 마이크/카메라/문서 버튼 - 상단에 배치 (hideModalWrapper가 true일 때는 숨김) */}
+              {!hideModalWrapper && (
               <div className="flex justify-between items-center px-6 mb-6">
                 <button
                   type="button"
@@ -624,6 +596,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                   <FileText size={24} className="text-white" />
                 </button>
               </div>
+              )}
 
               {/* 담당 프로필 선택 */}
               {familyMembers.length > 0 && (
@@ -1173,6 +1146,47 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
               {isExtracting ? '추출 중...' : '저장'}
             </button>
           </div>
+    </>
+  );
+
+  // 모달 wrapper 없이 폼만 렌더링 (InputMethodModal 안에서 사용 시)
+  if (hideModalWrapper) {
+    return formContent;
+  }
+
+  // 기본 모달 구조로 렌더링
+  return (
+    <>
+      {/* 배경 오버레이 */}
+      <div
+        className="fixed inset-0 bg-black/30 z-40 transition-opacity duration-200"
+        onClick={onClose}
+      />
+
+      {/* 팝업 컨테이너 */}
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div
+          className="bg-white rounded-2xl shadow-2xl max-w-[400px] w-full max-h-[85vh] flex flex-col pointer-events-auto transform transition-all duration-200 overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            animation: 'slideUp 0.2s ease-out'
+          }}
+        >
+          {/* Header */}
+          <div className="bg-gradient-to-r from-[#FF9B82] to-[#FFB499] px-6 py-4 text-white rounded-t-2xl relative">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-white">일정 추가</h2>
+            </div>
+            {/* 우측 상단 닫기 버튼 */}
+            <button
+              onClick={onClose}
+              className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
+              aria-label="닫기"
+            >
+              <X size={16} className="text-white" />
+            </button>
+          </div>
+          {formContent}
         </div>
       </div>
     </>

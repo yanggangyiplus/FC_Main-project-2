@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Bell,
   Pencil,
@@ -403,45 +403,84 @@ export function CalendarHomeScreen() {
       console.log('Todos loaded:', response.data);
 
       if (response.data && Array.isArray(response.data)) {
-        const formattedTodos = response.data.map((todo: any) => ({
-          id: todo.id,
-          title: todo.title,
-          description: todo.description,
-          time: todo.start_time ? `${todo.start_time}` : undefined,
-          rule: todo.category,
-          completed: todo.status === 'completed',
-          draft: todo.status === 'draft',
-          overdue: todo.status === 'overdue',
-          status: todo.status,
-          priority: todo.priority,
-          date: todo.date,
-          endDate: todo.end_date,
-          startTime: todo.start_time,
-          endTime: todo.end_time,
-          isAllDay: todo.all_day,
-          duration: todo.duration,
-          location: todo.location,
-          memo: todo.memo,
-          category: todo.category,
-          hasNotification: todo.has_notification,
-          notificationTimes: todo.notification_times || [],
-          notificationReminders: todo.notification_reminders || [],
-          repeatType: todo.repeat_type || "none",
-          repeatEndDate: todo.repeat_end_date,
-          repeatPattern: todo.repeat_pattern,
-          checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
-          memberId: todo.member_id,
-          assignedMemberIds: Array.isArray(todo.family_member_ids)
-            ? todo.family_member_ids
-            : (Array.isArray(todo.assigned_member_ids)
-              ? todo.assigned_member_ids
-              : (todo.family_member_ids ? [todo.family_member_ids] : (todo.assigned_member_ids ? [todo.assigned_member_ids] : []))),
-          isRoutine: todo.is_routine || false,
-          source: todo.source || 'always_plan',
-          googleCalendarEventId: todo.google_calendar_event_id || undefined,
-          bulkSynced: todo.bulk_synced || false,
-          todoGroupId: todo.todo_group_id || undefined,
-        }));
+        const formattedTodos = response.data.map((todo: any) => {
+          // duration 계산: start_time과 end_time으로부터 계산
+          let calculatedDuration = 60; // 기본값
+          if (!todo.all_day && todo.start_time && todo.end_time) {
+            try {
+              const startTimeStr = typeof todo.start_time === 'string' ? todo.start_time : todo.start_time;
+              const endTimeStr = typeof todo.end_time === 'string' ? todo.end_time : todo.end_time;
+
+              // "HH:MM" 형식 파싱
+              const [startHours, startMinutes] = startTimeStr.split(':').map((s: string) => {
+                const num = parseInt(s, 10);
+                return isNaN(num) ? 0 : num;
+              });
+              const [endHours, endMinutes] = endTimeStr.split(':').map((s: string) => {
+                const num = parseInt(s, 10);
+                return isNaN(num) ? 0 : num;
+              });
+
+              const startTotal = startHours * 60 + startMinutes;
+              const endTotal = endHours * 60 + endMinutes;
+              calculatedDuration = endTotal - startTotal;
+
+              if (calculatedDuration <= 0 || isNaN(calculatedDuration)) {
+                calculatedDuration = 60; // 최소 1시간
+              }
+            } catch (e) {
+              console.error('Duration 계산 오류:', e, todo);
+              calculatedDuration = 60;
+            }
+          } else if (todo.all_day) {
+            calculatedDuration = 24 * 60; // 하루종일 일정은 24시간
+          }
+
+          // todo.duration이 있으면 우선 사용, 없으면 계산된 값 사용
+          const finalDuration = (todo.duration && !isNaN(todo.duration) && todo.duration > 0)
+            ? todo.duration
+            : calculatedDuration;
+
+          return {
+            id: todo.id,
+            title: todo.title,
+            description: todo.description,
+            time: todo.start_time ? `${todo.start_time}` : undefined,
+            rule: todo.category,
+            completed: todo.status === 'completed',
+            draft: todo.status === 'draft',
+            overdue: todo.status === 'overdue',
+            status: todo.status,
+            priority: todo.priority,
+            date: todo.date,
+            endDate: todo.end_date,
+            startTime: todo.start_time,
+            endTime: todo.end_time,
+            isAllDay: todo.all_day,
+            duration: finalDuration,
+            location: todo.location,
+            memo: todo.memo,
+            category: todo.category,
+            hasNotification: todo.has_notification,
+            notificationTimes: todo.notification_times || [],
+            notificationReminders: todo.notification_reminders || [],
+            repeatType: todo.repeat_type || "none",
+            repeatEndDate: todo.repeat_end_date,
+            repeatPattern: todo.repeat_pattern,
+            checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
+            memberId: todo.member_id,
+            assignedMemberIds: Array.isArray(todo.family_member_ids)
+              ? todo.family_member_ids
+              : (Array.isArray(todo.assigned_member_ids)
+                ? todo.assigned_member_ids
+                : (todo.family_member_ids ? [todo.family_member_ids] : (todo.assigned_member_ids ? [todo.assigned_member_ids] : []))),
+            isRoutine: todo.is_routine || false,
+            source: todo.source || 'always_plan',
+            googleCalendarEventId: todo.google_calendar_event_id || undefined,
+            bulkSynced: todo.bulk_synced || false,
+            todoGroupId: todo.todo_group_id || undefined,
+          };
+        });
         setTodos(formattedTodos);
         console.log('[할 일 로드] 완료:', formattedTodos.length, '개');
       }
@@ -490,7 +529,7 @@ export function CalendarHomeScreen() {
       setSyncStatus('success');
       setSyncError(null);
       setLastSyncTime(new Date());
-      
+
       // 동기화 결과 메시지 표시
       if (response.data?.message) {
         console.log('[동기화] 결과:', response.data.message);
@@ -501,10 +540,10 @@ export function CalendarHomeScreen() {
           skipped: response.data.skipped_counts
         });
       }
-      
+
       // 전체 응답 데이터 로깅 (디버깅용)
       console.log('[동기화] 전체 응답 데이터:', response.data);
-      
+
       // 문제 진단: 왜 일정이 저장되지 않았는지 확인
       if (response.data.imported_count === 0) {
         console.warn('[동기화] ⚠️ Google Calendar 이벤트가 저장되지 않았습니다.');
@@ -516,7 +555,7 @@ export function CalendarHomeScreen() {
         console.log('  - Always Plan 이벤트:', response.data.skipped_counts?.always_plan_events || 0, '개 (이것들은 건너뛰는 것이 정상)');
         console.log('  - 이미 저장된 이벤트:', response.data.skipped_counts?.already_saved || 0, '개');
         console.log('  - 저장 실패한 이벤트 수:', response.data.imported_failed_count);
-        
+
         // 실패한 이벤트 상세 정보 출력
         if (response.data.failed_events_info && response.data.failed_events_info.length > 0) {
           console.error('[동기화] ❌ 저장 실패한 이벤트 상세 정보:');
@@ -635,8 +674,112 @@ export function CalendarHomeScreen() {
   // Todo 관련 함수들 (임시 구현)
   const handleTodoUpdate = async (todoId: string, updates: any) => {
     try {
-      await apiClient.updateTodo(todoId, updates);
-      setTodos(prev => prev.map(t => t.id === todoId ? { ...t, ...updates } : t));
+      // time과 duration을 start_time과 end_time으로 변환
+      const apiUpdates: any = { ...updates };
+
+      if (updates.time !== undefined || updates.duration !== undefined) {
+        const todo = todos.find(t => t.id === todoId);
+        if (todo) {
+          // 업데이트할 시간과 duration
+          const newTime = updates.time !== undefined ? updates.time : todo.time;
+          const newDuration = updates.duration !== undefined ? updates.duration : todo.duration;
+
+          if (newTime && !isNaN(newDuration) && newDuration > 0) {
+            try {
+              // "HH:MM" 형식 파싱
+              const [hours, minutes] = newTime.split(':').map((s: string) => {
+                const num = parseInt(s, 10);
+                return isNaN(num) ? 0 : num;
+              });
+
+              const startTotalMinutes = hours * 60 + minutes;
+              const endTotalMinutes = startTotalMinutes + newDuration;
+
+              const endHours = Math.floor(endTotalMinutes / 60) % 24;
+              const endMins = endTotalMinutes % 60;
+
+              apiUpdates.start_time = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+              apiUpdates.end_time = `${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}`;
+
+              // time과 duration 제거 (백엔드에서는 start_time과 end_time만 사용)
+              delete apiUpdates.time;
+              delete apiUpdates.duration;
+            } catch (e) {
+              console.error('시간 변환 오류:', e);
+            }
+          }
+        }
+      }
+
+      const response = await apiClient.updateTodo(todoId, apiUpdates);
+
+      // 응답 데이터를 프론트엔드 형식으로 변환
+      if (response.data) {
+        const updatedTodo = {
+          id: response.data.id,
+          title: response.data.title,
+          description: response.data.description || response.data.memo || '',
+          time: response.data.start_time ? `${response.data.start_time}` : undefined,
+          rule: response.data.category || '기타',
+          completed: response.data.status === 'completed',
+          draft: response.data.status === 'draft',
+          overdue: response.data.status === 'overdue',
+          status: response.data.status || 'pending',
+          priority: response.data.priority,
+          date: response.data.date,
+          endDate: response.data.end_date,
+          startTime: response.data.start_time || undefined,
+          endTime: response.data.end_time || undefined,
+          isAllDay: response.data.all_day === true || response.data.all_day === 'true',
+          duration: (() => {
+            if (response.data.start_time && response.data.end_time) {
+              try {
+                const [startHours, startMinutes] = response.data.start_time.split(':').map((s: string) => {
+                  const num = parseInt(s, 10);
+                  return isNaN(num) ? 0 : num;
+                });
+                const [endHours, endMinutes] = response.data.end_time.split(':').map((s: string) => {
+                  const num = parseInt(s, 10);
+                  return isNaN(num) ? 0 : num;
+                });
+                const startTotal = startHours * 60 + startMinutes;
+                const endTotal = endHours * 60 + endMinutes;
+                const calcDuration = endTotal - startTotal;
+                return (calcDuration > 0 && !isNaN(calcDuration)) ? calcDuration : 60;
+              } catch (e) {
+                return 60;
+              }
+            }
+            return response.data.duration || 60;
+          })(),
+          location: response.data.location,
+          memo: response.data.memo || response.data.description || '',
+          category: response.data.category || '기타',
+          hasNotification: response.data.has_notification || false,
+          notificationTimes: response.data.notification_times || [],
+          notificationReminders: response.data.notification_reminders ? (typeof response.data.notification_reminders === 'string' ? JSON.parse(response.data.notification_reminders) : response.data.notification_reminders) : [],
+          repeatType: response.data.repeat_type || 'none',
+          repeatEndDate: response.data.repeat_end_date,
+          repeatPattern: response.data.repeat_pattern ? (typeof response.data.repeat_pattern === 'string' ? JSON.parse(response.data.repeat_pattern) : response.data.repeat_pattern) : undefined,
+          checklistItems: response.data.checklist_items?.map((item: any) => item.text || item) || [],
+          memberId: response.data.member_id,
+          assignedMemberIds: Array.isArray(response.data.family_member_ids)
+            ? response.data.family_member_ids
+            : (Array.isArray(response.data.assigned_member_ids)
+              ? response.data.assigned_member_ids
+              : (response.data.family_member_ids ? [response.data.family_member_ids] : (response.data.assigned_member_ids ? [response.data.assigned_member_ids] : []))),
+          isRoutine: response.data.is_routine || false,
+          source: response.data.source || 'always_plan',
+          googleCalendarEventId: response.data.google_calendar_event_id || undefined,
+          bulkSynced: response.data.bulk_synced || false,
+          todoGroupId: response.data.todo_group_id || undefined,
+        };
+
+        setTodos(prev => prev.map(t => t.id === todoId ? updatedTodo : t));
+      } else {
+        // 응답 데이터가 없으면 기존 방식으로 fallback
+        setTodos(prev => prev.map(t => t.id === todoId ? { ...t, ...updates } : t));
+      }
     } catch (error) {
       console.error('Failed to update todo:', error);
     }
@@ -709,14 +852,14 @@ export function CalendarHomeScreen() {
         status: 'pending',
         has_notification: formData.hasNotification || false,
         notification_reminders: formData.hasNotification && formData.notificationReminders && formData.notificationReminders.length > 0
-          ? JSON.stringify(formData.notificationReminders.map((r: any) => ({ value: r.value, unit: r.unit })))
+          ? formData.notificationReminders.map((r: any) => ({ value: r.value, unit: r.unit }))
           : undefined,
         repeat_type: formData.repeatType || "none",
         repeat_end_date: formData.repeatEndDate || undefined,
-        repeat_pattern: formData.repeatPattern ? JSON.stringify(formData.repeatPattern) : undefined,
+        repeat_pattern: formData.repeatPattern || undefined,
         checklist_items: formData.checklistItems && formData.checklistItems.length > 0
-          ? formData.checklistItems.filter((item: string) => item.trim()).map((item: string) => ({ text: item }))
-          : [],
+          ? formData.checklistItems.filter((item: string) => item.trim())
+          : undefined,
         // 수정 모드에서는 항상 family_member_ids를 보내야 함 (백엔드가 None이 아닐 때만 업데이트하기 때문)
         // 생성 모드에서도 빈 배열이라도 보내야 함
         family_member_ids: assignedMemberIdsArray,
@@ -827,12 +970,16 @@ export function CalendarHomeScreen() {
         };
 
         console.log('[일정 추가] 새 일정:', newTodo);
+        // 일정을 즉시 상태에 추가하고, 그 다음 전체 목록 새로고침
         setTodos(prev => {
           const updated = [...prev, newTodo];
-          console.log('[일정 추가] 업데이트된 todos:', updated.length, '개');
+          console.log('[일정 추가] 로컬 상태 업데이트 완료:', updated.length, '개');
           return updated;
         });
+        // 전체 목록 새로고침 (서버와 동기화)
+        await loadTodos();
         setShowAddTodoModal(false);
+        setExtractedTodoInfo(null); // AI 추출 정보 초기화
         toast.success("일정이 추가되었습니다.");
       }
     } catch (error) {
@@ -842,11 +989,18 @@ export function CalendarHomeScreen() {
   };
 
   const handleInputMethodSelect = (method: 'voice' | 'camera' | 'text', _extractedText?: string, _todoInfo?: any) => {
+    // STT/OCR에서 직접 작성 탭으로 전환할 때 extractedTodoInfo 설정
+    // 이 함수는 InputMethodModal 내부에서 탭 전환 시 호출되지 않음
+    // 직접 작성 탭으로 전환은 InputMethodModal 내부에서 setActiveMethod(null)로 처리됨
     if (method === 'text') {
-      // 직접 작성 선택 시 AddTodoModal 열기 (기본 양식으로 표시)
-      // extractedTodoInfo를 null로 설정하여 전체 양식이 보이도록 함
-      setExtractedTodoInfo(null);
-      setEditingTodoId(null); // 수정 모드가 아닌 추가 모드로 설정
+      // 직접 작성 선택 시 AddTodoModal 열기
+      if (_todoInfo) {
+        console.log('[일정 추가] 추출된 일정 정보:', _todoInfo);
+        setExtractedTodoInfo(_todoInfo);
+      } else {
+        setExtractedTodoInfo(null);
+      }
+      setEditingTodoId(null);
       setShowInputMethodModal(false);
       setShowAddTodoModal(true);
     } else {
@@ -1209,43 +1363,104 @@ export function CalendarHomeScreen() {
             </div>
           )}
         </div>
-        <button className="p-2 flex-shrink-0 relative" onClick={() => setShowNotificationPanel(true)}>
+        <button
+          className="p-2 flex-shrink-0 relative"
+          onClick={() => {
+            console.log("[알림 버튼] 클릭됨, showNotificationPanel 설정:", true);
+            setShowNotificationPanel(true);
+          }}
+        >
           <Bell size={20} className="text-[#6B7280]" />
-          {/* 알림 상태 점 */}
-          {(() => {
+          {/* 알림 상태 점 - todos와 읽음 상태 변경 시 즉시 업데이트 */}
+          {useMemo(() => {
             const now = new Date();
-            const upcomingNotifications = todos.filter(todo =>
-              !todo.completed &&
-              todo.date &&
-              new Date(todo.date) > now &&
-              todo.hasNotification &&
-              (todo.notificationReminders?.some((r: any) => r.value > 0) || todo.notificationTimes?.length > 0)
-            );
-            const pastNotifications = todos.filter(todo =>
-              !todo.completed &&
-              todo.date &&
-              new Date(todo.date) < now &&
-              todo.hasNotification
-            );
+            const currentDateTime = now.getTime();
 
-            const unreadUpcomingNotifications = upcomingNotifications.filter(todo => !readUpcomingNotificationIds.has(todo.id));
-            const unreadPastNotifications = pastNotifications.filter(todo => !readPastNotificationIds.has(todo.id));
+            // 알림이 설정된 일정만 필터링
+            const notifications = todos.filter(todo => {
+              if (todo.completed || !todo.date || !todo.hasNotification) return false;
+              const notificationReminders = todo.notificationReminders || todo.notification_reminders || [];
+              return Array.isArray(notificationReminders) && notificationReminders.length > 0;
+            });
+
+            // 알림 시간 기준으로 지나간 알림과 예정된 알림 분리 (NotificationPanel과 동일한 로직)
+            const past: string[] = [];
+            const upcoming: string[] = [];
+
+            notifications.forEach(todo => {
+              if (!todo.date) return;
+
+              const reminders = todo.notificationReminders || todo.notification_reminders || [];
+              if (reminders.length === 0) return;
+
+              const todoDate = todo.date;
+              const todoTime = todo.time || todo.startTime || "00:00";
+              const [hours, minutes] = todoTime.split(':').map(Number);
+
+              // 일정 날짜/시간 계산
+              const todoDateTime = new Date(todoDate);
+              todoDateTime.setHours(hours, minutes, 0, 0);
+
+              // 각 알림 리마인더에 대해 알림 시간 계산
+              reminders.forEach((reminder: { value: number; unit: string }) => {
+                const value = reminder.value || 30;
+                const unit = reminder.unit || 'minutes';
+
+                // 알림 시간 계산
+                let notificationDateTime = new Date(todoDateTime);
+                if (unit === 'minutes') {
+                  notificationDateTime.setMinutes(notificationDateTime.getMinutes() - value);
+                } else if (unit === 'hours') {
+                  notificationDateTime.setHours(notificationDateTime.getHours() - value);
+                } else if (unit === 'days') {
+                  notificationDateTime.setDate(notificationDateTime.getDate() - value);
+                } else if (unit === 'weeks') {
+                  notificationDateTime.setDate(notificationDateTime.getDate() - (value * 7));
+                }
+
+                // 알림 시간 기준으로 분류
+                if (notificationDateTime.getTime() < currentDateTime) {
+                  if (!past.includes(todo.id)) past.push(todo.id);
+                } else {
+                  if (!upcoming.includes(todo.id)) upcoming.push(todo.id);
+                }
+              });
+            });
+
+            const pastNotifications = notifications.filter(todo => past.includes(todo.id));
+            const upcomingNotifications = notifications.filter(todo => upcoming.includes(todo.id));
+
+            // 읽지 않은 알림만 필터링 (todo.id를 문자열로 변환하여 비교)
+            const unreadUpcomingNotifications = upcomingNotifications.filter(todo => {
+              const todoId = String(todo.id);
+              const isRead = readUpcomingNotificationIds.has(todoId);
+              return !isRead;
+            });
+            const unreadPastNotifications = pastNotifications.filter(todo => {
+              const todoId = String(todo.id);
+              const isRead = readPastNotificationIds.has(todoId);
+              return !isRead;
+            });
 
             const hasNewUpcoming = unreadUpcomingNotifications.length > 0;
             const hasUnreadPast = unreadPastNotifications.length > 0;
 
-            if (!hasNewUpcoming && !hasUnreadPast) return null;
-
-            // 디버깅: 실제 렌더링 여부 확인
+            // 디버깅: 실제 계산 결과 확인
             if (hasNewUpcoming || hasUnreadPast) {
-              console.log("[알림 점] 렌더링:", {
-                hasNewUpcoming,
-                hasUnreadPast,
-                newUpcomingCount: unreadUpcomingNotifications.length,
+              console.log("[알림 점 계산]", {
+                upcomingCount: upcomingNotifications.length,
+                pastCount: pastNotifications.length,
+                unreadUpcomingCount: unreadUpcomingNotifications.length,
                 unreadPastCount: unreadPastNotifications.length,
-                currentTime: `${currentDate} ${currentTime}`
+                readUpcomingIds: Array.from(readUpcomingNotificationIds),
+                readPastIds: Array.from(readPastNotificationIds),
+                hasNewUpcoming,
+                hasUnreadPast
               });
             }
+
+            // 둘 다 없으면 null 반환
+            if (!hasNewUpcoming && !hasUnreadPast) return null;
 
             return (
               <>
@@ -1271,7 +1486,7 @@ export function CalendarHomeScreen() {
                 )}
               </>
             );
-          })()}
+          }, [todos, readUpcomingNotificationIds, readPastNotificationIds])}
         </button>
       </div>
 
@@ -2074,10 +2289,11 @@ export function CalendarHomeScreen() {
         readUpcomingNotificationIds={readUpcomingNotificationIds}
         readPastNotificationIds={readPastNotificationIds}
         onMarkAsRead={(todoId, notificationType) => {
+          const todoIdStr = String(todoId);
           if (notificationType === 'upcoming') {
-            setReadUpcomingNotificationIds(prev => new Set([...prev, todoId]));
+            setReadUpcomingNotificationIds(prev => new Set([...prev, todoIdStr]));
           } else {
-            setReadPastNotificationIds(prev => new Set([...prev, todoId]));
+            setReadPastNotificationIds(prev => new Set([...prev, todoIdStr]));
           }
         }}
         onTodoClick={(todoId) => {
@@ -2115,6 +2331,13 @@ export function CalendarHomeScreen() {
           }}
           onSelect={handleInputMethodSelect}
           initialMethod={inputMethodInitialMode}
+          familyMembers={familyMembers}
+          onSave={async (formData: any) => {
+            await handleTodoSubmit(formData);
+            setShowInputMethodModal(false);
+            setExtractedTodoInfo(null);
+            setInputMethodInitialMode('voice');
+          }}
         />
       )}
 
