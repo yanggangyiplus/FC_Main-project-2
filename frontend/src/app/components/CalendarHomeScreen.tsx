@@ -1367,6 +1367,7 @@ export function CalendarHomeScreen() {
           className="p-2 flex-shrink-0 relative"
           onClick={() => {
             console.log("[알림 버튼] 클릭됨, showNotificationPanel 설정:", true);
+            setShowTodoDetailFromNotification(false); // 일정 상세 화면 닫기
             setShowNotificationPanel(true);
           }}
         >
@@ -2618,20 +2619,28 @@ export function CalendarHomeScreen() {
 
         return (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden">
               {/* Header */}
-              <div className="flex items-center justify-between p-6 border-b border-[#F3F4F6]">
-                <h2 className="text-lg font-bold text-[#1F2937]">일정 상세</h2>
+              <div className="bg-gradient-to-r from-[#FF9B82] to-[#FFB499] px-6 py-4 text-white rounded-t-2xl flex items-center justify-between flex-shrink-0 relative">
+                <h2 className="text-lg font-semibold text-white">일정 상세</h2>
                 <button
-                  onClick={() => setSelectedTodoForDetail(null)}
-                  className="p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
+                  onClick={() => {
+                    // 알림에서 열었을 경우 알림 팝업으로 돌아가기
+                    if (showTodoDetailFromNotification) {
+                      setShowTodoDetailFromNotification(false);
+                      setSelectedTodoForDetail(null);
+                    } else {
+                      setSelectedTodoForDetail(null);
+                    }
+                  }}
+                  className="p-2 hover:bg-white/20 rounded-full transition-colors"
                 >
-                  <X size={20} className="text-[#6B7280]" />
+                  <X size={20} className="text-white" />
                 </button>
               </div>
 
               {/* Content */}
-              <div className="p-6 space-y-4">
+              <div className="flex-1 overflow-y-auto bg-[#FAFAFA] p-6 space-y-4">
                 {/* Title */}
                 <div className="flex items-center gap-3">
                   <div
@@ -2897,30 +2906,31 @@ export function CalendarHomeScreen() {
                   </label>
                 </div>
 
-                {/* Actions */}
-                <div className="pt-4 border-t border-[#F3F4F6] flex gap-3">
-                  <button
-                    onClick={() => {
-                      setEditingTodoId(todo.id);
-                      setShowAddTodoModal(true);
+              </div>
+
+              {/* Footer - Actions */}
+              <div className="px-6 py-4 border-t border-[#F3F4F6] bg-white flex-shrink-0 flex gap-3">
+                <button
+                  onClick={() => {
+                    setEditingTodoId(todo.id);
+                    setShowAddTodoModal(true);
+                    setSelectedTodoForDetail(null);
+                  }}
+                  className="flex-1 py-3 px-4 bg-[#FF9B82] text-white rounded-lg font-medium hover:bg-[#FF8A6D] transition-colors"
+                >
+                  수정
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm('정말로 이 일정을 삭제하시겠습니까?')) {
+                      handleTodoDelete(todo.id);
                       setSelectedTodoForDetail(null);
-                    }}
-                    className="flex-1 py-3 px-4 bg-[#FF9B82] text-white rounded-lg font-medium hover:bg-[#FF8A6D] transition-colors"
-                  >
-                    수정
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (window.confirm('정말로 이 일정을 삭제하시겠습니까?')) {
-                        handleTodoDelete(todo.id);
-                        setSelectedTodoForDetail(null);
-                      }
-                    }}
-                    className="flex-1 py-3 px-4 bg-[#FEF2F2] text-[#EF4444] rounded-lg font-medium hover:bg-[#FEE2E2] transition-colors"
-                  >
-                    삭제
-                  </button>
-                </div>
+                    }
+                  }}
+                  className="flex-1 py-3 px-4 bg-[#FEF2F2] text-[#EF4444] rounded-lg font-medium hover:bg-[#FEE2E2] transition-colors"
+                >
+                  삭제
+                </button>
               </div>
             </div>
           </div>
