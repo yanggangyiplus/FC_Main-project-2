@@ -483,13 +483,54 @@ export function CalendarHomeScreen() {
     }
 
     setSyncStatus('syncing');
+    console.log('[동기화] Google Calendar 동기화 시작...', force ? '(강제 실행)' : '');
     try {
-      await apiClient.syncGoogleCalendar();
+      const response = await apiClient.syncGoogleCalendar();
+      console.log('[동기화] Google Calendar 동기화 완료:', response.data);
       setSyncStatus('success');
       setSyncError(null);
       setLastSyncTime(new Date());
+      
+      // 동기화 결과 메시지 표시
+      if (response.data?.message) {
+        console.log('[동기화] 결과:', response.data.message);
+        console.log('[동기화] 저장 통계:', {
+          imported: response.data.imported_count,
+          synced: response.data.synced_count,
+          matched: response.data.matched_count,
+          skipped: response.data.skipped_counts
+        });
+      }
+      
+      // 전체 응답 데이터 로깅 (디버깅용)
+      console.log('[동기화] 전체 응답 데이터:', response.data);
+      
+      // 문제 진단: 왜 일정이 저장되지 않았는지 확인
+      if (response.data.imported_count === 0) {
+        console.warn('[동기화] ⚠️ Google Calendar 이벤트가 저장되지 않았습니다.');
+        console.log('[동기화] 진단 정보:');
+        console.log('  - import_enabled 토글이 켜져있는지 확인하세요:', response.data.import_enabled);
+        console.log('  - Google Calendar에서 가져온 전체 이벤트 수:', response.data.total_events_from_google);
+        console.log('  - 새로 처리해야 할 이벤트 수:', response.data.new_events_count);
+        console.log('  - 건너뛴 이벤트 수:', response.data.skipped_counts);
+        console.log('  - Always Plan 이벤트:', response.data.skipped_counts?.always_plan_events || 0, '개 (이것들은 건너뛰는 것이 정상)');
+        console.log('  - 이미 저장된 이벤트:', response.data.skipped_counts?.already_saved || 0, '개');
+        console.log('  - 저장 실패한 이벤트 수:', response.data.imported_failed_count);
+        
+        // 실패한 이벤트 상세 정보 출력
+        if (response.data.failed_events_info && response.data.failed_events_info.length > 0) {
+          console.error('[동기화] ❌ 저장 실패한 이벤트 상세 정보:');
+          response.data.failed_events_info.forEach((failedEvent: any, index: number) => {
+            console.error(`  [${index + 1}] 이벤트 ID: ${failedEvent.event_id}`);
+            console.error(`      제목: ${failedEvent.title}`);
+            console.error(`      에러 타입: ${failedEvent.error_type}`);
+            console.error(`      에러 메시지: ${failedEvent.error_message}`);
+            console.error(`      시작 시간: ${failedEvent.start}`);
+          });
+        }
+      }
     } catch (error: any) {
-      console.error('Google Calendar sync error:', error);
+      console.error('[동기화] Google Calendar 동기화 실패:', error);
       setSyncStatus('error');
       setSyncError(error.response?.data?.detail || error.message);
     }

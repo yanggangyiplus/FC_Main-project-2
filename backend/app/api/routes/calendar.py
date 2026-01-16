@@ -79,6 +79,7 @@ async def sync_all_todos_to_google_calendar(
     current_user: User = Depends(get_current_user)
 ):
     """모든 기존 일정을 Google Calendar에 일괄 동기화 (중복 방지)"""
+    logger.info(f"[SYNC_ALL] ========== 동기화 시작 ========== 사용자: {current_user.email} (ID: {current_user.id})")
     try:
         # 사용자의 Google Calendar 토큰 확인
         if not current_user.google_calendar_token:
@@ -96,16 +97,17 @@ async def sync_all_todos_to_google_calendar(
         logger.info("[SYNC_ALL] Google Calendar 이벤트 목록 가져오기 시작...")
         existing_events = []
         try:
-            # 최근 1년 전부터 1년 후까지의 이벤트 가져오기
-            time_min = datetime.utcnow() - timedelta(days=365)
-            time_max = datetime.utcnow() + timedelta(days=365)
+            # 최근 3년 전부터 3년 후까지의 이벤트 가져오기 (과거 일정도 포함)
+            time_min = datetime.utcnow() - timedelta(days=3*365)
+            time_max = datetime.utcnow() + timedelta(days=3*365)
+            # max_results는 페이지당 개수이므로, 페이지네이션으로 모든 이벤트를 가져옴
             existing_events = await GoogleCalendarService.list_events(
                 token_json=current_user.google_calendar_token,
                 time_min=time_min,
                 time_max=time_max,
-                max_results=1000
+                max_results=2500  # Google Calendar API 최대값 (2500)
             )
-            logger.info(f"[SYNC_ALL] Google Calendar에서 {len(existing_events)}개 이벤트 가져옴")
+            logger.info(f"[SYNC_ALL] Google Calendar에서 {len(existing_events)}개 이벤트 가져옴 (3년 범위)")
         except Exception as e:
             logger.warning(f"[SYNC_ALL] Google Calendar 이벤트 목록 가져오기 실패 (계속 진행): {e}")
         
@@ -136,8 +138,9 @@ async def sync_all_todos_to_google_calendar(
         logger.info(f"[SYNC_ALL] 기존 이벤트 맵 생성 완료: {len(existing_events_map)}개")
         
         # export_enabled 토글 확인
-        export_enabled = getattr(current_user, 'google_calendar_export_enabled', 'false') == 'true'
-        logger.info(f"[SYNC_ALL] Google Calendar 내보내기 토글 상태: {export_enabled}")
+        export_enabled_raw = getattr(current_user, 'google_calendar_export_enabled', 'false')
+        export_enabled = str(export_enabled_raw).lower() == 'true'
+        logger.info(f"[SYNC_ALL] Google Calendar 내보내기 토글 상태 확인 - raw: {export_enabled_raw}, enabled: {export_enabled}")
         
         # 2단계: Google Calendar에 동기화되지 않은 모든 일정 조회 (export_enabled가 활성화되어 있을 때만)
         todos_to_sync = []
@@ -252,7 +255,6 @@ async def sync_all_todos_to_google_calendar(
                     notification_reminders = []
                     if todo.notification_reminders:
                         try:
-                            import json
                             parsed = json.loads(todo.notification_reminders) if isinstance(todo.notification_reminders, str) else todo.notification_reminders
                             if isinstance(parsed, list):
                                 notification_reminders = parsed
@@ -299,12 +301,20 @@ async def sync_all_todos_to_google_calendar(
         
         # 4단계: Google Calendar 이벤트를 웹앱에 Todo로 저장 (양방향 동기화)
         # import_enabled가 활성화되어 있을 때만 실행
-        import_enabled = getattr(current_user, 'google_calendar_import_enabled', 'false') == 'true'
-        logger.info(f"[SYNC_ALL] Google Calendar 가져오기 토글 상태: {import_enabled}")
+        import_enabled_raw = getattr(current_user, 'google_calendar_import_enabled', 'false')
+        import_enabled = str(import_enabled_raw).lower() == 'true'
+        logger.info(f"[SYNC_ALL] Google Calendar 가져오기 토글 상태 확인 - raw: {import_enabled_raw}, enabled: {import_enabled}, existing_events_count: {len(existing_events)}")
         
         imported_count = 0
         imported_matched_count = 0
         imported_failed_count = 0
+        
+        # 변수 초기화 (import_enabled 블록 밖에서도 사용하기 위해)
+        new_events_count = 0
+        skipped_events_count = 0
+        skipped_already_saved_count = 0
+        skipped_always_plan_count = 0
+        failed_events_info = []  # 실패한 이벤트 정보 저장
         
         if not import_enabled:
             logger.info("[SYNC_ALL] Google Calendar 가져오기가 비활성화되어 있어 이벤트를 가져오지 않습니다.")
@@ -325,13 +335,48 @@ async def sync_all_todos_to_google_calendar(
             existing_google_event_ids = {str(id[0]) for id in existing_google_event_ids if id[0]}
             
             logger.info(f"[SYNC_ALL] 이미 저장된 Google Calendar 이벤트: {len(existing_google_event_ids)}개")
+            logger.info(f"[SYNC_ALL] 처리할 전체 이벤트 수: {len(existing_events)}개")
             
             for event in existing_events:
                 try:
                     event_id = event.get('id')
-                    if not event_id or event_id in existing_google_event_ids:
-                        # 이미 저장된 이벤트는 건너뜀
+                    if not event_id:
+                        logger.warning(f"[SYNC_ALL] 이벤트 ID가 없음: {event.get('summary', '제목 없음')}")
+                        skipped_events_count += 1
                         continue
+                    
+                    # 1차 체크: 이미 저장된 이벤트 ID인지 확인
+                    if event_id in existing_google_event_ids:
+                        # 이미 저장된 이벤트는 건너뜀
+                        skipped_already_saved_count += 1
+                        logger.debug(f"[SYNC_ALL] 이미 저장된 이벤트 건너뜀: event_id={event_id}, title={event.get('summary', '제목 없음')}")
+                        continue
+                    
+                    # 2차 체크: Always Plan에서 만든 이벤트인지 확인 (source_id 체크)
+                    # Always Plan에서 만든 이벤트는 extendedProperties 또는 description에 AlwaysPlanID가 있음
+                    source_id = None
+                    extended_props = event.get('extendedProperties', {})
+                    private_props = extended_props.get('private', {})
+                    if private_props.get('alwaysPlanSourceId'):
+                        source_id = private_props.get('alwaysPlanSourceId')
+                    else:
+                        # description에서도 추출 시도 (fallback)
+                        description = event.get('description', '')
+                        if description and 'AlwaysPlanID:' in description:
+                            import re
+                            match = re.search(r'AlwaysPlanID:([^\s\n]+)', description)
+                            if match:
+                                source_id = match.group(1)
+                    
+                    if source_id:
+                        # Always Plan에서 만든 이벤트는 건너뜀 (웹앱의 Todo를 Google Calendar에 동기화한 것)
+                        skipped_always_plan_count += 1
+                        logger.debug(f"[SYNC_ALL] Always Plan에서 만든 이벤트 건너뜀: event_id={event_id}, source_id={source_id}, title={event.get('summary', '제목 없음')}")
+                        continue
+                    
+                    # 구글 캘린더에서 직접 만든 이벤트만 저장
+                    new_events_count += 1
+                    logger.info(f"[SYNC_ALL] 새 이벤트 처리 시작 (구글 캘린더에서 직접 만든 이벤트): event_id={event_id}, title={event.get('summary', '제목 없음')}")
                     
                     # 이벤트 정보 파싱
                     start = event.get('start', {})
@@ -448,7 +493,11 @@ async def sync_all_todos_to_google_calendar(
                                     else:
                                         reminders_list.append({'value': minutes, 'unit': 'minutes'})
                         if reminders_list:
-                            notification_reminders = json.dumps(reminders_list)
+                            try:
+                                notification_reminders = json.dumps(reminders_list)
+                            except Exception as json_err:
+                                logger.error(f"[SYNC_ALL] 알림 정보 JSON 변환 실패: {json_err}")
+                                notification_reminders = None
                     
                     # 반복 정보 파싱
                     repeat_type = None
@@ -593,15 +642,60 @@ async def sync_all_todos_to_google_calendar(
                         db.refresh(new_todo)
                     
                     imported_count += 1
-                    logger.info(f"[SYNC_ALL] Google Calendar 이벤트를 Todo로 저장: event_id={event_id}, todo_id={new_todo.id}, title={new_todo.title}, deleted_at={new_todo.deleted_at}, bulk_synced={new_todo.bulk_synced}")
+                    logger.info(f"[SYNC_ALL] ✅ Google Calendar 이벤트를 Todo로 저장 완료: event_id={event_id}, todo_id={new_todo.id}, title={new_todo.title}, date={new_todo.date}, deleted_at={new_todo.deleted_at}, bulk_synced={new_todo.bulk_synced}")
                     
                 except Exception as e:
-                    logger.error(f"[SYNC_ALL] Google Calendar 이벤트 저장 실패 (event_id={event.get('id')}): {e}", exc_info=True)
+                    # 상세한 에러 정보 로깅
+                    error_type = type(e).__name__
+                    error_message = str(e)
+                    event_title = event.get('summary', '제목 없음')
+                    event_start = event.get('start', {})
+                    
+                    logger.error(f"[SYNC_ALL] ❌ Google Calendar 이벤트 저장 실패:")
+                    logger.error(f"  - event_id: {event_id}")
+                    logger.error(f"  - title: {event_title}")
+                    logger.error(f"  - start: {event_start}")
+                    logger.error(f"  - error_type: {error_type}")
+                    logger.error(f"  - error_message: {error_message}")
+                    logger.error(f"  - 상세 에러:", exc_info=True)
+                    
+                    # 파싱된 데이터 정보도 로깅
+                    try:
+                        logger.error(f"  - 파싱된 데이터: start_date={start_date}, end_date={end_date}, all_day={all_day}, start_time_obj={start_time_obj}, end_time_obj={end_time_obj}")
+                    except:
+                        logger.error(f"  - 파싱된 데이터 정보 없음 (파싱 단계에서 실패)")
+                    
+                    # 실패한 이벤트 정보 저장
+                    failed_events_info.append({
+                        "event_id": event_id,
+                        "title": event_title,
+                        "error_type": error_type,
+                        "error_message": error_message,
+                        "start": str(event_start) if event_start else None
+                    })
+                    
                     imported_failed_count += 1
+                    
+                    # 데이터베이스 롤백 (다음 이벤트 처리를 위해)
+                    try:
+                        db.rollback()
+                    except:
+                        pass
+            
+        logger.info(f"[SYNC_ALL] Google Calendar 이벤트 저장 완료:")
+        logger.info(f"  - 새 이벤트 {new_events_count}개 중 {imported_count}개 저장 성공, {imported_failed_count}개 실패")
+        logger.info(f"  - 건너뛴 이벤트: 이미 저장됨 {skipped_already_saved_count}개, Always Plan 이벤트 {skipped_always_plan_count}개, 기타 {skipped_events_count}개")
         
-        logger.info(f"[SYNC_ALL] Google Calendar 이벤트 저장 완료: {imported_count}개 저장, {imported_failed_count}개 실패")
-        
-        logger.info(f"[SYNC_ALL] 동기화 완료: 매칭={matched_count}개, 새로 생성={synced_count}개, 실패={failed_count}개, 이미 동기화된 일정={bulk_synced_count}개, Google Calendar 이벤트 저장={imported_count}개")
+        logger.info(f"[SYNC_ALL] ========== 동기화 완료 ==========")
+        logger.info(f"[SYNC_ALL] 웹앱 → Google Calendar:")
+        logger.info(f"  - 매칭: {matched_count}개")
+        logger.info(f"  - 새로 생성: {synced_count}개")
+        logger.info(f"  - 실패: {failed_count}개")
+        logger.info(f"  - 이미 동기화된 일정 (bulk_synced=True 설정): {bulk_synced_count}개")
+        logger.info(f"[SYNC_ALL] Google Calendar → 웹앱:")
+        logger.info(f"  - 새로 저장: {imported_count}개")
+        logger.info(f"  - 실패: {imported_failed_count}개")
+        logger.info(f"  - 건너뛴 이벤트: 이미 저장됨 {skipped_already_saved_count}개, Always Plan 이벤트 {skipped_always_plan_count}개, 기타 {skipped_events_count}개")
         
         total_saved = synced_count + matched_count + bulk_synced_count
         
@@ -620,7 +714,15 @@ async def sync_all_todos_to_google_calendar(
         if message_parts:
             message = ", ".join(message_parts) + ". 동기화 해제해도 양쪽에 일정이 남아있습니다."
         else:
-            message = "저장할 일정이 없습니다."
+            # 저장할 일정이 없을 때 더 자세한 메시지 제공
+            if not import_enabled:
+                message = "Google Calendar 가져오기가 비활성화되어 있습니다. 설정에서 활성화해주세요."
+            elif len(existing_events) == 0:
+                message = "Google Calendar에서 가져온 이벤트가 없습니다. Google Calendar에 일정이 있는지 확인해주세요."
+            elif new_events_count == 0:
+                message = f"모든 Google Calendar 이벤트가 이미 저장되어 있거나 Always Plan에서 만든 이벤트입니다. (전체 {len(existing_events)}개 이벤트 중 건너뜀: 이미 저장됨 {skipped_already_saved_count}개, Always Plan 이벤트 {skipped_always_plan_count}개)"
+            else:
+                message = "저장할 일정이 없습니다."
         
         return {
             "success": True,
@@ -633,7 +735,16 @@ async def sync_all_todos_to_google_calendar(
             "total_count": len(todos_to_sync),
             "total_saved": total_saved,  # 총 저장된 일정 수 (웹앱 → Google Calendar)
             "failed_todo_ids": failed_todos,
-            "message": message
+            "message": message,
+            "import_enabled": import_enabled,  # import_enabled 토글 상태
+            "total_events_from_google": len(existing_events),  # Google Calendar에서 가져온 전체 이벤트 수
+            "new_events_count": new_events_count,  # 새로 처리해야 할 이벤트 수 (건너뛴 것 제외)
+            "skipped_counts": {  # 건너뛴 이벤트 통계
+                "already_saved": skipped_already_saved_count,
+                "always_plan_events": skipped_always_plan_count,
+                "other": skipped_events_count
+            },
+            "failed_events_info": failed_events_info  # 실패한 이벤트 상세 정보 (디버깅용)
         }
         
     except HTTPException:
@@ -717,7 +828,6 @@ async def sync_todo_to_google_calendar(
                 notification_reminders = []
                 if todo.notification_reminders:
                     try:
-                        import json
                         parsed = json.loads(todo.notification_reminders) if isinstance(todo.notification_reminders, str) else todo.notification_reminders
                         if isinstance(parsed, list):
                             notification_reminders = parsed
@@ -798,7 +908,6 @@ async def sync_todo_to_google_calendar(
         notification_reminders = []
         if todo.notification_reminders:
             try:
-                import json
                 parsed = json.loads(todo.notification_reminders) if isinstance(todo.notification_reminders, str) else todo.notification_reminders
                 if isinstance(parsed, list):
                     notification_reminders = parsed
@@ -883,8 +992,6 @@ async def get_calendar_status(
     current_user: User = Depends(get_current_user)
 ):
     """Google Calendar 연동 상태 확인"""
-    import json
-    
     token_exists = bool(current_user.google_calendar_token)
     token_valid = False
     
@@ -1025,15 +1132,16 @@ async def toggle_calendar_export(
         # 1단계: Google Calendar에서 현재 이벤트 목록 가져오기 (중복 체크용)
         existing_events = []
         try:
-            time_min = datetime.utcnow() - timedelta(days=365)
-            time_max = datetime.utcnow() + timedelta(days=365)
+            # 최근 3년 전부터 3년 후까지의 이벤트 가져오기 (과거 일정도 포함)
+            time_min = datetime.utcnow() - timedelta(days=3*365)
+            time_max = datetime.utcnow() + timedelta(days=3*365)
             existing_events = await GoogleCalendarService.list_events(
                 token_json=current_user.google_calendar_token,
                 time_min=time_min,
                 time_max=time_max,
-                max_results=1000
+                max_results=2500  # Google Calendar API 최대값
             )
-            logger.info(f"[TOGGLE_EXPORT] Google Calendar에서 {len(existing_events)}개 이벤트 가져옴")
+            logger.info(f"[TOGGLE_EXPORT] Google Calendar에서 {len(existing_events)}개 이벤트 가져옴 (3년 범위)")
         except Exception as e:
             logger.warning(f"[TOGGLE_EXPORT] Google Calendar 이벤트 목록 가져오기 실패 (계속 진행): {e}")
         
@@ -1123,7 +1231,6 @@ async def toggle_calendar_export(
                     notification_reminders = []
                     if todo.notification_reminders:
                         try:
-                            import json
                             parsed = json.loads(todo.notification_reminders) if isinstance(todo.notification_reminders, str) else todo.notification_reminders
                             if isinstance(parsed, list):
                                 notification_reminders = parsed
@@ -1135,7 +1242,6 @@ async def toggle_calendar_export(
                     repeat_end_date = None
                     if todo.repeat_pattern:
                         try:
-                            import json
                             repeat_pattern = json.loads(todo.repeat_pattern) if isinstance(todo.repeat_pattern, str) else todo.repeat_pattern
                         except:
                             pass
@@ -1369,7 +1475,6 @@ async def google_calendar_callback(
     """Google Calendar OAuth 콜백 처리"""
     from app.api.routes.auth import oauth_states
     from app.services.auth_service import GoogleOAuthService
-    import json
     
     try:
         # State 검증
@@ -1452,8 +1557,6 @@ async def debug_list_calendars(
         raise HTTPException(status_code=400, detail="토큰이 없습니다")
     
     try:
-        import json
-        
         # 저장된 토큰 확인
         token_data = json.loads(current_user.google_calendar_token)
         logger.info(f"[DEBUG_CALENDARS] 저장된 토큰 필드:")
@@ -1890,7 +1993,6 @@ async def test_google_calendar_connection(
         }
     
     try:
-        import json
         token_data = json.loads(current_user.google_calendar_token)
         
         # Credentials 생성 테스트
