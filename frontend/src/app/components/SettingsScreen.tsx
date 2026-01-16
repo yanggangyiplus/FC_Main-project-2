@@ -18,7 +18,6 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
   const [googleCalendarExportEnabled, setGoogleCalendarExportEnabled] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncLoading, setIsSyncLoading] = useState(false); // 동기화 후 저장 버튼 전용 로딩 상태
-
   // Google Calendar 연동 상태 확인
   useEffect(() => {
     if (isOpen) {
@@ -262,7 +261,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
                 <div className="flex-1">
                   <div className="font-medium text-[#1F2937]">Always Plan 일정 내보내기</div>
                   <div className="text-sm text-[#6B7280] mt-1">
-                    앱의 일정을 Google Calendar에 표시
+                    토글을 켜면 웹앱의 모든 기존 일정을 Google Calendar로 내보냅니다
                   </div>
                 </div>
                 <button
@@ -270,9 +269,23 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
                     if (isLoading) return;
                     setIsLoading(true);
                     try {
+                      console.log("[토글] Always Plan 일정 내보내기 토글 변경 시작...");
                       const response = await apiClient.toggleCalendarExport();
-                      const newState = response.data?.export_enabled || false;
+                      console.log("[토글] 응답:", response.data);
+                      
+                      const newState = response.data?.export_enabled !== undefined 
+                        ? response.data.export_enabled 
+                        : response.data?.success 
+                          ? (response.data.export_enabled ?? false)
+                          : false;
+                      
+                      console.log("[토글] 새 상태:", newState, "현재 상태:", googleCalendarExportEnabled);
+                      
+                      // 상태 업데이트
                       setGoogleCalendarExportEnabled(newState);
+                      
+                      // 상태 확인을 위해 다시 로드
+                      await checkCalendarStatus();
 
                       if (!newState) {
                         // 토글을 끌 때: bulk_synced가 아닌 일정들의 Google Calendar 이벤트가 삭제됨
@@ -282,16 +295,25 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
                         } else {
                           toast.success("Always Plan 일정 내보내기가 비활성화되었습니다. (동기화 후 저장한 일정은 유지됩니다)");
                         }
-                        // 토글을 끌 때는 동기화를 호출하지 않음 (동기화가 비활성화되므로)
-                        // onRefreshCalendar를 호출하지 않음
+                        
+                        // 일정 목록 새로고침 (동기화 해제 반영)
+                        if (onRefreshTodos) {
+                          await onRefreshTodos();
+                        }
                       } else {
                         // 토글을 켤 때: 바로 동기화 실행
                         const syncedCount = response.data?.synced_count || 0;
                         const matchedCount = response.data?.matched_count || 0;
+                        
+                        // 일정 목록 새로고침 (동기화된 일정 반영)
+                        if (onRefreshTodos) {
+                          await onRefreshTodos();
+                        }
+                        
                         if (syncedCount > 0 || matchedCount > 0) {
                           toast.success(`Always Plan 일정 내보내기가 활성화되었습니다. ${syncedCount}개 일정 동기화, ${matchedCount}개 일정 매칭됨`);
                         } else {
-                          toast.success("Always Plan 일정 내보내기가 활성화되었습니다.");
+                          toast.success("Always Plan 일정 내보내기가 활성화되었습니다. (이미 모든 일정이 동기화되어 있음)");
                         }
                       }
                     } catch (error: any) {
