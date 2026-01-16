@@ -27,7 +27,7 @@ interface RoutineItem {
 interface AddTodoModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (todo: TodoFormData) => void;
+  onSave: (todo: TodoFormData) => Promise<void> | void;
   onOpenInputMethod?: (method: 'voice' | 'camera') => void;
   familyMembers?: FamilyMember[];
   initialData?: {
@@ -174,6 +174,11 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
     // 모달이 닫혀있으면 초기화하지 않음
     if (!isOpen) return;
 
+    // 모달이 열릴 때 추출 상태 리셋
+    setIsExtracting(false);
+    setHasExtracted(false);
+    setLastExtractedMemo('');
+
     if (initialData) {
       // 하루종일이면 시간 필드를 빈 문자열로 설정
       const isAllDay = initialData.isAllDay || false;
@@ -247,6 +252,14 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
     }
   }, [initialData, isOpen]);
 
+  // 모달이 열릴 때 isExtracting 강제 리셋
+  useEffect(() => {
+    if (isOpen) {
+      console.log('[AddTodoModal] 모달 열림, isExtracting 리셋');
+      setIsExtracting(false);
+    }
+  }, [isOpen]);
+
   // initialData가 변경되면 hasExtracted 리셋
   useEffect(() => {
     if (initialData) {
@@ -261,9 +274,11 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
 
   // 추가 모드에서 메모가 변경되면 hasExtracted 리셋 (수정된 메모에서 다시 추출 가능하도록)
   // 단, lastExtractedMemo가 있을 때만 리셋 (자동 추출 후 수정된 경우만)
+  // 직접 작성 모드(initialData가 없고 memo도 없는 경우)에서는 자동 추출하지 않음
   useEffect(() => {
     const isAddMode = !initialData || !initialData.title;
-    if (isAddMode && hasExtracted && lastExtractedMemo && formData.memo !== lastExtractedMemo) {
+    const isDirectWriteMode = !initialData && !formData.memo.trim();
+    if (isAddMode && !isDirectWriteMode && hasExtracted && lastExtractedMemo && formData.memo !== lastExtractedMemo) {
       // 메모가 추출된 이후 변경되었으면 리셋
       setHasExtracted(false);
     }
@@ -285,9 +300,13 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
       });
     }
 
-    // initialData가 있어도 title이 없으면 자동 추출 실행 (추가 모드)
+    // initialData가 있고 title이 있으면 자동 추출하지 않음 (직접 작성 모드)
+    // initialData가 없거나 title이 없고, memo만 있는 경우에만 자동 추출 실행
     const isAddMode = !initialData || !initialData.title;
-    if (isOpen && isAddMode && formData.memo.trim() && !formData.title.trim() && !hasExtracted && !isExtracting) {
+    const hasOnlyMemo = formData.memo.trim() && !formData.title.trim();
+    const shouldExtract = isOpen && isAddMode && hasOnlyMemo && !hasExtracted && !isExtracting;
+
+    if (shouldExtract) {
       console.log('[자동 추출 시작]');
       const extractInfo = async () => {
         try {
@@ -504,35 +523,30 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
   };
 
   const handleSave = async () => {
+    console.log('[handleSave] 호출됨', { isExtracting, title: formData.title });
+    
     // 제목 검증
     if (!formData.title.trim()) {
-      alert('일정 제목을 입력해주세요.');
+      toast.error('일정 제목을 입력해주세요.');
       return;
     }
-    onSave(formData);
-    onClose();
-    // Reset form
-    setFormData({
-      title: '',
-      date: new Date().toISOString().split('T')[0],
-      startTime: '09:00',
-      endTime: '10:00',
-      isAllDay: false,
-      postponeToNextDay: false,
-      category: '생활',
-      checklistItems: [''],
-      memo: '',
-      location: '',
-      hasNotification: false,
-      alarmTimes: [],
-      notificationReminders: [],
-      repeatType: 'none',
-      assignedMemberIds: [],
-      repeatEndDate: undefined,
-      repeatPattern: undefined,
-    });
-    setHasExtracted(false);
-    setLastExtractedMemo(''); // 메모 추출 상태도 리셋
+    
+    try {
+      console.log('[handleSave] onSave 호출 전');
+      // onSave가 완료될 때까지 기다림
+      const result = onSave(formData);
+      if (result instanceof Promise) {
+        await result;
+      }
+      console.log('[handleSave] onSave 완료');
+      // 성공적으로 저장된 후 모달 닫기
+      onClose();
+    } catch (error) {
+      // 에러는 handleTodoSubmit에서 이미 처리되므로 여기서는 로그만
+      console.error('일정 저장 중 오류:', error);
+      // 에러 발생 시 모달을 닫지 않고 사용자가 수정할 수 있도록 함
+      // onClose()를 호출하지 않음
+    }
   };
 
   return (
@@ -636,11 +650,10 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                               };
                             });
                           }}
-                          className={`px-3 py-2 rounded-full text-sm font-medium flex items-center justify-center gap-1 flex-shrink-0 transition-all ${
-                            isSelected
+                          className={`px-3 py-2 rounded-full text-sm font-medium flex items-center justify-center gap-1 flex-shrink-0 transition-all ${isSelected
                               ? 'bg-[#FF9B82] text-white shadow-sm'
                               : 'bg-[#F3F4F6] text-[#6B7280] hover:bg-[#E5E7EB]'
-                          }`}
+                            }`}
                         >
                           <span className="text-base">{member.emoji}</span>
                           <span>{member.name}</span>
@@ -1145,9 +1158,17 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
               취소
             </button>
             <button
-              onClick={handleSave}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('[저장 버튼] 클릭됨', { isExtracting, disabled: isExtracting });
+                if (!isExtracting) {
+                  handleSave();
+                }
+              }}
               disabled={isExtracting}
               className="flex-1 px-6 py-3 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              type="button"
             >
               {isExtracting ? '추출 중...' : '저장'}
             </button>

@@ -594,7 +594,8 @@ export function InputMethodModal({ isOpen, onClose, onSelect, initialMethod }: I
   };
 
   const handleTextClick = () => {
-    setActiveMethod(null);
+    // 문서 버튼 클릭 시 AddTodoModal을 열기 위해 'text' 메서드로 onSelect 호출
+    onSelect('text');
   };
 
   const handleClose = () => {

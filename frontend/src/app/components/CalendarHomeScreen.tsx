@@ -425,7 +425,11 @@ export function CalendarHomeScreen() {
             repeatPattern: todo.repeat_pattern,
             checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
             memberId: todo.member_id,
-            assignedMemberIds: todo.family_member_ids || todo.assigned_member_ids || [],
+            assignedMemberIds: Array.isArray(todo.family_member_ids)
+              ? todo.family_member_ids
+              : (Array.isArray(todo.assigned_member_ids)
+                ? todo.assigned_member_ids
+                : (todo.family_member_ids ? [todo.family_member_ids] : (todo.assigned_member_ids ? [todo.assigned_member_ids] : []))),
             isRoutine: todo.is_routine || false,
             source: todo.source || 'always_plan',
             googleCalendarEventId: todo.google_calendar_event_id || undefined,
@@ -573,7 +577,8 @@ export function CalendarHomeScreen() {
   const currentDate = new Date().toISOString().split('T')[0];
   const currentTime = new Date().toTimeString().split(' ')[0];
 
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  // 새로고침 시 오늘 날짜로 초기화
+  const [selectedDate, setSelectedDate] = useState<string | null>(currentDate);
 
   // Todo 관련 함수들 (임시 구현)
   const handleTodoUpdate = async (todoId: string, updates: any) => {
@@ -642,7 +647,9 @@ export function CalendarHomeScreen() {
         memo: formData.memo || "",
         location: formData.location || "",
         date: formData.date,
-        end_date: formData.endDate && formData.endDate !== formData.date ? formData.endDate : undefined,
+        // end_date: 종료 날짜가 시작 날짜와 같거나 없으면 빈 문자열로 설정 (백엔드에서 None으로 처리)
+        // 수정 모드에서는 항상 end_date를 보내야 함 (없으면 빈 문자열로)
+        end_date: formData.endDate && formData.endDate !== formData.date ? formData.endDate : (editingTodoId ? "" : undefined),
         start_time: formData.isAllDay ? undefined : (formData.startTime || undefined),
         end_time: formData.isAllDay ? undefined : (formData.endTime || undefined),
         all_day: formData.isAllDay === true,
@@ -672,33 +679,53 @@ export function CalendarHomeScreen() {
         // 수정 모드
         const response = await apiClient.updateTodo(editingTodoId, todoData);
 
-        // 응답 데이터를 프론트엔드 형식으로 변환
+        // 응답 데이터를 프론트엔드 형식으로 변환 (loadTodos와 동일한 형식)
         const updatedTodo = {
           id: response.data.id,
           title: response.data.title,
+          description: response.data.description || response.data.memo || '',
+          time: response.data.start_time ? `${response.data.start_time}` : undefined,
+          rule: response.data.category || '기타',
+          completed: response.data.status === 'completed',
+          draft: response.data.status === 'draft',
+          overdue: response.data.status === 'overdue',
+          status: response.data.status || 'pending',
+          priority: response.data.priority,
           date: response.data.date,
           endDate: response.data.end_date,
           startTime: response.data.start_time || undefined,
           endTime: response.data.end_time || undefined,
-          time: response.data.start_time || '',
           isAllDay: response.data.all_day === true || response.data.all_day === 'true',
           duration: response.data.start_time && response.data.end_time ? duration : (response.data.duration || duration),
           location: response.data.location,
           memo: response.data.memo || response.data.description || '',
           category: response.data.category || '기타',
           hasNotification: response.data.has_notification || false,
-          alarmTimes: response.data.notification_times || [],
-          notificationReminders: response.data.notification_reminders ? JSON.parse(response.data.notification_reminders) : [],
+          notificationTimes: response.data.notification_times || [],
+          notificationReminders: response.data.notification_reminders ? (typeof response.data.notification_reminders === 'string' ? JSON.parse(response.data.notification_reminders) : response.data.notification_reminders) : [],
           repeatType: response.data.repeat_type || 'none',
           repeatEndDate: response.data.repeat_end_date,
-          repeatPattern: response.data.repeat_pattern ? JSON.parse(response.data.repeat_pattern) : undefined,
+          repeatPattern: response.data.repeat_pattern ? (typeof response.data.repeat_pattern === 'string' ? JSON.parse(response.data.repeat_pattern) : response.data.repeat_pattern) : undefined,
           checklistItems: response.data.checklist_items?.map((item: any) => item.text || item) || [],
-          assignedMemberIds: response.data.family_member_ids || response.data.assigned_member_ids || [],
-          completed: response.data.status === 'completed',
+          memberId: response.data.member_id,
+          assignedMemberIds: Array.isArray(response.data.family_member_ids)
+            ? response.data.family_member_ids
+            : (Array.isArray(response.data.assigned_member_ids)
+              ? response.data.assigned_member_ids
+              : (response.data.family_member_ids ? [response.data.family_member_ids] : (response.data.assigned_member_ids ? [response.data.assigned_member_ids] : []))),
           isRoutine: response.data.is_routine || false,
+          source: response.data.source || 'always_plan',
+          googleCalendarEventId: response.data.google_calendar_event_id || undefined,
+          bulkSynced: response.data.bulk_synced || false,
+          todoGroupId: response.data.todo_group_id || undefined,
         };
 
-        setTodos(prev => prev.map(t => t.id === editingTodoId ? updatedTodo : t));
+        console.log('[일정 수정] 업데이트된 일정:', updatedTodo);
+        setTodos(prev => {
+          const updated = prev.map(t => t.id === editingTodoId ? updatedTodo : t);
+          console.log('[일정 수정] 업데이트된 todos:', updated.length, '개');
+          return updated;
+        });
         setEditingTodoId(null);
         setShowAddTodoModal(false);
         toast.success("일정이 수정되었습니다.");
@@ -706,33 +733,53 @@ export function CalendarHomeScreen() {
         // 생성 모드
         const response = await apiClient.createTodo(todoData);
 
-        // 응답 데이터를 프론트엔드 형식으로 변환
+        // 응답 데이터를 프론트엔드 형식으로 변환 (loadTodos와 동일한 형식)
         const newTodo = {
           id: response.data.id,
           title: response.data.title,
+          description: response.data.description || response.data.memo || '',
+          time: response.data.start_time ? `${response.data.start_time}` : undefined,
+          rule: response.data.category || '기타',
+          completed: response.data.status === 'completed',
+          draft: response.data.status === 'draft',
+          overdue: response.data.status === 'overdue',
+          status: response.data.status || 'pending',
+          priority: response.data.priority,
           date: response.data.date,
           endDate: response.data.end_date,
           startTime: response.data.start_time || undefined,
           endTime: response.data.end_time || undefined,
-          time: response.data.start_time || '',
           isAllDay: response.data.all_day === true || response.data.all_day === 'true',
           duration: response.data.start_time && response.data.end_time ? duration : (response.data.duration || duration),
           location: response.data.location,
           memo: response.data.memo || response.data.description || '',
           category: response.data.category || '기타',
           hasNotification: response.data.has_notification || false,
-          alarmTimes: response.data.notification_times || [],
-          notificationReminders: response.data.notification_reminders ? JSON.parse(response.data.notification_reminders) : [],
+          notificationTimes: response.data.notification_times || [],
+          notificationReminders: response.data.notification_reminders ? (typeof response.data.notification_reminders === 'string' ? JSON.parse(response.data.notification_reminders) : response.data.notification_reminders) : [],
           repeatType: response.data.repeat_type || 'none',
           repeatEndDate: response.data.repeat_end_date,
-          repeatPattern: response.data.repeat_pattern ? JSON.parse(response.data.repeat_pattern) : undefined,
+          repeatPattern: response.data.repeat_pattern ? (typeof response.data.repeat_pattern === 'string' ? JSON.parse(response.data.repeat_pattern) : response.data.repeat_pattern) : undefined,
           checklistItems: response.data.checklist_items?.map((item: any) => item.text || item) || [],
-          assignedMemberIds: response.data.family_member_ids || response.data.assigned_member_ids || [],
-          completed: false,
-          isRoutine: false,
+          memberId: response.data.member_id,
+          assignedMemberIds: Array.isArray(response.data.family_member_ids)
+            ? response.data.family_member_ids
+            : (Array.isArray(response.data.assigned_member_ids)
+              ? response.data.assigned_member_ids
+              : (response.data.family_member_ids ? [response.data.family_member_ids] : (response.data.assigned_member_ids ? [response.data.assigned_member_ids] : []))),
+          isRoutine: response.data.is_routine || false,
+          source: response.data.source || 'always_plan',
+          googleCalendarEventId: response.data.google_calendar_event_id || undefined,
+          bulkSynced: response.data.bulk_synced || false,
+          todoGroupId: response.data.todo_group_id || undefined,
         };
 
-        setTodos(prev => [...prev, newTodo]);
+        console.log('[일정 추가] 새 일정:', newTodo);
+        setTodos(prev => {
+          const updated = [...prev, newTodo];
+          console.log('[일정 추가] 업데이트된 todos:', updated.length, '개');
+          return updated;
+        });
         setShowAddTodoModal(false);
         toast.success("일정이 추가되었습니다.");
       }
@@ -745,7 +792,9 @@ export function CalendarHomeScreen() {
   const handleInputMethodSelect = (method: 'voice' | 'camera' | 'text', _extractedText?: string, _todoInfo?: any) => {
     if (method === 'text') {
       // 직접 작성 선택 시 AddTodoModal 열기 (기본 양식으로 표시)
-      setExtractedTodoInfo(null); // 기본 양식이 보이도록 null로 설정
+      // extractedTodoInfo를 null로 설정하여 전체 양식이 보이도록 함
+      setExtractedTodoInfo(null);
+      setEditingTodoId(null); // 수정 모드가 아닌 추가 모드로 설정
       setShowInputMethodModal(false);
       setShowAddTodoModal(true);
     } else {
@@ -1816,20 +1865,91 @@ export function CalendarHomeScreen() {
                   todos={todos}
                   familyMembers={familyMembers}
                   selectedMembers={selectedMembers}
+                  selectedDate={selectedDate}
+                  onDateSelect={(date) => setSelectedDate(date)}
                   onTodoUpdate={handleTodoUpdate}
                   onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
                 />
+                {/* 선택된 날짜의 일정 리스트 - 모바일/태블릿 주간 캘린더 아래에 표시 */}
+                {selectedDate && (
+                  <div className="space-y-3 px-4 mt-4">
+                    <h3 className="text-lg font-bold text-[#1F2937] mb-4">
+                      {new Date(selectedDate).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' })} 일정
+                    </h3>
+                    {(() => {
+                      const selectedDateTodos = todos.filter(t => {
+                        if (t.isRoutine || !t.date) return false;
+                        if (t.date === selectedDate) return true;
+                        if (t.endDate && t.date <= selectedDate && t.endDate >= selectedDate) return true;
+                        return false;
+                      });
+                      return selectedDateTodos.length > 0 ? (
+                        selectedDateTodos.map((todo) => (
+                          <div
+                            key={todo.id}
+                            className={`${getCategoryColor(todo.category)} border-l-4 rounded-lg p-3 cursor-pointer hover:shadow-md transition-all`}
+                            onClick={() => setSelectedTodoForDetail(todo.id)}
+                          >
+                            <div className="flex items-center gap-2">
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleTodoComplete(todo.id);
+                                }}
+                                className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer hover:scale-110 transition-transform ${todo.completed
+                                  ? "bg-[#FF9B82] border-[#FF9B82]"
+                                  : "border-[#D1D5DB] bg-white hover:border-[#FF9B82]"
+                                  }`}
+                              >
+                                {todo.completed && (
+                                  <Check size={12} className="text-white" strokeWidth={3} />
+                                )}
+                              </div>
+                              <h4 className={`text-sm font-medium truncate ${todo.completed
+                                ? "line-through text-[#9CA3AF]"
+                                : "text-[#1F2937]"
+                                }`}>
+                                {todo.title}
+                              </h4>
+                            </div>
+                            {todo.time && (
+                              <div className="mt-1 ml-6">
+                                <span className="text-xs text-[#6B7280]">{todo.time}</span>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-center py-8 text-[#9CA3AF]">
+                          <Calendar size={32} className="mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">선택한 날짜에 일정이 없습니다</p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
               </>
             )}
 
             {/* Day Calendar - 모바일 뷰에서만 표시 */}
             {calendarView === "day" && isMobile && (
               <div className="flex flex-col gap-4">
-                {/* 오늘의 할 일 리스트 - 캘린더 위에 표시 */}
+                {/* 선택된 날짜의 할 일 리스트 - 캘린더 위에 표시 */}
                 <div className="space-y-3 px-4">
-                  <div className="text-sm font-medium text-[#6B7280] mb-3">오늘의 할 일</div>
+                  <h3 className="text-lg font-bold text-[#1F2937] mb-4">
+                    {selectedDate
+                      ? new Date(selectedDate).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' }) + ' 일정'
+                      : '오늘의 할 일'}
+                  </h3>
                   {(() => {
-                    const todayTodos = todos.filter(t => !t.completed && !t.isRoutine && t.date === currentDate).slice(0, 10);
+                    // 선택된 날짜의 일정만 표시 (새로고침 시 오늘 날짜)
+                    const displayDate = selectedDate || currentDate;
+                    const todayTodos = todos.filter(t => {
+                      if (t.isRoutine || !t.date) return false;
+                      if (t.date === displayDate) return true;
+                      if (t.endDate && t.date <= displayDate && t.endDate >= displayDate) return true;
+                      return false;
+                    }).slice(0, 10);
                     return (
                       <>
                         {todayTodos.map((todo) => (
@@ -2002,7 +2122,8 @@ export function CalendarHomeScreen() {
                 ...extractedTodoInfo,
                 date: selectedDate || extractedTodoInfo?.date
               }
-              : undefined}
+              : undefined
+          }
           familyMembers={familyMembers}
         />
       )}
@@ -2470,7 +2591,11 @@ export function CalendarHomeScreen() {
                                 alarmTimes: response.data.notification_times || [],
                                 repeatType: response.data.repeat_type || "none",
                                 checklistItems: response.data.checklist_items?.map((item: any) => item.text || item) || [],
-                                assignedMemberIds: response.data.family_member_ids || response.data.assigned_member_ids || [],
+                                assignedMemberIds: Array.isArray(response.data.family_member_ids)
+                                  ? response.data.family_member_ids
+                                  : (Array.isArray(response.data.assigned_member_ids)
+                                    ? response.data.assigned_member_ids
+                                    : (response.data.family_member_ids ? [response.data.family_member_ids] : (response.data.assigned_member_ids ? [response.data.assigned_member_ids] : []))),
                                 postponeToNextDay: false,
                               };
 
