@@ -411,7 +411,7 @@ export function DayCalendar({ todos, routines = [], selectedDate, onDateChange, 
                       onMouseDown={(e) => handleResizeStart(e, todo.id, todo.time, todo.duration, 'top')}
                     />
 
-                    <div className="font-semibold text-sm pointer-events-none">{todo.title}</div>
+                    <div className={`font-semibold text-sm pointer-events-none ${todo.completed ? 'line-through opacity-70' : ''}`}>{todo.title}</div>
                     <div className="text-xs mt-1 opacity-90 pointer-events-none">
                       {todo.time} - {formatDuration(todo.duration || 60)}
                     </div>

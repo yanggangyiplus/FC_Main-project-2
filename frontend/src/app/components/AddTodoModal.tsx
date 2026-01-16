@@ -140,7 +140,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
     endTime: endTimeInitial,
     isAllDay: isAllDayInitial,
     postponeToNextDay: initialData?.postponeToNextDay || false,
-    category: initialData?.category || '생활',
+    category: initialData?.category || '기타',
     checklistItems: initialData?.checklistItems && initialData.checklistItems.length > 0
       ? initialData.checklistItems.filter(item => item.trim() !== '')
       : [''],
@@ -169,6 +169,8 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
   const [isExtracting, setIsExtracting] = useState(false);
   const [hasExtracted, setHasExtracted] = useState(false);
   const [lastExtractedMemo, setLastExtractedMemo] = useState<string>(''); // 마지막으로 추출된 메모 저장
+  const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false); // 덮어쓰기 확인 다이얼로그
+  const [pendingExtractedInfo, setPendingExtractedInfo] = useState<any>(null); // 확인 대기 중인 추출 정보
 
   // initialData가 변경되거나 모달이 열릴 때 formData 업데이트
   useEffect(() => {
@@ -195,7 +197,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
         endTime: endTime,
         isAllDay: isAllDay,
         postponeToNextDay: initialData.postponeToNextDay || false,
-        category: initialData.category || '생활',
+        category: initialData.category || '기타',
         checklistItems: initialData.checklistItems && initialData.checklistItems.length > 0
           ? initialData.checklistItems.filter(item => item && item.trim() !== '')
           : [],
@@ -234,7 +236,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
         endTime: '10:00',
         isAllDay: false,
         postponeToNextDay: false,
-        category: '생활',
+        category: '기타',
         checklistItems: [''],
         memo: '',
         hasNotification: false,
@@ -468,6 +470,14 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
       return;
     }
 
+    // 기존에 작성된 일정이 있는지 확인 (제목, 날짜, 시간 중 하나라도 있으면)
+    const hasExistingData = formData.title.trim() || 
+                            formData.date !== formatLocalDate(new Date()) || 
+                            (formData.startTime && formData.startTime !== '09:00') ||
+                            (formData.endTime && formData.endTime !== '10:00') ||
+                            formData.location.trim() ||
+                            formData.category !== '기타';
+
     try {
       setIsExtracting(true);
       toast.loading('일정 정보를 추출하는 중...');
@@ -485,31 +495,19 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
           }));
         }
 
-        // 추출된 정보로 폼 업데이트 (모든 필드 자동 채움)
-        setFormData({
-          ...formData,
-          title: info.title || formData.title,
-          date: info.date || formData.date,
-          endDate: info.end_date || info.date || formData.endDate,
-          startTime: info.start_time || (info.all_day ? '' : (formData.startTime || '09:00')),
-          endTime: info.end_time || (info.all_day ? '' : (formData.endTime || '10:00')),
-          isAllDay: info.all_day !== undefined ? info.all_day : formData.isAllDay,
-          category: info.category || formData.category,
-          checklistItems: info.checklist && info.checklist.length > 0 ? info.checklist : formData.checklistItems,
-          location: info.location || formData.location,
-          memo: info.memo || formData.memo,
-          repeatType: info.repeat_type || formData.repeatType,
-          repeatEndDate: info.repeat_end_date || formData.repeatEndDate,
-          repeatPattern: info.repeat_pattern || formData.repeatPattern,
-          hasNotification: info.has_notification !== undefined ? info.has_notification : formData.hasNotification,
-          alarmTimes: info.notification_times || formData.alarmTimes,
-          notificationReminders: notificationReminders.length > 0 ? notificationReminders : formData.notificationReminders,
-        });
-
-        setHasExtracted(true);
-        setLastExtractedMemo(formData.memo); // 추출된 메모 저장
-        toast.dismiss();
-        toast.success('일정 정보가 자동으로 추출되었습니다. 확인 후 저장해주세요.');
+        // 기존에 작성된 일정이 있으면 확인 다이얼로그 표시
+        if (hasExistingData) {
+          setPendingExtractedInfo(info);
+          setPendingExtractedInfo({
+            ...info,
+            notificationReminders: notificationReminders,
+          });
+          setShowOverwriteConfirm(true);
+          toast.dismiss();
+        } else {
+          // 기존 일정이 없으면 바로 업데이트
+          applyExtractedInfo(info, notificationReminders);
+        }
       } else {
         toast.dismiss();
         toast.error('일정 정보 추출에 실패했습니다.');
@@ -521,6 +519,34 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
     } finally {
       setIsExtracting(false);
     }
+  };
+
+  // 추출된 정보를 폼에 적용하는 함수
+  const applyExtractedInfo = (info: any, notificationReminders: NotificationReminder[]) => {
+    setFormData({
+      ...formData,
+      title: info.title || formData.title,
+      date: info.date || formData.date,
+      endDate: info.end_date || info.date || formData.endDate,
+      startTime: info.start_time || (info.all_day ? '' : (formData.startTime || '09:00')),
+      endTime: info.end_time || (info.all_day ? '' : (formData.endTime || '10:00')),
+      isAllDay: info.all_day !== undefined ? info.all_day : formData.isAllDay,
+      category: info.category || formData.category,
+      checklistItems: info.checklist && info.checklist.length > 0 ? info.checklist : formData.checklistItems,
+      location: info.location || formData.location,
+      memo: info.memo || formData.memo,
+      repeatType: info.repeat_type || formData.repeatType,
+      repeatEndDate: info.repeat_end_date || formData.repeatEndDate,
+      repeatPattern: info.repeat_pattern || formData.repeatPattern,
+      hasNotification: info.has_notification !== undefined ? info.has_notification : formData.hasNotification,
+      alarmTimes: info.notification_times || formData.alarmTimes,
+      notificationReminders: notificationReminders.length > 0 ? notificationReminders : formData.notificationReminders,
+      assignedMemberIds: info.assigned_member_ids || formData.assignedMemberIds || [],
+    });
+
+    setHasExtracted(true);
+    setLastExtractedMemo(formData.memo);
+    toast.success('일정 정보가 자동으로 추출되었습니다. 확인 후 저장해주세요.');
   };
 
   const handleSave = async () => {
@@ -647,7 +673,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                   placeholder="일정 제목을 입력하세요"
-                  className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
+                  className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
                 />
               </div>
 
@@ -673,7 +699,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                           endDate: formData.endDate && formData.endDate < newDate ? newDate : (formData.endDate || newDate)
                         });
                       }}
-                      className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
+                      className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
                     />
                   </div>
                   <div>
@@ -683,7 +709,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                       value={formData.endDate || ''}
                       min={formData.date} // 시작 날짜 이후만 선택 가능
                       onChange={(e) => setFormData({ ...formData, endDate: e.target.value || undefined })}
-                      className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
+                      className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
                       placeholder="종료 날짜를 선택하면 여러 날에 일정이 생성됩니다"
                     />
                     {formData.endDate && (
@@ -695,11 +721,11 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                 </div>
               </div>
 
-              {/* 시작/종료 시간 */}
+              {/* 시간 설정 */}
               <div>
                 <label className="block text-sm font-medium text-[#1F2937] mb-2 flex items-center gap-2">
                   <Clock size={18} className="text-[#FF9B82]" />
-                  시작/종료 시간
+                  시간 설정
                 </label>
                 <div className="grid grid-cols-2 gap-4 mb-3">
                   <div>
@@ -707,7 +733,17 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                     <input
                       type="time"
                       value={formData.startTime}
-                      onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
+                      onChange={(e) => {
+                        const newStartTime = e.target.value;
+                        // 하루만 선택된 경우 종료 시간 자동 계산 (시작 시간 + 1시간)
+                        let newEndTime = formData.endTime;
+                        if (formData.date === formData.endDate && newStartTime && !formData.isAllDay) {
+                          const [hours, minutes] = newStartTime.split(':').map(Number);
+                          const endHours = (hours + 1) % 24;
+                          newEndTime = `${String(endHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+                        }
+                        setFormData({ ...formData, startTime: newStartTime, endTime: newEndTime });
+                      }}
                       disabled={formData.isAllDay}
                       className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF]"
                     />
@@ -812,7 +848,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                   value={formData.location || ''}
                   onChange={(e) => setFormData({ ...formData, location: e.target.value })}
                   placeholder="장소를 입력하세요"
-                  className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
+                  className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
                 />
               </div>
 
@@ -826,7 +862,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                   onChange={(e) => setFormData({ ...formData, memo: e.target.value })}
                   placeholder="메모를 입력하세요"
                   rows={3}
-                  className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent resize-none"
+                  className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent resize-none"
                 />
                 <button
                   type="button"
@@ -871,8 +907,8 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                     </option>
                   ))}
                 </select>
-                {/* 반복이 선택된 경우 반복 종료일 설정 */}
-                {formData.repeatType && formData.repeatType !== 'none' && (
+                {/* 반복이 선택된 경우 반복 종료일 설정 (맞춤 옵션이 아닌 경우만) */}
+                {formData.repeatType && formData.repeatType !== 'none' && formData.repeatType !== 'custom' && (
                   <div>
                     <label className="block text-xs text-[#6B7280] mb-1">반복 종료일 (선택사항)</label>
                     <input
@@ -880,7 +916,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                       value={formData.repeatEndDate || ''}
                       min={formData.date} // 시작 날짜 이후만 선택 가능
                       onChange={(e) => setFormData({ ...formData, repeatEndDate: e.target.value || undefined })}
-                      className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
+                      className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
                       placeholder="반복 종료일을 선택하세요"
                     />
                     {formData.repeatEndDate && (
@@ -892,7 +928,7 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                 )}
                 {/* 맞춤 반복인 경우 추가 설정 */}
                 {formData.repeatType === 'custom' && (
-                  <div className="mt-3 p-4 bg-[#F9FAFB] rounded-lg space-y-4">
+                  <div className="mt-3 p-4 space-y-4">
                     {/* 반복 주기 */}
                     <div>
                       <label className="block text-xs font-medium text-[#6B7280] mb-2">
@@ -925,21 +961,20 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                       </div>
                     </div>
 
-                    {/* 반복 요일 (주 단위인 경우만 표시) */}
-                    {formData.customRepeatUnit === 'weeks' && (
-                      <div>
-                        <label className="block text-xs font-medium text-[#6B7280] mb-2">
-                          반복 요일
-                        </label>
-                        <div className="flex flex-wrap gap-2">
-                          {[
-                            { value: 0, label: '일' },
-                            { value: 1, label: '월' },
-                            { value: 2, label: '화' },
-                            { value: 3, label: '수' },
-                            { value: 4, label: '목' },
-                            { value: 5, label: '금' },
-                            { value: 6, label: '토' },
+                    {/* 반복 요일 (맞춤 옵션에서는 항상 표시) */}
+                    <div>
+                      <label className="block text-xs font-medium text-[#6B7280] mb-2">
+                        반복 요일
+                      </label>
+                      <div className="flex gap-2 justify-center">
+                        {[
+                          { value: 0, label: '일' },
+                          { value: 1, label: '월' },
+                          { value: 2, label: '화' },
+                          { value: 3, label: '수' },
+                          { value: 4, label: '목' },
+                          { value: 5, label: '금' },
+                          { value: 6, label: '토' },
                           ].map((day) => (
                             <button
                               key={day.value}
@@ -947,24 +982,27 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                               onClick={() => {
                                 const currentDays = formData.customRepeatDays || [];
                                 const isSelected = currentDays.includes(day.value);
+                                const newDays = isSelected
+                                  ? currentDays.filter(d => d !== day.value)
+                                  : [...currentDays, day.value].sort();
+                                // 요일이 선택되면 자동으로 주 단위로 설정
+                                const newUnit = newDays.length > 0 ? 'weeks' : formData.customRepeatUnit;
                                 setFormData({
                                   ...formData,
-                                  customRepeatDays: isSelected
-                                    ? currentDays.filter(d => d !== day.value)
-                                    : [...currentDays, day.value].sort(),
+                                  customRepeatDays: newDays,
+                                  customRepeatUnit: newUnit,
                                 });
                               }}
-                              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${(formData.customRepeatDays || []).includes(day.value)
-                                ? 'bg-[#FF9B82] text-white'
-                                : 'bg-white border border-[#D1D5DB] text-[#6B7280] hover:bg-[#F9FAFB]'
-                                }`}
-                            >
-                              {day.label}
-                            </button>
-                          ))}
-                        </div>
+                            className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${(formData.customRepeatDays || []).includes(day.value)
+                              ? 'bg-[#FF9B82] text-white'
+                              : 'bg-white border border-[#D1D5DB] text-[#6B7280] hover:bg-[#F9FAFB]'
+                              }`}
+                          >
+                            {day.label}
+                          </button>
+                        ))}
                       </div>
-                    )}
+                    </div>
 
                     {/* 종료 */}
                     <div>
@@ -1000,18 +1038,17 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                             className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] focus:ring-[#FF9B82]"
                           />
                           <span className="text-sm text-[#6B7280]">날짜:</span>
-                          {formData.customRepeatEndType === 'date' && (
-                            <input
-                              type="date"
-                              value={formData.customRepeatEndDate || ''}
-                              onChange={(e) => setFormData({
-                                ...formData,
-                                customRepeatEndDate: e.target.value
-                              })}
-                              min={formData.date}
-                              className="flex-1 px-3 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm"
-                            />
-                          )}
+                          <input
+                            type="date"
+                            value={formData.customRepeatEndDate || ''}
+                            onChange={(e) => setFormData({
+                              ...formData,
+                              customRepeatEndDate: e.target.value
+                            })}
+                            min={formData.date}
+                            disabled={formData.customRepeatEndType !== 'date'}
+                            className="flex-1 px-3 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF]"
+                          />
                         </label>
 
                         <label className="flex items-center gap-2">
@@ -1027,21 +1064,18 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                             className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] focus:ring-[#FF9B82]"
                           />
                           <span className="text-sm text-[#6B7280]">다음</span>
-                          {formData.customRepeatEndType === 'count' && (
-                            <>
-                              <input
-                                type="number"
-                                min="1"
-                                value={formData.customRepeatCount || 10}
-                                onChange={(e) => setFormData({
-                                  ...formData,
-                                  customRepeatCount: parseInt(e.target.value) || 10
-                                })}
-                                className="w-20 px-3 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm"
-                              />
-                              <span className="text-sm text-[#6B7280]">회 반복</span>
-                            </>
-                          )}
+                          <input
+                            type="number"
+                            min="1"
+                            value={formData.customRepeatCount || 10}
+                            onChange={(e) => setFormData({
+                              ...formData,
+                              customRepeatCount: parseInt(e.target.value) || 10
+                            })}
+                            disabled={formData.customRepeatEndType !== 'count'}
+                            className="w-20 px-3 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF]"
+                          />
+                          <span className="text-sm text-[#6B7280]">회 반복</span>
                         </label>
                       </div>
                     </div>
@@ -1157,6 +1191,49 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
   // 기본 모달 구조로 렌더링
   return (
     <>
+      {/* 덮어쓰기 확인 다이얼로그 */}
+      {showOverwriteConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-[#1F2937] mb-2">기존 일정 덮어쓰기</h3>
+            <p className="text-sm text-[#6B7280] mb-6">
+              기존에 작성하던 일정에 덮어 쓸까요?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowOverwriteConfirm(false);
+                  setPendingExtractedInfo(null);
+                }}
+                className="flex-1 px-4 py-3 border border-[#D1D5DB] rounded-lg text-[#6B7280] hover:bg-[#F9FAFB] transition-colors font-medium"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => {
+                  if (pendingExtractedInfo) {
+                    const notificationReminders: NotificationReminder[] = [];
+                    if (pendingExtractedInfo.notification_reminders && Array.isArray(pendingExtractedInfo.notification_reminders)) {
+                      pendingExtractedInfo.notification_reminders.forEach((r: any) => {
+                        notificationReminders.push({
+                          value: Number(r.value) || 30,
+                          unit: r.unit || 'minutes'
+                        });
+                      });
+                    }
+                    applyExtractedInfo(pendingExtractedInfo, notificationReminders);
+                  }
+                  setShowOverwriteConfirm(false);
+                  setPendingExtractedInfo(null);
+                }}
+                className="flex-1 px-4 py-3 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] transition-colors font-medium"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* 배경 오버레이 */}
       <div
         className="fixed inset-0 bg-black/30 z-40 transition-opacity duration-200"

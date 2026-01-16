@@ -125,8 +125,15 @@ def send_scheduled_emails(db: Session):
                                 try:
                                     member_ids = json.loads(todo.family_member_ids) if isinstance(todo.family_member_ids, str) else todo.family_member_ids
                                     if isinstance(member_ids, list) and len(member_ids) > 0:
-                                        members = db.query(FamilyMember).filter(FamilyMember.id.in_(member_ids)).all()
-                                        assigned_members = [{"emoji": m.emoji or "👤", "name": m.name} for m in members]
+                                        # "me"가 포함되어 있으면 사용자 정보 추가
+                                        if "me" in member_ids:
+                                            assigned_members.append({"emoji": user.avatar_emoji or "👤", "name": user.name})
+                                        # FamilyMember 조회 (me 제외)
+                                        filtered_member_ids = [mid for mid in member_ids if mid != "me"]
+                                        if filtered_member_ids:
+                                            members = db.query(FamilyMember).filter(FamilyMember.id.in_(filtered_member_ids)).all()
+                                            for m in members:
+                                                assigned_members.append({"emoji": m.emoji or "👤", "name": m.name})
                                 except:
                                     pass
                             

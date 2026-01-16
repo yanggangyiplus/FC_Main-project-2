@@ -10,6 +10,7 @@ import logging
 
 from app.database import get_db
 from app.models.user import User
+from app.models.models import FamilyMember
 from app.schemas import STTResponse, OCRResponse, OCRReceiptResponse
 from app.services.ai_service import GeminiSTTService, GeminiOCRService, ClaudeOCRService, TesseractOCRService
 from app.api.routes.auth import get_current_user
@@ -252,7 +253,23 @@ async def extract_todo_info(
     - notification_times: 알림 시간 배열
     """
     try:
-        result = await gemini_stt.extract_todo_info(request.text)
+        # 가족 구성원 정보 조회 (담당 프로필 이름 매칭용)
+        family_members = db.query(FamilyMember).filter(
+            FamilyMember.user_id == current_user.id,
+            FamilyMember.deleted_at.is_(None)
+        ).all()
+        
+        # 가족 구성원 이름 목록 생성 (나, 사용자 이름 포함)
+        member_names = []
+        if current_user.name:
+            member_names.append(current_user.name)
+        member_names.append("나")
+        for member in family_members:
+            if member.name:
+                member_names.append(member.name)
+        
+        # AI 서비스에 가족 구성원 이름 목록 전달
+        result = await gemini_stt.extract_todo_info(request.text, member_names=member_names, family_members=[{"id": member.id, "name": member.name} for member in family_members])
         
         if not result.get('success'):
             raise HTTPException(
@@ -277,6 +294,7 @@ async def extract_todo_info(
             "has_notification": result.get("has_notification", False),
             "notification_times": result.get("notification_times", []),
             "notification_reminders": result.get("notification_reminders", []),  # 새로운 알림 형식
+            "assigned_member_ids": result.get("assigned_member_ids", []),  # 담당 프로필 ID 목록
             "timestamp": datetime.utcnow().isoformat()
         }
         

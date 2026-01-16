@@ -248,11 +248,14 @@ async def create_todo(
     
     # 반복 일정인 경우 그룹 ID 생성 (없으면 생성)
     import uuid
-    if todo.repeat_type and todo.repeat_type != "none" and not todo.todo_group_id:
-        todo.todo_group_id = f"repeat_{uuid.uuid4().hex[:12]}"
-        logger.info(f"[CREATE_TODO] 반복 그룹 ID 생성: {todo.todo_group_id}")
+    repeat_group_id = todo.todo_group_id
+    if todo.repeat_type and todo.repeat_type != "none":
+        if not repeat_group_id:
+            repeat_group_id = f"repeat_{uuid.uuid4().hex[:12]}"
+            logger.info(f"[CREATE_TODO] 반복 그룹 ID 생성: {repeat_group_id}")
+        todo.todo_group_id = repeat_group_id
     
-    db_todo.todo_group_id = todo.todo_group_id  # 그룹 ID 설정
+    db_todo.todo_group_id = repeat_group_id  # 그룹 ID 설정 (반복 일정인 경우 반복 그룹 ID 사용)
     db.add(db_todo)
     db.commit()
     db.refresh(db_todo)
@@ -299,15 +302,14 @@ async def create_todo(
         
         from datetime import timedelta
         
-        # 반복 그룹 ID (첫 번째 일정과 동일한 그룹 ID 사용)
+        # 반복 그룹 ID는 이미 설정된 값 사용 (원본 일정과 동일)
         repeat_group_id = db_todo.todo_group_id
         if not repeat_group_id:
-            import uuid
             repeat_group_id = f"repeat_{uuid.uuid4().hex[:12]}"
             db_todo.todo_group_id = repeat_group_id
             db.commit()
             db.refresh(db_todo)
-        logger.info(f"[CREATE_TODO] 반복 그룹 ID: {repeat_group_id}")
+        logger.info(f"[CREATE_TODO] 반복 그룹 ID: {repeat_group_id} (원본 일정과 동일)")
         
         # 시작 날짜와 종료 날짜
         start_date = db_todo.date

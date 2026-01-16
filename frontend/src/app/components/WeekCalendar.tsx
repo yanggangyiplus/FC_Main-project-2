@@ -480,7 +480,7 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
                           onMouseLeave={() => setHoveredTodo(null)}
                           onClick={() => handleItemClick(todo.id)}
                         >
-                          <div className="text-xs font-medium truncate pointer-events-none flex-1">
+                          <div className={`text-xs font-medium truncate pointer-events-none flex-1 ${todo.completed ? 'line-through opacity-70' : ''}`}>
                             {todo.title}
                           </div>
                         </div>
@@ -555,7 +555,7 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
                         )}
 
                         {/* Content */}
-                        <div className="text-xs font-medium truncate pointer-events-none">
+                        <div className={`text-xs font-medium truncate pointer-events-none ${todo.completed ? 'line-through opacity-70' : ''}`}>
                           {todo.title}
                         </div>
                         <div className={`text-xs opacity-90 pointer-events-none ${backgroundColor ? 'text-white' : ''}`}>

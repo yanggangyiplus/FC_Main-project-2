@@ -15,6 +15,7 @@ import {
   Tag,
   Calendar,
   MapPin,
+  Repeat,
 } from "lucide-react";
 import { CommunityScreen } from "./CommunityScreen";
 import { MyPageScreen } from "./MyPageScreen";
@@ -677,6 +678,12 @@ export function CalendarHomeScreen() {
       // time과 duration을 start_time과 end_time으로 변환
       const apiUpdates: any = { ...updates };
 
+      // completed를 status로 변환
+      if (updates.completed !== undefined) {
+        apiUpdates.status = updates.completed ? 'completed' : 'pending';
+        delete apiUpdates.completed;
+      }
+
       if (updates.time !== undefined || updates.duration !== undefined) {
         const todo = todos.find(t => t.id === todoId);
         if (todo) {
@@ -856,7 +863,16 @@ export function CalendarHomeScreen() {
           : undefined,
         repeat_type: formData.repeatType || "none",
         repeat_end_date: formData.repeatEndDate || undefined,
-        repeat_pattern: formData.repeatPattern || undefined,
+        // 맞춤 반복인 경우 repeat_pattern 생성
+        repeat_pattern: formData.repeatType === 'custom' ? {
+          // 요일이 선택되어 있으면 자동으로 주 단위로 설정
+          freq: (formData.customRepeatDays && formData.customRepeatDays.length > 0) ? 'weeks' : (formData.customRepeatUnit || 'days'),
+          interval: formData.customRepeatInterval || 1,
+          days: formData.customRepeatDays || [],
+          endType: formData.customRepeatEndType || 'never',
+          endDate: formData.customRepeatEndType === 'date' ? formData.customRepeatEndDate : undefined,
+          count: formData.customRepeatEndType === 'count' ? formData.customRepeatCount : undefined,
+        } : (formData.repeatPattern || undefined),
         checklist_items: formData.checklistItems && formData.checklistItems.length > 0
           ? formData.checklistItems.filter((item: string) => item.trim())
           : undefined,
@@ -2718,6 +2734,52 @@ export function CalendarHomeScreen() {
                   </div>
                 )}
 
+                {/* 반복 설정 */}
+                {todo.repeatType && todo.repeatType !== 'none' && (
+                  <div className="flex items-start gap-3 text-sm text-[#6B7280] pt-4 border-t border-[#F3F4F6]">
+                    <Repeat size={18} className="text-[#9CA3AF] mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <h4 className="text-sm font-medium text-[#1F2937] mb-1">반복 설정</h4>
+                      <p className="text-sm text-[#6B7280]">
+                        {todo.repeatType === 'daily' && '매일 반복'}
+                        {todo.repeatType === 'weekly' && '매주 반복'}
+                        {todo.repeatType === 'monthly' && '매월 반복'}
+                        {todo.repeatType === 'yearly' && '매년 반복'}
+                        {todo.repeatType === 'weekdays' && '평일 반복'}
+                        {todo.repeatType === 'weekends' && '주말 반복'}
+                        {todo.repeatType === 'custom' && '맞춤 반복'}
+                        {todo.repeatEndDate && ` (${new Date(todo.repeatEndDate).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })}까지)`}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* 알림 설정 */}
+                {todo.hasNotification && (
+                  <div className="flex items-start gap-3 text-sm text-[#6B7280] pt-4 border-t border-[#F3F4F6]">
+                    <Bell size={18} className="text-[#9CA3AF] mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <h4 className="text-sm font-medium text-[#1F2937] mb-1">알림 설정</h4>
+                      <div className="space-y-1">
+                        {todo.notificationReminders && todo.notificationReminders.length > 0 ? (
+                          todo.notificationReminders.map((reminder: any, index: number) => {
+                            const value = typeof reminder === 'object' ? reminder.value : reminder;
+                            const unit = typeof reminder === 'object' ? reminder.unit : 'minutes';
+                            const unitText = unit === 'minutes' ? '분' : unit === 'hours' ? '시간' : unit === 'days' ? '일' : '주';
+                            return (
+                              <p key={index} className="text-sm text-[#6B7280]">
+                                일정 {value}{unitText} 전 알림
+                              </p>
+                            );
+                          })
+                        ) : (
+                          <p className="text-sm text-[#6B7280]">알림이 설정되어 있습니다</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Description */}
                 {todo.description && (
                   <div className="pt-4 border-t border-[#F3F4F6]">
@@ -2839,6 +2901,9 @@ export function CalendarHomeScreen() {
                             const endMins = endTotalMinutes % 60;
                             const endTime = `${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}`;
 
+                            // todo_group_id 생성 또는 기존 그룹 ID 사용
+                            const todoGroupId = todo.todoGroupId || `postpone_${todo.id}_${Date.now()}`;
+
                             const nextDayTodoData = {
                               title: todo.title,
                               description: todo.memo || "",
@@ -2855,7 +2920,17 @@ export function CalendarHomeScreen() {
                               repeat_type: "none",
                               checklist_items: todo.checklistItems || [],
                               assigned_member_ids: todo.assignedMemberIds || [],
+                              todo_group_id: todoGroupId, // 그룹 ID 설정
                             };
+
+                            // 원본 일정도 같은 그룹 ID로 업데이트 (아직 그룹 ID가 없는 경우)
+                            if (!todo.todoGroupId) {
+                              try {
+                                await apiClient.updateTodo(todo.id, { todo_group_id: todoGroupId });
+                              } catch (error) {
+                                console.error("원본 일정 그룹 ID 업데이트 실패:", error);
+                              }
+                            }
 
                             console.log("다음날 일정 생성 시작:", nextDayTodoData);
                             const response = await apiClient.createTodo(nextDayTodoData);

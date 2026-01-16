@@ -616,7 +616,7 @@ async def sync_all_todos_to_google_calendar(
                         start_time=start_time_obj,
                         end_time=end_time_obj,
                         all_day=all_day,
-                        category="기타",
+                        category="구글",
                         status="pending",
                         priority="medium",
                         source="google_calendar",  # Google Calendar에서 가져온 일정임을 명시

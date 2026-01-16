@@ -119,8 +119,8 @@ class EmailService:
         # 담당 프로필 정보 포맷팅
         member_info = ""
         if assigned_members and len(assigned_members) > 0:
-            member_names = [f"{m.get('emoji', '👤')} {m.get('name', '')}" for m in assigned_members]
-            member_info = f"<p style='color: #6b7280; font-size: 14px; margin-bottom: 20px;'>{(', '.join(member_names))}의 일정을 확인해주세요.</p>"
+            member_names = [f"{m.get('emoji', '👤')} {m.get('name', '')}님" for m in assigned_members]
+            member_info = f"<p style='color: #6b7280; font-size: 14px; margin-bottom: 20px;'>{( ' & '.join(member_names))}의 일정을 확인해주세요.</p>"
         else:
             member_info = "<p style='color: #6b7280; font-size: 14px; margin-bottom: 20px;'>일정을 확인해주세요.</p>"
         
@@ -257,8 +257,8 @@ class EmailService:
         
         # 담당 프로필 텍스트
         if assigned_members and len(assigned_members) > 0:
-            member_names = [f"{m.get('emoji', '👤')} {m.get('name', '')}" for m in assigned_members]
-            member_text = f"{', '.join(member_names)}의 일정을 확인해주세요."
+            member_names = [f"{m.get('emoji', '👤')} {m.get('name', '')}님" for m in assigned_members]
+            member_text = f"{' & '.join(member_names)}의 일정을 확인해주세요."
         else:
             member_text = "일정을 확인해주세요."
         
