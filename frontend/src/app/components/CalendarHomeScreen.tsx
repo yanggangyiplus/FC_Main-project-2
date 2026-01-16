@@ -1200,6 +1200,34 @@ export function CalendarHomeScreen() {
     return todos.filter(t => {
       if (t.isRoutine || !t.date) return false;
 
+      // 프로필 필터링 (assignedMemberIds 지원)
+      if (selectedMembers.length > 0) {
+        // 프로필이 선택되어 있는 경우:
+        // - 담당 프로필이 있는 일정: 선택된 프로필에 포함되어야 함
+        // - 담당 프로필이 없는 일정: 표시 (프로필이 선택되어 있어도 담당 프로필 없는 일정은 표시)
+        const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+        const hasMemberId = t.memberId;
+        
+        if (hasAssignedMembers) {
+          // assignedMemberIds 중 하나라도 선택된 프로필에 포함되어야 함
+          const assignedIds = t.assignedMemberIds.map((id: any) => String(id));
+          const selectedIds = selectedMembers.map((id: string) => String(id));
+          const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+          if (!hasSelectedMember) {
+            return false;
+          }
+        } else if (hasMemberId && !selectedMembers.includes(String(t.memberId))) {
+          return false;
+        }
+        // 담당 프로필이 없으면 표시
+      } else {
+        // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+        const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+        if (t.memberId || hasAssignedMembers) {
+          return false;
+        }
+      }
+
       // 시작일과 동일한 경우
       if (t.date === selectedDate) return true;
 
@@ -1664,7 +1692,35 @@ export function CalendarHomeScreen() {
                       </h3>
                       <div className="space-y-3">
                         {(() => {
-                          const selectedDateTodos = todos.filter(t => t.date === selectedDate);
+                          // 프로필 필터링 적용
+                          const selectedDateTodos = todos.filter(t => {
+                            if (!t.date || t.date !== selectedDate) return false;
+                            
+                            // 프로필 필터링 (assignedMemberIds 지원)
+                            if (selectedMembers.length > 0) {
+                              const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                              const hasMemberId = t.memberId;
+                              
+                              if (hasAssignedMembers) {
+                                const assignedIds = t.assignedMemberIds.map((id: any) => String(id));
+                                const selectedIds = selectedMembers.map((id: string) => String(id));
+                                const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+                                if (!hasSelectedMember) {
+                                  return false;
+                                }
+                              } else if (hasMemberId && !selectedMembers.includes(String(t.memberId))) {
+                                return false;
+                              }
+                            } else {
+                              // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+                              const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                              if (t.memberId || hasAssignedMembers) {
+                                return false;
+                              }
+                            }
+                            
+                            return true;
+                          });
                           return selectedDateTodos.length > 0 ? (
                             selectedDateTodos.map((todo) => (
                               <div
