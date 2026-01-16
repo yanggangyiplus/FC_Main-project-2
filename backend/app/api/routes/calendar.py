@@ -1309,10 +1309,13 @@ async def toggle_calendar_import(
         for todo in todos_to_delete:
             try:
                 # 웹앱에서만 소프트 삭제 (deleted_at 설정)
-                # Google Calendar API를 호출하지 않으므로 Google Calendar의 실제 이벤트는 유지됨
+                # 중요: Google Calendar API를 호출하지 않으므로 Google Calendar의 실제 이벤트는 절대 삭제되지 않음
+                # Google Calendar의 실제 이벤트는 그대로 유지되고, 웹앱에서만 표시되지 않도록 함
+                # GoogleCalendarService.delete_event()를 호출하지 않음
                 todo.deleted_at = datetime.utcnow()
+                # google_calendar_event_id는 그대로 유지 (Google Calendar 이벤트 참조 유지)
                 deleted_count += 1
-                logger.info(f"[TOGGLE_IMPORT] 웹앱에서 일정 숨김 (Google Calendar 이벤트는 유지): todo_id={todo.id}, title={todo.title}, google_calendar_event_id={todo.google_calendar_event_id}")
+                logger.info(f"[TOGGLE_IMPORT] 웹앱에서 일정 숨김 (Google Calendar 이벤트는 유지, API 호출 없음): todo_id={todo.id}, title={todo.title}, google_calendar_event_id={todo.google_calendar_event_id}")
             except Exception as e:
                 logger.error(f"[TOGGLE_IMPORT] 일정 숨김 실패: todo_id={todo.id}, error={e}")
         
@@ -1552,23 +1555,26 @@ async def toggle_calendar_export(
             deleted_count = 0  # 토글 켤 때는 삭제 없음
             
         else:
-            # 토글을 끌 때: Google Calendar의 모든 Always Plan 일정 삭제 (bulk_synced 상태와 무관)
-            logger.info("[TOGGLE_EXPORT] 토글 꺼짐 - Google Calendar 이벤트 삭제 시작 (모든 Always Plan 일정 삭제)")
+            # 토글을 끌 때: Always Plan에서 생성한 일정만 Google Calendar에서 삭제
+            # 중요: Google Calendar에서 가져온 일정(source='google_calendar')은 삭제하지 않음
+            logger.info("[TOGGLE_EXPORT] 토글 꺼짐 - Always Plan 일정만 Google Calendar에서 삭제 시작 (Google Calendar에서 가져온 일정은 제외)")
             
-            # Google Calendar에 동기화된 모든 일정 조회 (bulk_synced 상태와 무관)
+            # Always Plan에서 생성한 일정만 조회 (Google Calendar에서 가져온 일정 제외)
+            # source != 'google_calendar'이고 google_calendar_event_id가 있는 일정만 삭제
             todos_to_unsync = db.query(Todo).filter(
                 Todo.user_id == current_user.id,
                 Todo.deleted_at.is_(None),
-                Todo.google_calendar_event_id.isnot(None)
+                Todo.google_calendar_event_id.isnot(None),
+                Todo.source != 'google_calendar'  # Google Calendar에서 가져온 일정은 제외
             ).all()
             
-            logger.info(f"[TOGGLE_EXPORT] 삭제할 일정: {len(todos_to_unsync)}개 (Google Calendar에 동기화된 모든 일정)")
+            logger.info(f"[TOGGLE_EXPORT] 삭제할 일정: {len(todos_to_unsync)}개 (Always Plan에서 생성한 일정만, Google Calendar에서 가져온 일정은 제외)")
             
             # 삭제할 일정의 상세 정보 로깅
             if todos_to_unsync:
-                logger.info(f"[TOGGLE_EXPORT] 삭제할 일정 상세:")
+                logger.info(f"[TOGGLE_EXPORT] 삭제할 일정 상세 (Always Plan에서 생성한 일정만):")
                 for todo in todos_to_unsync:
-                    logger.info(f"  - todo_id={todo.id}, title={todo.title}, event_id={todo.google_calendar_event_id}, bulk_synced={todo.bulk_synced}")
+                    logger.info(f"  - todo_id={todo.id}, title={todo.title}, event_id={todo.google_calendar_event_id}, source={todo.source}, bulk_synced={todo.bulk_synced}")
             
             deleted_count = 0
             failed_delete_count = 0
