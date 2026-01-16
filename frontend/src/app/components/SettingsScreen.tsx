@@ -7,9 +7,10 @@ interface SettingsScreenProps {
   isOpen: boolean;
   onClose: () => void;
   onRefreshCalendar?: (force?: boolean) => Promise<void>; // 동기화 새로고침 함수
+  onRefreshTodos?: () => Promise<void>; // 일정 목록 새로고침 함수
 }
 
-export function SettingsScreen({ isOpen, onClose, onRefreshCalendar }: SettingsScreenProps) {
+export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTodos }: SettingsScreenProps) {
   const [notificationEnabled, setNotificationEnabled] = useState(true);
   const [googleCalendarEnabled, setGoogleCalendarEnabled] = useState(false);
   const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false);
@@ -204,14 +205,19 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar }: SettingsS
                       setGoogleCalendarImportEnabled(newState);
 
                       if (!newState) {
-                        // 토글을 끌 때: Google Calendar 이벤트가 제거됨
-                        toast.success("Google Calendar 가져오기가 비활성화되었습니다. Google Calendar 일정이 제거됩니다.");
-                        // 토글을 끌 때: 바로 동기화 상태 업데이트 (Google Calendar 이벤트 제거)
-                        if (onRefreshCalendar) {
+                        // 토글을 끌 때: Google Calendar에서 가져온 일정들이 삭제됨
+                        const deletedCount = response.data?.deleted_count || 0;
+                        if (deletedCount > 0) {
+                          toast.success(`Google Calendar 가져오기가 비활성화되었습니다. ${deletedCount}개 Google Calendar 일정이 제거되었습니다.`);
+                        } else {
+                          toast.success("Google Calendar 가져오기가 비활성화되었습니다. Google Calendar 일정이 제거됩니다.");
+                        }
+                        // 일정 목록 새로고침 (삭제된 일정 반영)
+                        if (onRefreshTodos) {
                           try {
-                            await onRefreshCalendar(true);
-                          } catch (syncError) {
-                            console.error("동기화 상태 업데이트 실패:", syncError);
+                            await onRefreshTodos();
+                          } catch (error) {
+                            console.error("일정 목록 새로고침 실패:", error);
                           }
                         }
                       } else {
@@ -222,6 +228,14 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar }: SettingsS
                             await onRefreshCalendar(true);
                           } catch (syncError) {
                             console.error("동기화 실행 실패:", syncError);
+                          }
+                        }
+                        // 일정 목록 새로고침 (새로 가져온 일정 반영)
+                        if (onRefreshTodos) {
+                          try {
+                            await onRefreshTodos();
+                          } catch (error) {
+                            console.error("일정 목록 새로고침 실패:", error);
                           }
                         }
                       }
@@ -268,6 +282,8 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar }: SettingsS
                         } else {
                           toast.success("Always Plan 일정 내보내기가 비활성화되었습니다. (동기화 후 저장한 일정은 유지됩니다)");
                         }
+                        // 토글을 끌 때는 동기화를 호출하지 않음 (동기화가 비활성화되므로)
+                        // onRefreshCalendar를 호출하지 않음
                       } else {
                         // 토글을 켤 때: 바로 동기화 실행
                         const syncedCount = response.data?.synced_count || 0;

@@ -322,8 +322,10 @@ export function CalendarHomeScreen() {
       try {
         const response = await apiClient.getCalendarStatus();
         if (response.data) {
-          const enabled = response.data.enabled || false;
-          if (!enabled) {
+          const importEnabled = response.data.import_enabled || false;
+          const exportEnabled = response.data.export_enabled || false;
+          // 두 토글 중 하나도 활성화되어 있지 않으면 동기화 비활성화
+          if (!importEnabled && !exportEnabled) {
             setSyncStatus('disabled');
             setLastSyncTime(null); // 동기화 비활성화시 마지막 동기화 시간 초기화
           } else {
@@ -332,9 +334,14 @@ export function CalendarHomeScreen() {
               setSyncStatus('idle');
             }
           }
+        } else {
+          setSyncStatus('disabled');
+          setLastSyncTime(null);
         }
       } catch (error) {
         console.error('Failed to check Google Calendar status:', error);
+        setSyncStatus('disabled');
+        setLastSyncTime(null);
       }
     };
 
@@ -390,84 +397,88 @@ export function CalendarHomeScreen() {
   }, [userName, selectedEmoji]);
 
   // 할 일 로드
-  useEffect(() => {
-    const loadTodos = async () => {
-      try {
-        const response = await apiClient.getTodos();
-        console.log('Todos loaded:', response.data);
+  const loadTodos = useCallback(async () => {
+    try {
+      const response = await apiClient.getTodos();
+      console.log('Todos loaded:', response.data);
 
-        if (response.data && Array.isArray(response.data)) {
-          const formattedTodos = response.data.map((todo: any) => ({
-            id: todo.id,
-            title: todo.title,
-            description: todo.description,
-            time: todo.start_time ? `${todo.start_time}` : undefined,
-            rule: todo.category,
-            completed: todo.status === 'completed',
-            draft: todo.status === 'draft',
-            overdue: todo.status === 'overdue',
-            status: todo.status,
-            priority: todo.priority,
-            date: todo.date,
-            endDate: todo.end_date,
-            startTime: todo.start_time,
-            endTime: todo.end_time,
-            isAllDay: todo.all_day,
-            duration: todo.duration,
-            location: todo.location,
-            memo: todo.memo,
-            category: todo.category,
-            hasNotification: todo.has_notification,
-            notificationTimes: todo.notification_times || [],
-            notificationReminders: todo.notification_reminders || [],
-            repeatType: todo.repeat_type || "none",
-            repeatEndDate: todo.repeat_end_date,
-            repeatPattern: todo.repeat_pattern,
-            checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
-            memberId: todo.member_id,
-            assignedMemberIds: Array.isArray(todo.family_member_ids)
-              ? todo.family_member_ids
-              : (Array.isArray(todo.assigned_member_ids)
-                ? todo.assigned_member_ids
-                : (todo.family_member_ids ? [todo.family_member_ids] : (todo.assigned_member_ids ? [todo.assigned_member_ids] : []))),
-            isRoutine: todo.is_routine || false,
-            source: todo.source || 'always_plan',
-            googleCalendarEventId: todo.google_calendar_event_id || undefined,
-            bulkSynced: todo.bulk_synced || false,
-            todoGroupId: todo.todo_group_id || undefined,
-          }));
-          setTodos(formattedTodos);
-          console.log('[할 일 로드] 완료:', formattedTodos.length, '개');
-        }
-      } catch (error) {
-        console.error('Failed to load todos:', error);
+      if (response.data && Array.isArray(response.data)) {
+        const formattedTodos = response.data.map((todo: any) => ({
+          id: todo.id,
+          title: todo.title,
+          description: todo.description,
+          time: todo.start_time ? `${todo.start_time}` : undefined,
+          rule: todo.category,
+          completed: todo.status === 'completed',
+          draft: todo.status === 'draft',
+          overdue: todo.status === 'overdue',
+          status: todo.status,
+          priority: todo.priority,
+          date: todo.date,
+          endDate: todo.end_date,
+          startTime: todo.start_time,
+          endTime: todo.end_time,
+          isAllDay: todo.all_day,
+          duration: todo.duration,
+          location: todo.location,
+          memo: todo.memo,
+          category: todo.category,
+          hasNotification: todo.has_notification,
+          notificationTimes: todo.notification_times || [],
+          notificationReminders: todo.notification_reminders || [],
+          repeatType: todo.repeat_type || "none",
+          repeatEndDate: todo.repeat_end_date,
+          repeatPattern: todo.repeat_pattern,
+          checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
+          memberId: todo.member_id,
+          assignedMemberIds: Array.isArray(todo.family_member_ids)
+            ? todo.family_member_ids
+            : (Array.isArray(todo.assigned_member_ids)
+              ? todo.assigned_member_ids
+              : (todo.family_member_ids ? [todo.family_member_ids] : (todo.assigned_member_ids ? [todo.assigned_member_ids] : []))),
+          isRoutine: todo.is_routine || false,
+          source: todo.source || 'always_plan',
+          googleCalendarEventId: todo.google_calendar_event_id || undefined,
+          bulkSynced: todo.bulk_synced || false,
+          todoGroupId: todo.todo_group_id || undefined,
+        }));
+        setTodos(formattedTodos);
+        console.log('[할 일 로드] 완료:', formattedTodos.length, '개');
       }
-    };
-
-    loadTodos();
+    } catch (error) {
+      console.error('Failed to load todos:', error);
+    }
   }, []);
+
+  useEffect(() => {
+    loadTodos();
+  }, [loadTodos]);
 
   // Google Calendar 이벤트 로드
   const loadGoogleCalendarEvents = useCallback(async (force: boolean = false) => {
-    // 동기화가 비활성화되어 있으면 동기화하지 않음
-    if (syncStatus === 'disabled' && !force) {
-      return;
-    }
-
     // 동기화 상태 확인: import_enabled 또는 export_enabled 중 하나 이상이 활성화되어 있어야 함
     try {
       const statusResponse = await apiClient.getCalendarStatus();
       const importEnabled = statusResponse.data?.import_enabled || false;
       const exportEnabled = statusResponse.data?.export_enabled || false;
 
-      // 두 토글 중 하나도 활성화되어 있지 않으면 동기화 비활성화
+      // 두 토글 중 하나도 활성화되어 있지 않으면 동기화 비활성화 (force여도 무시)
       if (!importEnabled && !exportEnabled) {
         setSyncStatus('disabled');
         setLastSyncTime(null);
+        console.log('[동기화] 비활성화 상태 - 동기화 중단');
+        return;
+      }
+
+      // 동기화가 비활성화되어 있고 force가 아니면 동기화하지 않음
+      if (syncStatus === 'disabled' && !force) {
+        console.log('[동기화] 비활성화 상태 - 동기화 중단');
         return;
       }
     } catch (error) {
       console.error('Failed to check calendar status:', error);
+      setSyncStatus('disabled');
+      setLastSyncTime(null);
       return;
     }
 
@@ -2187,6 +2198,10 @@ export function CalendarHomeScreen() {
               onRefreshCalendar={async (force?: boolean) => {
                 // 사용자가 '동기화 새로고침' 버튼을 눌렀을 때
                 await loadGoogleCalendarEvents(force || true);
+              }}
+              onRefreshTodos={async () => {
+                // 일정 목록 새로고침
+                await loadTodos();
               }}
             />
           </div>

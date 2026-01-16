@@ -135,12 +135,21 @@ async def sync_all_todos_to_google_calendar(
         
         logger.info(f"[SYNC_ALL] 기존 이벤트 맵 생성 완료: {len(existing_events_map)}개")
         
-        # 2단계: Google Calendar에 동기화되지 않은 모든 일정 조회
-        todos_to_sync = db.query(Todo).filter(
-            Todo.user_id == current_user.id,
-            Todo.deleted_at.is_(None),
-            Todo.google_calendar_event_id.is_(None)  # 아직 동기화되지 않은 일정만
-        ).all()
+        # export_enabled 토글 확인
+        export_enabled = getattr(current_user, 'google_calendar_export_enabled', 'false') == 'true'
+        logger.info(f"[SYNC_ALL] Google Calendar 내보내기 토글 상태: {export_enabled}")
+        
+        # 2단계: Google Calendar에 동기화되지 않은 모든 일정 조회 (export_enabled가 활성화되어 있을 때만)
+        todos_to_sync = []
+        if export_enabled:
+            todos_to_sync = db.query(Todo).filter(
+                Todo.user_id == current_user.id,
+                Todo.deleted_at.is_(None),
+                Todo.google_calendar_event_id.is_(None)  # 아직 동기화되지 않은 일정만
+            ).all()
+            logger.info(f"[SYNC_ALL] 동기화할 일정: {len(todos_to_sync)}개")
+        else:
+            logger.info("[SYNC_ALL] Google Calendar 내보내기가 비활성화되어 있어 일정을 내보내지 않습니다.")
         
         # 3단계: 이미 동기화되었지만 bulk_synced=False인 일정도 bulk_synced=True로 설정
         # (토글을 꺼도 Google Calendar에 남아있도록 하기 위함)
@@ -161,343 +170,356 @@ async def sync_all_todos_to_google_calendar(
             db.commit()
             logger.info(f"[SYNC_ALL] {bulk_synced_count}개 이미 동기화된 일정을 bulk_synced=True로 설정 완료")
         
-        logger.info(f"[SYNC_ALL] 동기화할 일정: {len(todos_to_sync)}개")
-        
-        if not todos_to_sync:
-            return {
-                "success": True,
-                "synced_count": 0,
-                "matched_count": 0,
-                "failed_count": 0,
-                "message": "동기화할 일정이 없습니다"
-            }
-        
         synced_count = 0
         matched_count = 0  # 기존 이벤트와 매칭된 일정 수
         failed_count = 0
         failed_todos = []
         
-        for todo in todos_to_sync:
-            try:
-                # 날짜가 없는 일정은 건너뜀
-                if not todo.date:
-                    continue
-                
-                # 일정 키 생성 (제목_날짜_시간)
-                todo_date_str = todo.date.isoformat() if hasattr(todo.date, 'isoformat') else str(todo.date)
-                todo_time_str = None
-                if not todo.all_day and todo.start_time:
-                    if hasattr(todo.start_time, 'strftime'):
-                        todo_time_str = todo.start_time.strftime('%H:%M')
-                    else:
-                        todo_time_str = str(todo.start_time)
-                
-                key = f"{todo.title.strip()}_{todo_date_str}_{todo_time_str or 'all_day'}"
-                
-                # 기존 이벤트와 매칭 확인
-                if key in existing_events_map:
-                    # 이미 Google Calendar에 있는 이벤트와 매칭
-                    existing_event_id = existing_events_map[key]
-                    todo.google_calendar_event_id = existing_event_id
-                    todo.bulk_synced = True  # 일괄 동기화로 매칭된 일정도 표시
-                    db.commit()  # 변경사항 저장
-                    matched_count += 1
-                    logger.info(f"[SYNC_ALL] 기존 이벤트와 매칭: todo_id={todo.id}, event_id={existing_event_id}, bulk_synced=True")
-                    continue
-                
-                # Google Calendar에 이벤트 생성
-                start_datetime = None
-                end_datetime = None
-                
-                if todo.all_day:
-                    # 종일 이벤트
-                    start_datetime = datetime.combine(todo.date, datetime.min.time())
-                    # end_date가 있으면 그 날짜까지, 없으면 하루만
-                    if todo.end_date:
-                        # end_date는 inclusive이므로, Google Calendar의 exclusive 형식으로 변환하려면 +1일
-                        end_datetime = datetime.combine(todo.end_date, datetime.min.time()) + timedelta(days=1)
-                        logger.info(f"[SYNC_ALL] 종일 이벤트 기간: {todo.date} ~ {todo.end_date} ({(todo.end_date - todo.date).days + 1}일)")
-                    else:
-                        end_datetime = start_datetime + timedelta(days=1)
-                        logger.info(f"[SYNC_ALL] 종일 이벤트 (하루): {todo.date}")
-                else:
-                    # 시간 지정 이벤트
-                    if todo.start_time:
-                        start_datetime = datetime.combine(todo.date, todo.start_time)
-                    else:
-                        start_datetime = datetime.combine(todo.date, datetime.min.time())
+        if not todos_to_sync:
+            logger.info("[SYNC_ALL] 동기화할 일정이 없습니다 (내보내기 토글이 비활성화되었거나 모든 일정이 이미 동기화됨)")
+        else:
+            for todo in todos_to_sync:
+                try:
+                    # 날짜가 없는 일정은 건너뜀
+                    if not todo.date:
+                        continue
                     
-                    # end_date가 있으면 그 날짜의 end_time 사용, 없으면 같은 날의 end_time 사용
-                    if todo.end_date:
-                        # 여러 날짜에 걸친 일정
-                        if todo.end_time:
-                            end_datetime = datetime.combine(todo.end_date, todo.end_time)
+                    # 일정 키 생성 (제목_날짜_시간)
+                    todo_date_str = todo.date.isoformat() if hasattr(todo.date, 'isoformat') else str(todo.date)
+                    todo_time_str = None
+                    if not todo.all_day and todo.start_time:
+                        if hasattr(todo.start_time, 'strftime'):
+                            todo_time_str = todo.start_time.strftime('%H:%M')
                         else:
-                            # end_time이 없으면 end_date의 23:59:59로 설정
-                            end_datetime = datetime.combine(todo.end_date, datetime.max.time())
-                        logger.info(f"[SYNC_ALL] 시간 지정 이벤트 기간: {todo.date} {todo.start_time} ~ {todo.end_date} {todo.end_time or '23:59'} ({(todo.end_date - todo.date).days + 1}일)")
+                            todo_time_str = str(todo.start_time)
+                    
+                    key = f"{todo.title.strip()}_{todo_date_str}_{todo_time_str or 'all_day'}"
+                    
+                    # 기존 이벤트와 매칭 확인
+                    if key in existing_events_map:
+                        # 이미 Google Calendar에 있는 이벤트와 매칭
+                        existing_event_id = existing_events_map[key]
+                        todo.google_calendar_event_id = existing_event_id
+                        todo.bulk_synced = True  # 일괄 동기화로 매칭된 일정도 표시
+                        db.commit()  # 변경사항 저장
+                        matched_count += 1
+                        logger.info(f"[SYNC_ALL] 기존 이벤트와 매칭: todo_id={todo.id}, event_id={existing_event_id}, bulk_synced=True")
+                        continue
+                    
+                    # Google Calendar에 이벤트 생성
+                    start_datetime = None
+                    end_datetime = None
+                    
+                    if todo.all_day:
+                        # 종일 이벤트
+                        start_datetime = datetime.combine(todo.date, datetime.min.time())
+                        # end_date가 있으면 그 날짜까지, 없으면 하루만
+                        if todo.end_date:
+                            # end_date는 inclusive이므로, Google Calendar의 exclusive 형식으로 변환하려면 +1일
+                            end_datetime = datetime.combine(todo.end_date, datetime.min.time()) + timedelta(days=1)
+                            logger.info(f"[SYNC_ALL] 종일 이벤트 기간: {todo.date} ~ {todo.end_date} ({(todo.end_date - todo.date).days + 1}일)")
+                        else:
+                            end_datetime = start_datetime + timedelta(days=1)
+                            logger.info(f"[SYNC_ALL] 종일 이벤트 (하루): {todo.date}")
                     else:
-                        # 하루 일정
-                        if todo.end_time:
-                            end_datetime = datetime.combine(todo.date, todo.end_time)
+                        # 시간 지정 이벤트
+                        if todo.start_time:
+                            start_datetime = datetime.combine(todo.date, todo.start_time)
                         else:
-                            end_datetime = start_datetime + timedelta(hours=1)
-                        logger.info(f"[SYNC_ALL] 시간 지정 이벤트 (하루): {todo.date} {todo.start_time} ~ {todo.end_time or '1시간 후'}")
-                
-                if not start_datetime:
-                    continue
-                
-                # 알림 및 반복 정보 파싱
-                notification_reminders = []
-                if todo.notification_reminders:
-                    try:
-                        import json
-                        parsed = json.loads(todo.notification_reminders) if isinstance(todo.notification_reminders, str) else todo.notification_reminders
-                        if isinstance(parsed, list):
-                            notification_reminders = parsed
-                    except:
-                        pass
-                
-                # 반복 정보는 Google Calendar로 전달하지 않음 (중복 일정 생성 방지)
-                # 반복 정보는 웹앱 내에서만 관리하고, Google Calendar에는 단일 이벤트로만 내보냄
-                
-                # Google Calendar에 이벤트 생성
-                logger.info(f"[SYNC_ALL] Google Calendar 이벤트 생성 - start={start_datetime}, end={end_datetime}, all_day={todo.all_day}")
-                event = await GoogleCalendarService.create_event(
-                    token_json=current_user.google_calendar_token,
-                    title=todo.title,
-                    description=todo.memo or todo.description or "",
-                    start_datetime=start_datetime,
-                    end_datetime=end_datetime,
-                    location=todo.location or "",
-                    all_day=todo.all_day,
-                    notification_reminders=notification_reminders if notification_reminders else None,
-                    repeat_type=None,  # 반복 정보는 전달하지 않음
-                    repeat_pattern=None,
-                    repeat_end_date=None,
-                    source_id=todo.id  # Always Plan의 Todo ID 저장 (중복 제거용)
-                )
-                
-                if event and event.get('id'):
-                    # Todo에 Google Calendar 이벤트 ID 저장 및 일괄 동기화 플래그 설정
-                    todo.google_calendar_event_id = event.get('id')
-                    todo.bulk_synced = True  # 일괄 동기화로 생성된 일정 표시
-                    db.commit()  # 변경사항 저장
-                    synced_count += 1
-                    logger.info(f"[SYNC_ALL] 새 이벤트 생성: todo_id={todo.id}, event_id={event.get('id')}, bulk_synced=True")
-                else:
+                            start_datetime = datetime.combine(todo.date, datetime.min.time())
+                        
+                        # end_date가 있으면 그 날짜의 end_time 사용, 없으면 같은 날의 end_time 사용
+                        if todo.end_date:
+                            # 여러 날짜에 걸친 일정
+                            if todo.end_time:
+                                end_datetime = datetime.combine(todo.end_date, todo.end_time)
+                            else:
+                                # end_time이 없으면 end_date의 23:59:59로 설정
+                                end_datetime = datetime.combine(todo.end_date, datetime.max.time())
+                            logger.info(f"[SYNC_ALL] 시간 지정 이벤트 기간: {todo.date} {todo.start_time} ~ {todo.end_date} {todo.end_time or '23:59'} ({(todo.end_date - todo.date).days + 1}일)")
+                        else:
+                            # 하루 일정
+                            if todo.end_time:
+                                end_datetime = datetime.combine(todo.date, todo.end_time)
+                            else:
+                                end_datetime = start_datetime + timedelta(hours=1)
+                            logger.info(f"[SYNC_ALL] 시간 지정 이벤트 (하루): {todo.date} {todo.start_time} ~ {todo.end_time or '1시간 후'}")
+                    
+                    if not start_datetime:
+                        continue
+                    
+                    # 알림 및 반복 정보 파싱
+                    notification_reminders = []
+                    if todo.notification_reminders:
+                        try:
+                            import json
+                            parsed = json.loads(todo.notification_reminders) if isinstance(todo.notification_reminders, str) else todo.notification_reminders
+                            if isinstance(parsed, list):
+                                notification_reminders = parsed
+                        except:
+                            pass
+                    
+                    # 반복 정보는 Google Calendar로 전달하지 않음 (중복 일정 생성 방지)
+                    # 반복 정보는 웹앱 내에서만 관리하고, Google Calendar에는 단일 이벤트로만 내보냄
+                    
+                    # Google Calendar에 이벤트 생성
+                    logger.info(f"[SYNC_ALL] Google Calendar 이벤트 생성 - start={start_datetime}, end={end_datetime}, all_day={todo.all_day}")
+                    event = await GoogleCalendarService.create_event(
+                        token_json=current_user.google_calendar_token,
+                        title=todo.title,
+                        description=todo.memo or todo.description or "",
+                        start_datetime=start_datetime,
+                        end_datetime=end_datetime,
+                        location=todo.location or "",
+                        all_day=todo.all_day,
+                        notification_reminders=notification_reminders if notification_reminders else None,
+                        repeat_type=None,  # 반복 정보는 전달하지 않음
+                        repeat_pattern=None,
+                        repeat_end_date=None,
+                        source_id=todo.id  # Always Plan의 Todo ID 저장 (중복 제거용)
+                    )
+                    
+                    if event and event.get('id'):
+                        # Todo에 Google Calendar 이벤트 ID 저장 및 일괄 동기화 플래그 설정
+                        todo.google_calendar_event_id = event.get('id')
+                        todo.bulk_synced = True  # 일괄 동기화로 생성된 일정 표시
+                        db.commit()  # 변경사항 저장
+                        synced_count += 1
+                        logger.info(f"[SYNC_ALL] 새 이벤트 생성: todo_id={todo.id}, event_id={event.get('id')}, bulk_synced=True")
+                    else:
+                        failed_count += 1
+                        failed_todos.append(todo.id)
+                except Exception as e:
+                    logger.error(f"일정 동기화 실패 (todo_id={todo.id}): {e}", exc_info=True)
                     failed_count += 1
                     failed_todos.append(todo.id)
-            except Exception as e:
-                logger.error(f"일정 동기화 실패 (todo_id={todo.id}): {e}", exc_info=True)
-                failed_count += 1
-                failed_todos.append(todo.id)
         
         # 변경사항 커밋
         db.commit()
         
         # 4단계: Google Calendar 이벤트를 웹앱에 Todo로 저장 (양방향 동기화)
-        logger.info("[SYNC_ALL] Google Calendar 이벤트를 웹앱에 저장 시작...")
+        # import_enabled가 활성화되어 있을 때만 실행
+        import_enabled = getattr(current_user, 'google_calendar_import_enabled', 'false') == 'true'
+        logger.info(f"[SYNC_ALL] Google Calendar 가져오기 토글 상태: {import_enabled}")
+        
         imported_count = 0
         imported_matched_count = 0
         imported_failed_count = 0
         
-        from datetime import time as time_obj
-        from datetime import timezone
-        
-        # 이미 저장된 Google Calendar 이벤트 ID 목록 (중복 방지)
-        existing_google_event_ids = set(
-            db.query(Todo.google_calendar_event_id).filter(
-                Todo.user_id == current_user.id,
-                Todo.deleted_at.is_(None),
-                Todo.google_calendar_event_id.isnot(None)
-            ).all()
-        )
-        existing_google_event_ids = {str(id[0]) for id in existing_google_event_ids if id[0]}
-        
-        logger.info(f"[SYNC_ALL] 이미 저장된 Google Calendar 이벤트: {len(existing_google_event_ids)}개")
-        
-        for event in existing_events:
-            try:
-                event_id = event.get('id')
-                if not event_id or event_id in existing_google_event_ids:
-                    # 이미 저장된 이벤트는 건너뜀
-                    continue
-                
-                # 이벤트 정보 파싱
-                start = event.get('start', {})
-                end = event.get('end', {})
-                
-                # 시작 시간 파싱
-                start_date = None
-                end_date = None
-                start_time_obj = None
-                end_time_obj = None
-                all_day = False
-                
-                if 'date' in start:
-                    # 종일 이벤트
-                    all_day = True
-                    start_date_str = start['date']
-                    if 'T' in start_date_str:
-                        start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00')).date()
-                    else:
-                        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        if not import_enabled:
+            logger.info("[SYNC_ALL] Google Calendar 가져오기가 비활성화되어 있어 이벤트를 가져오지 않습니다.")
+        else:
+            logger.info("[SYNC_ALL] Google Calendar 이벤트를 웹앱에 저장 시작...")
+            
+            from datetime import time as time_obj
+            from datetime import timezone
+            
+            # 이미 저장된 Google Calendar 이벤트 ID 목록 (중복 방지)
+            existing_google_event_ids = set(
+                db.query(Todo.google_calendar_event_id).filter(
+                    Todo.user_id == current_user.id,
+                    Todo.deleted_at.is_(None),
+                    Todo.google_calendar_event_id.isnot(None)
+                ).all()
+            )
+            existing_google_event_ids = {str(id[0]) for id in existing_google_event_ids if id[0]}
+            
+            logger.info(f"[SYNC_ALL] 이미 저장된 Google Calendar 이벤트: {len(existing_google_event_ids)}개")
+            
+            for event in existing_events:
+                try:
+                    event_id = event.get('id')
+                    if not event_id or event_id in existing_google_event_ids:
+                        # 이미 저장된 이벤트는 건너뜀
+                        continue
                     
-                    # 종료 날짜 파싱 (종일 이벤트의 경우)
-                    if 'date' in end:
-                        end_date_str = end['date']
-                        if 'T' in end_date_str:
-                            end_date_obj = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
+                    # 이벤트 정보 파싱
+                    start = event.get('start', {})
+                    end = event.get('end', {})
+                    
+                    # 시작 시간 파싱
+                    start_date = None
+                    end_date = None
+                    start_time_obj = None
+                    end_time_obj = None
+                    all_day = False
+                    
+                    if 'date' in start:
+                        # 종일 이벤트
+                        all_day = True
+                        start_date_str = start['date']
+                        if 'T' in start_date_str:
+                            start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00')).date()
                         else:
-                            end_date_obj = datetime.strptime(end_date_str, '%Y-%m-%d')
-                        # Google Calendar는 종료 날짜를 exclusive로 저장하므로 하루 빼야 함
-                        end_date = (end_date_obj - timedelta(days=1)).date()
-                        # 시작 날짜와 종료 날짜가 같으면 종료 날짜를 None으로 설정
-                        if end_date <= start_date:
-                            end_date = None
-                elif 'dateTime' in start:
-                    # 시간 지정 이벤트
-                    start_datetime_str = start['dateTime']
-                    
-                    # ISO 형식 파싱
-                    if start_datetime_str.endswith('Z'):
-                        start_datetime_obj = datetime.fromisoformat(start_datetime_str.replace('Z', '+00:00'))
-                    else:
-                        start_datetime_obj = datetime.fromisoformat(start_datetime_str)
-                    
-                    # 타임존이 없으면 UTC로 간주
-                    if start_datetime_obj.tzinfo is None:
-                        start_datetime_obj = start_datetime_obj.replace(tzinfo=timezone.utc)
-                    
-                    # Asia/Seoul 타임존으로 변환
-                    seoul_tz = timezone(timedelta(hours=9))
-                    start_datetime_seoul = start_datetime_obj.astimezone(seoul_tz)
-                    
-                    start_date = start_datetime_seoul.date()
-                    start_time_str = start_datetime_seoul.strftime('%H:%M')
-                    start_time_obj = time_obj(*map(int, start_time_str.split(':')))
-                    
-                    # 종료 시간 파싱
-                    if 'dateTime' in end:
-                        end_datetime_str = end['dateTime']
-                        if end_datetime_str.endswith('Z'):
-                            end_datetime_obj = datetime.fromisoformat(end_datetime_str.replace('Z', '+00:00'))
+                            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                        
+                        # 종료 날짜 파싱 (종일 이벤트의 경우)
+                        if 'date' in end:
+                            end_date_str = end['date']
+                            if 'T' in end_date_str:
+                                end_date_obj = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
+                            else:
+                                end_date_obj = datetime.strptime(end_date_str, '%Y-%m-%d')
+                            # Google Calendar는 종료 날짜를 exclusive로 저장하므로 하루 빼야 함
+                            end_date = (end_date_obj - timedelta(days=1)).date()
+                            # 시작 날짜와 종료 날짜가 같으면 종료 날짜를 None으로 설정
+                            if end_date <= start_date:
+                                end_date = None
+                    elif 'dateTime' in start:
+                        # 시간 지정 이벤트
+                        start_datetime_str = start['dateTime']
+                        
+                        # ISO 형식 파싱
+                        if start_datetime_str.endswith('Z'):
+                            start_datetime_obj = datetime.fromisoformat(start_datetime_str.replace('Z', '+00:00'))
                         else:
-                            end_datetime_obj = datetime.fromisoformat(end_datetime_str)
+                            start_datetime_obj = datetime.fromisoformat(start_datetime_str)
                         
-                        if end_datetime_obj.tzinfo is None:
-                            end_datetime_obj = end_datetime_obj.replace(tzinfo=timezone.utc)
+                        # 타임존이 없으면 UTC로 간주
+                        if start_datetime_obj.tzinfo is None:
+                            start_datetime_obj = start_datetime_obj.replace(tzinfo=timezone.utc)
                         
-                        end_datetime_seoul = end_datetime_obj.astimezone(seoul_tz)
-                        end_date = end_datetime_seoul.date()
-                        end_time_str = end_datetime_seoul.strftime('%H:%M')
-                        end_time_obj = time_obj(*map(int, end_time_str.split(':')))
+                        # Asia/Seoul 타임존으로 변환
+                        seoul_tz = timezone(timedelta(hours=9))
+                        start_datetime_seoul = start_datetime_obj.astimezone(seoul_tz)
                         
-                        # 시작 날짜와 종료 날짜가 같으면 종료 날짜를 None으로 설정
-                        if end_date <= start_date:
-                            end_date = None
-                
-                if not start_date:
-                    continue
-                
-                # 알림 정보 파싱
-                notification_reminders = None
-                reminders = event.get('reminders', {})
-                if reminders:
-                    reminders_list = []
-                    if reminders.get('useDefault'):
-                        # 기본 알림 사용 (30분 전)
-                        reminders_list = [{'value': 30, 'unit': 'minutes'}]
-                    else:
-                        # 커스텀 알림
-                        overrides = reminders.get('overrides', [])
-                        for override in overrides:
-                            minutes = override.get('minutes', 30)
-                            # 분을 단위로 변환
-                            if minutes < 60:
-                                reminders_list.append({'value': minutes, 'unit': 'minutes'})
-                            elif minutes < 24 * 60:
-                                hours = minutes // 60
-                                remaining_minutes = minutes % 60
-                                if remaining_minutes == 0:
-                                    reminders_list.append({'value': hours, 'unit': 'hours'})
-                                else:
-                                    reminders_list.append({'value': minutes, 'unit': 'minutes'})
-                            elif minutes < 7 * 24 * 60:
-                                days = minutes // (24 * 60)
-                                remaining_minutes = minutes % (24 * 60)
-                                if remaining_minutes == 0:
-                                    reminders_list.append({'value': days, 'unit': 'days'})
-                                else:
-                                    reminders_list.append({'value': minutes, 'unit': 'minutes'})
+                        start_date = start_datetime_seoul.date()
+                        start_time_str = start_datetime_seoul.strftime('%H:%M')
+                        start_time_obj = time_obj(*map(int, start_time_str.split(':')))
+                        
+                        # 종료 시간 파싱
+                        if 'dateTime' in end:
+                            end_datetime_str = end['dateTime']
+                            if end_datetime_str.endswith('Z'):
+                                end_datetime_obj = datetime.fromisoformat(end_datetime_str.replace('Z', '+00:00'))
                             else:
-                                weeks = minutes // (7 * 24 * 60)
-                                remaining_minutes = minutes % (7 * 24 * 60)
-                                if remaining_minutes == 0:
-                                    reminders_list.append({'value': weeks, 'unit': 'weeks'})
-                                else:
+                                end_datetime_obj = datetime.fromisoformat(end_datetime_str)
+                            
+                            if end_datetime_obj.tzinfo is None:
+                                end_datetime_obj = end_datetime_obj.replace(tzinfo=timezone.utc)
+                            
+                            end_datetime_seoul = end_datetime_obj.astimezone(seoul_tz)
+                            end_date = end_datetime_seoul.date()
+                            end_time_str = end_datetime_seoul.strftime('%H:%M')
+                            end_time_obj = time_obj(*map(int, end_time_str.split(':')))
+                            
+                            # 시작 날짜와 종료 날짜가 같으면 종료 날짜를 None으로 설정
+                            if end_date <= start_date:
+                                end_date = None
+                    
+                    if not start_date:
+                        continue
+                    
+                    # 알림 정보 파싱
+                    notification_reminders = None
+                    reminders = event.get('reminders', {})
+                    if reminders:
+                        reminders_list = []
+                        if reminders.get('useDefault'):
+                            # 기본 알림 사용 (30분 전)
+                            reminders_list = [{'value': 30, 'unit': 'minutes'}]
+                        else:
+                            # 커스텀 알림
+                            overrides = reminders.get('overrides', [])
+                            for override in overrides:
+                                minutes = override.get('minutes', 30)
+                                # 분을 단위로 변환
+                                if minutes < 60:
                                     reminders_list.append({'value': minutes, 'unit': 'minutes'})
-                    if reminders_list:
-                        notification_reminders = json.dumps(reminders_list)
-                
-                # 반복 정보 파싱
-                repeat_type = None
-                repeat_pattern = None
-                repeat_end_date = None
-                recurrence = event.get('recurrence', [])
-                if recurrence and len(recurrence) > 0:
-                    rrule = recurrence[0]
-                    if rrule.startswith('RRULE:'):
-                        rrule_str = rrule[6:]
-                        parts = rrule_str.split(';')
-                        freq = None
-                        until = None
-                        count = None
-                        byday = None
-                        interval = None
-                        
-                        for part in parts:
-                            if '=' in part:
-                                key, value = part.split('=', 1)
-                                if key == 'FREQ':
-                                    freq = value
-                                elif key == 'UNTIL':
-                                    until = value
-                                elif key == 'COUNT':
-                                    count = int(value)
-                                elif key == 'BYDAY':
-                                    byday = value
-                                elif key == 'INTERVAL':
-                                    interval = int(value)
-                        
-                        if freq == 'DAILY':
-                            repeat_type = 'daily'
-                        elif freq == 'WEEKLY':
-                            if byday:
-                                if byday == 'MO,TU,WE,TH,FR':
-                                    repeat_type = 'weekdays'
-                                elif byday == 'SA,SU':
-                                    repeat_type = 'weekends'
+                                elif minutes < 24 * 60:
+                                    hours = minutes // 60
+                                    remaining_minutes = minutes % 60
+                                    if remaining_minutes == 0:
+                                        reminders_list.append({'value': hours, 'unit': 'hours'})
+                                    else:
+                                        reminders_list.append({'value': minutes, 'unit': 'minutes'})
+                                elif minutes < 7 * 24 * 60:
+                                    days = minutes // (24 * 60)
+                                    remaining_minutes = minutes % (24 * 60)
+                                    if remaining_minutes == 0:
+                                        reminders_list.append({'value': days, 'unit': 'days'})
+                                    else:
+                                        reminders_list.append({'value': minutes, 'unit': 'minutes'})
                                 else:
-                                    repeat_type = 'custom'
-                                    # 요일 목록을 배열로 변환 (예: 'MO,TU' -> [0, 1])
-                                    day_map = {'MO': 0, 'TU': 1, 'WE': 2, 'TH': 3, 'FR': 4, 'SA': 5, 'SU': 6}
-                                    days_list = [day_map.get(day, 0) for day in byday.split(',') if day in day_map]
-                                    repeat_pattern = json.dumps({
-                                        'freq': 'weeks',
-                                        'interval': interval or 1,
-                                        'days': days_list,
-                                        'endType': 'count' if count else ('date' if until else 'never'),
-                                        'count': count,
-                                        'endDate': until if until and not count else None
-                                    })
-                            else:
+                                    weeks = minutes // (7 * 24 * 60)
+                                    remaining_minutes = minutes % (7 * 24 * 60)
+                                    if remaining_minutes == 0:
+                                        reminders_list.append({'value': weeks, 'unit': 'weeks'})
+                                    else:
+                                        reminders_list.append({'value': minutes, 'unit': 'minutes'})
+                        if reminders_list:
+                            notification_reminders = json.dumps(reminders_list)
+                    
+                    # 반복 정보 파싱
+                    repeat_type = None
+                    repeat_pattern = None
+                    repeat_end_date = None
+                    recurrence = event.get('recurrence', [])
+                    if recurrence and len(recurrence) > 0:
+                        rrule = recurrence[0]
+                        if rrule.startswith('RRULE:'):
+                            rrule_str = rrule[6:]
+                            parts = rrule_str.split(';')
+                            freq = None
+                            until = None
+                            count = None
+                            byday = None
+                            interval = None
+                            
+                            for part in parts:
+                                if '=' in part:
+                                    key, value = part.split('=', 1)
+                                    if key == 'FREQ':
+                                        freq = value
+                                    elif key == 'UNTIL':
+                                        until = value
+                                    elif key == 'COUNT':
+                                        count = int(value)
+                                    elif key == 'BYDAY':
+                                        byday = value
+                                    elif key == 'INTERVAL':
+                                        interval = int(value)
+                            
+                            if freq == 'DAILY':
+                                repeat_type = 'daily'
+                            elif freq == 'WEEKLY':
+                                if byday:
+                                    if byday == 'MO,TU,WE,TH,FR':
+                                        repeat_type = 'weekdays'
+                                    elif byday == 'SA,SU':
+                                        repeat_type = 'weekends'
+                                    else:
+                                        repeat_type = 'custom'
+                                        # 요일 목록을 배열로 변환 (예: 'MO,TU' -> [0, 1])
+                                        day_map = {'MO': 0, 'TU': 1, 'WE': 2, 'TH': 3, 'FR': 4, 'SA': 5, 'SU': 6}
+                                        days_list = [day_map.get(day, 0) for day in byday.split(',') if day in day_map]
+                                        repeat_pattern = json.dumps({
+                                            'freq': 'weeks',
+                                            'interval': interval or 1,
+                                            'days': days_list,
+                                            'endType': 'count' if count else ('date' if until else 'never'),
+                                            'count': count,
+                                            'endDate': until if until and not count else None
+                                        })
+                                else:
+                                    if interval and interval > 1:
+                                        # INTERVAL이 1보다 크면 custom으로 처리
+                                        repeat_type = 'custom'
+                                        repeat_pattern = json.dumps({
+                                            'freq': 'weeks',
+                                            'interval': interval,
+                                            'days': [],
+                                            'endType': 'count' if count else ('date' if until else 'never'),
+                                            'count': count,
+                                            'endDate': until if until and not count else None
+                                        })
+                                    else:
+                                        repeat_type = 'weekly'
+                            elif freq == 'MONTHLY':
                                 if interval and interval > 1:
-                                    # INTERVAL이 1보다 크면 custom으로 처리
                                     repeat_type = 'custom'
                                     repeat_pattern = json.dumps({
-                                        'freq': 'weeks',
+                                        'freq': 'months',
                                         'interval': interval,
                                         'days': [],
                                         'endType': 'count' if count else ('date' if until else 'never'),
@@ -505,90 +527,77 @@ async def sync_all_todos_to_google_calendar(
                                         'endDate': until if until and not count else None
                                     })
                                 else:
-                                    repeat_type = 'weekly'
-                        elif freq == 'MONTHLY':
-                            if interval and interval > 1:
-                                repeat_type = 'custom'
-                                repeat_pattern = json.dumps({
-                                    'freq': 'months',
-                                    'interval': interval,
-                                    'days': [],
-                                    'endType': 'count' if count else ('date' if until else 'never'),
-                                    'count': count,
-                                    'endDate': until if until and not count else None
-                                })
-                            else:
-                                repeat_type = 'monthly'
-                        elif freq == 'YEARLY':
-                            if interval and interval > 1:
-                                repeat_type = 'custom'
-                                repeat_pattern = json.dumps({
-                                    'freq': 'years',
-                                    'interval': interval,
-                                    'days': [],
-                                    'endType': 'count' if count else ('date' if until else 'never'),
-                                    'count': count,
-                                    'endDate': until if until and not count else None
-                                })
-                            else:
-                                repeat_type = 'yearly'
-                        
-                        if until:
-                            if len(until) == 8:
-                                repeat_end_date = datetime.strptime(until, '%Y%m%d').date()
-                        
-                        # custom 반복 패턴이 아닌 경우에도 repeat_end_date 설정
-                        if repeat_type != 'custom':
+                                    repeat_type = 'monthly'
+                            elif freq == 'YEARLY':
+                                if interval and interval > 1:
+                                    repeat_type = 'custom'
+                                    repeat_pattern = json.dumps({
+                                        'freq': 'years',
+                                        'interval': interval,
+                                        'days': [],
+                                        'endType': 'count' if count else ('date' if until else 'never'),
+                                        'count': count,
+                                        'endDate': until if until and not count else None
+                                    })
+                                else:
+                                    repeat_type = 'yearly'
+                            
                             if until:
                                 if len(until) == 8:
                                     repeat_end_date = datetime.strptime(until, '%Y%m%d').date()
-                            elif count:
-                                # COUNT가 있으면 종료일 계산 필요 (현재는 처리하지 않음)
-                                pass
-                
-                # Todo 생성 (동기화 후 저장으로 영구 저장)
-                new_todo = Todo(
-                    user_id=current_user.id,
-                    title=event.get('summary', '제목 없음'),
-                    description=event.get('description', ''),
-                    memo=event.get('description', ''),
-                    location=event.get('location', ''),
-                    date=start_date,
-                    end_date=end_date,  # 종료 날짜 추가 (기간 일정인 경우)
-                    start_time=start_time_obj,
-                    end_time=end_time_obj,
-                    all_day=all_day,
-                    category="기타",
-                    status="pending",
-                    priority="medium",
-                    source="sync",
-                    google_calendar_event_id=event_id,
-                    bulk_synced=True,  # 동기화 후 저장으로 영구 저장
-                    deleted_at=None,  # 명시적으로 None 설정 (새로고침 후에도 유지되도록)
-                    notification_reminders=notification_reminders,
-                    repeat_type=repeat_type,
-                    repeat_pattern=repeat_pattern,
-                    repeat_end_date=repeat_end_date
-                )
-                
-                db.add(new_todo)
-                db.commit()
-                db.refresh(new_todo)  # 저장 후 새로고침하여 ID 확인
-                
-                # 저장 확인
-                if new_todo.deleted_at is not None:
-                    logger.error(f"[SYNC_ALL] Todo 저장 실패: deleted_at이 None이 아님. todo_id={new_todo.id}")
-                    # 재시도
-                    new_todo.deleted_at = None
+                            
+                            # custom 반복 패턴이 아닌 경우에도 repeat_end_date 설정
+                            if repeat_type != 'custom':
+                                if until:
+                                    if len(until) == 8:
+                                        repeat_end_date = datetime.strptime(until, '%Y%m%d').date()
+                                elif count:
+                                    # COUNT가 있으면 종료일 계산 필요 (현재는 처리하지 않음)
+                                    pass
+                    
+                    # Todo 생성 (Google Calendar에서 가져온 일정)
+                    new_todo = Todo(
+                        user_id=current_user.id,
+                        title=event.get('summary', '제목 없음'),
+                        description=event.get('description', ''),
+                        memo=event.get('description', ''),
+                        location=event.get('location', ''),
+                        date=start_date,
+                        end_date=end_date,  # 종료 날짜 추가 (기간 일정인 경우)
+                        start_time=start_time_obj,
+                        end_time=end_time_obj,
+                        all_day=all_day,
+                        category="기타",
+                        status="pending",
+                        priority="medium",
+                        source="google_calendar",  # Google Calendar에서 가져온 일정임을 명시
+                        google_calendar_event_id=event_id,
+                        bulk_synced=True,  # 동기화 후 저장으로 영구 저장
+                        deleted_at=None,  # 명시적으로 None 설정 (새로고침 후에도 유지되도록)
+                        notification_reminders=notification_reminders,
+                        repeat_type=repeat_type,
+                        repeat_pattern=repeat_pattern,
+                        repeat_end_date=repeat_end_date
+                    )
+                    
+                    db.add(new_todo)
                     db.commit()
-                    db.refresh(new_todo)
-                
-                imported_count += 1
-                logger.info(f"[SYNC_ALL] Google Calendar 이벤트를 Todo로 저장: event_id={event_id}, todo_id={new_todo.id}, title={new_todo.title}, deleted_at={new_todo.deleted_at}, bulk_synced={new_todo.bulk_synced}")
-                
-            except Exception as e:
-                logger.error(f"[SYNC_ALL] Google Calendar 이벤트 저장 실패 (event_id={event.get('id')}): {e}", exc_info=True)
-                imported_failed_count += 1
+                    db.refresh(new_todo)  # 저장 후 새로고침하여 ID 확인
+                    
+                    # 저장 확인
+                    if new_todo.deleted_at is not None:
+                        logger.error(f"[SYNC_ALL] Todo 저장 실패: deleted_at이 None이 아님. todo_id={new_todo.id}")
+                        # 재시도
+                        new_todo.deleted_at = None
+                        db.commit()
+                        db.refresh(new_todo)
+                    
+                    imported_count += 1
+                    logger.info(f"[SYNC_ALL] Google Calendar 이벤트를 Todo로 저장: event_id={event_id}, todo_id={new_todo.id}, title={new_todo.title}, deleted_at={new_todo.deleted_at}, bulk_synced={new_todo.bulk_synced}")
+                    
+                except Exception as e:
+                    logger.error(f"[SYNC_ALL] Google Calendar 이벤트 저장 실패 (event_id={event.get('id')}): {e}", exc_info=True)
+                    imported_failed_count += 1
         
         logger.info(f"[SYNC_ALL] Google Calendar 이벤트 저장 완료: {imported_count}개 저장, {imported_failed_count}개 실패")
         
@@ -937,20 +946,53 @@ async def toggle_calendar_import(
             detail="Google Calendar 토큰이 없습니다. 먼저 Google 로그인을 해주세요."
         )
     
+    from app.models.models import Todo
+    
     current_import_enabled = getattr(current_user, 'google_calendar_import_enabled', 'false')
     new_state = "false" if current_import_enabled == "true" else "true"
     current_user.google_calendar_import_enabled = new_state
+    
+    deleted_count = 0
+    
+    if new_state == "false":
+        # 토글을 끌 때: Google Calendar에서 가져온 일정들(source='google_calendar')을 삭제
+        logger.info("[TOGGLE_IMPORT] 토글 꺼짐 - Google Calendar에서 가져온 일정 삭제 시작")
+        
+        # source='google_calendar'인 일정들만 조회 (bulk_synced와 관계없이 모두 삭제)
+        todos_to_delete = db.query(Todo).filter(
+            Todo.user_id == current_user.id,
+            Todo.deleted_at.is_(None),
+            Todo.source == 'google_calendar'  # Google Calendar에서 가져온 일정만
+        ).all()
+        
+        logger.info(f"[TOGGLE_IMPORT] 삭제할 일정: {len(todos_to_delete)}개")
+        
+        for todo in todos_to_delete:
+            try:
+                # 소프트 삭제 (deleted_at 설정)
+                todo.deleted_at = datetime.utcnow()
+                deleted_count += 1
+                logger.info(f"[TOGGLE_IMPORT] 일정 삭제: todo_id={todo.id}, title={todo.title}")
+            except Exception as e:
+                logger.error(f"[TOGGLE_IMPORT] 일정 삭제 실패: todo_id={todo.id}, error={e}")
+        
+        logger.info(f"[TOGGLE_IMPORT] 총 {deleted_count}개 일정 삭제 완료")
+    
     db.commit()
     
     logger.info(f"[TOGGLE_IMPORT] 토글 변경 - user_id={current_user.id}, email={current_user.email}, 현재 상태={current_import_enabled}, 새 상태={new_state}")
     
     message = f"Google Calendar 가져오기가 {'활성화' if new_state == 'true' else '비활성화'}되었습니다"
     if new_state == "false":
-        message += ". Google Calendar 일정이 앱에서 제거됩니다."
+        if deleted_count > 0:
+            message += f". {deleted_count}개 Google Calendar 일정이 앱에서 제거되었습니다."
+        else:
+            message += ". Google Calendar 일정이 앱에서 제거됩니다."
     
     return {
         "success": True,
         "import_enabled": new_state == "true",
+        "deleted_count": deleted_count,
         "message": message
     }
 

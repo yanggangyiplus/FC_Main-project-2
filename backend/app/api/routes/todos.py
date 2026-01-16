@@ -76,7 +76,8 @@ async def get_todos(
             "updated_at": todo.updated_at,
             "google_calendar_event_id": todo.google_calendar_event_id,  # Google Calendar 이벤트 ID 추가
             "bulk_synced": todo.bulk_synced if hasattr(todo, 'bulk_synced') else False,  # 일괄 동기화 플래그
-            "todo_group_id": todo.todo_group_id if hasattr(todo, 'todo_group_id') else None  # 일정 그룹 ID
+            "todo_group_id": todo.todo_group_id if hasattr(todo, 'todo_group_id') else None,  # 일정 그룹 ID
+            "source": todo.source if hasattr(todo, 'source') else 'always_plan'  # 일정 소스 (google_calendar 또는 always_plan)
         }
         result.append(todo_dict)
     
