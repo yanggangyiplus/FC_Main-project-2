@@ -667,7 +667,6 @@ export function CalendarHomeScreen() {
 
   // 현재 날짜/시간
   const currentDate = new Date().toISOString().split('T')[0];
-  const currentTime = new Date().toTimeString().split(' ')[0];
 
   // 새로고침 시 오늘 날짜로 초기화
   const [selectedDate, setSelectedDate] = useState<string | null>(currentDate);
