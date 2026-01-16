@@ -81,11 +81,14 @@ class EmailService:
         todo_title: str,
         todo_date: str,
         todo_time: Optional[str] = None,
+        todo_end_time: Optional[str] = None,
+        is_all_day: bool = False,
         reminder_time: Optional[str] = None,
         todo_location: Optional[str] = None,
         todo_category: Optional[str] = None,
         todo_checklist: Optional[list] = None,
-        todo_memo: Optional[str] = None
+        todo_memo: Optional[str] = None,
+        assigned_members: Optional[list] = None
     ) -> bool:
         """
         일정 알림 이메일 발송
@@ -113,10 +116,23 @@ class EmailService:
         # 알림 시간 포맷팅
         reminder_info = f"{reminder_time}" if reminder_time else ""
         
+        # 담당 프로필 정보 포맷팅
+        member_info = ""
+        if assigned_members and len(assigned_members) > 0:
+            member_names = [f"{m.get('emoji', '👤')} {m.get('name', '')}" for m in assigned_members]
+            member_info = f"<p style='color: #6b7280; font-size: 14px; margin-bottom: 20px;'>{(', '.join(member_names))}의 일정을 확인해주세요.</p>"
+        else:
+            member_info = "<p style='color: #6b7280; font-size: 14px; margin-bottom: 20px;'>일정을 확인해주세요.</p>"
+        
         # 시간 정보 포맷팅
         time_info = ""
-        if todo_time:
-            time_info = f"<p><strong>시간:</strong> {todo_time}</p>"
+        if is_all_day:
+            time_info = "<p><strong>시간:</strong> 하루종일</p>"
+        elif todo_time:
+            if todo_end_time:
+                time_info = f"<p><strong>시간:</strong> {todo_time} - {todo_end_time}</p>"
+            else:
+                time_info = f"<p><strong>시간:</strong> {todo_time}</p>"
         
         # 장소 정보
         location_info = ""
@@ -198,11 +214,9 @@ class EmailService:
                         Always Plan에서 일정을 알려드립니다.
                     </p>
                     <h3 style="color: #1f2937; margin-top: 0;">
-                        <strong>{todo_title}</strong> 일정의 {reminder_info}입니다.
+                        <strong>{todo_title}</strong>일정의 {reminder_info}입니다.
                     </h3>
-                    <p style="color: #6b7280; font-size: 14px; margin-bottom: 20px;">
-                        일정을 확인해주세요.
-                    </p>
+                    {member_info}
                     <div class="info-box">
                         <p style="margin: 8px 0;"><strong>날짜:</strong> {todo_date}</p>
                         {time_info}
@@ -225,24 +239,52 @@ class EmailService:
         if todo_checklist and len(todo_checklist) > 0:
             checklist_items = [item for item in todo_checklist if item.strip()]
             if checklist_items:
-                checklist_text = "\n체크리스트:\n" + "\n".join([f"- {item}" for item in checklist_items])
+                checklist_text = "체크리스트:\n" + "\n".join([f"- {item}" for item in checklist_items])
         
-        location_text = f"장소: {todo_location}\n" if todo_location else ""
-        category_text = f"카테고리: {todo_category}\n" if todo_category else ""
-        memo_text = f"메모: {todo_memo}\n" if todo_memo and todo_memo.strip() else ""
-        time_text = f"시간: {todo_time}\n" if todo_time else ""
+        location_text = f"장소: {todo_location}" if todo_location else ""
+        category_text = f"카테고리: {todo_category}" if todo_category else ""
+        memo_text = f"메모: {todo_memo}" if todo_memo and todo_memo.strip() else ""
         
-        text_content = f"""Always Plan에서 일정을 알려드립니다.
-
-{todo_title} 일정의 {reminder_info}입니다.
-일정을 확인해주세요.
-
-일정 상세 정보:
-날짜: {todo_date}
-{time_text}{location_text}{category_text}{checklist_text}{memo_text}
----
-이 이메일은 Always Plan에서 자동으로 발송되었습니다.
-        """
+        if is_all_day:
+            time_text = "시간: 하루종일"
+        elif todo_time:
+            if todo_end_time:
+                time_text = f"시간: {todo_time} - {todo_end_time}"
+            else:
+                time_text = f"시간: {todo_time}"
+        else:
+            time_text = ""
+        
+        # 담당 프로필 텍스트
+        if assigned_members and len(assigned_members) > 0:
+            member_names = [f"{m.get('emoji', '👤')} {m.get('name', '')}" for m in assigned_members]
+            member_text = f"{', '.join(member_names)}의 일정을 확인해주세요."
+        else:
+            member_text = "일정을 확인해주세요."
+        
+        # 텍스트 본문 포맷팅 (각 항목 사이 빈 줄 추가)
+        text_parts = [
+            "일정 알림",
+            "Always Plan에서 일정을 알려드립니다.",
+            "",
+            f"{todo_title} 일정의 {reminder_info}입니다.",
+            member_text,
+            "",
+            f"날짜: {todo_date}"
+        ]
+        
+        if time_text:
+            text_parts.append(time_text)
+        if location_text:
+            text_parts.append(location_text)
+        if category_text:
+            text_parts.append(category_text)
+        if checklist_text:
+            text_parts.append(checklist_text)
+        if memo_text:
+            text_parts.append(memo_text)
+        
+        text_content = "\n".join(text_parts)
         
         return EmailService.send_email(to_email, subject, html_content, text_content)
 
