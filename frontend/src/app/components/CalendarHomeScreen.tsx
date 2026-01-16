@@ -1554,18 +1554,59 @@ export function CalendarHomeScreen() {
             <div className="flex-1 overflow-auto p-6">
               {/* 캘린더 표시 */}
               {calendarView === "month" && (
-                <div className="flex items-center justify-center">
-                  <div className="w-full max-w-4xl">
-                    <MonthCalendar
-                      todos={todos}
-                      selectedDate={selectedDate}
-                      onDateSelect={(date) => {
-                        setSelectedDate(date);
-                      }}
-                      onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
-                    />
+                <>
+                  {/* 프로필 선택 영역 */}
+                  <div className="bg-white px-4 pt-4 pb-3 border-b border-[#F3F4F6] mb-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-semibold text-[#1F2937]">프로필</h4>
+                    </div>
+                    {/* 가로 스크롤 가능한 프로필 목록 */}
+                    <div className="flex gap-3 overflow-x-auto pt-2 pb-2 -mx-4 px-4 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
+                      {familyMembers.map((member) => {
+                        const isSelected = selectedMembers.includes(member.id);
+                        return (
+                          <button
+                            key={member.id}
+                            onClick={() => toggleMemberSelection(member.id)}
+                            className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all min-w-[80px] flex-shrink-0 ${isSelected
+                              ? "bg-[#FF9B82] shadow-md scale-100"
+                              : "bg-[#F9FAFB] hover:bg-[#F3F4F6]"
+                              }`}
+                          >
+                            <div
+                              className={`w-10 h-10 rounded-full flex items-center justify-center text-xl transition-all relative ${isSelected
+                                ? "bg-white"
+                                : "bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82]"
+                                }`}
+                            >
+                              {member.emoji}
+                            </div>
+                            <span
+                              className={`text-xs font-medium ${isSelected ? "text-white" : "text-[#6B7280]"
+                                }`}
+                            >
+                              {member.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
+                  <div className="flex items-center justify-center">
+                    <div className="w-full max-w-4xl">
+                      <MonthCalendar
+                        todos={todos}
+                        familyMembers={familyMembers}
+                        selectedMembers={selectedMembers}
+                        selectedDate={selectedDate}
+                        onDateSelect={(date) => {
+                          setSelectedDate(date);
+                        }}
+                        onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
+                      />
+                    </div>
+                  </div>
+                </>
               )}
               {calendarView === "week" && (
                 <>
@@ -1673,13 +1714,54 @@ export function CalendarHomeScreen() {
                 </>
               )}
               {calendarView === "day" && (
-                <DayCalendar
-                  todos={todos}
-                  selectedDate={selectedDate}
-                  onDateChange={(date) => setSelectedDate(date)}
-                  onTodoUpdate={handleTodoUpdate}
-                  onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
-                />
+                <>
+                  {/* 프로필 선택 영역 */}
+                  <div className="bg-white px-4 pt-4 pb-3 border-b border-[#F3F4F6] mb-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-semibold text-[#1F2937]">프로필</h4>
+                    </div>
+                    {/* 가로 스크롤 가능한 프로필 목록 */}
+                    <div className="flex gap-3 overflow-x-auto pt-2 pb-2 -mx-4 px-4 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
+                      {familyMembers.map((member) => {
+                        const isSelected = selectedMembers.includes(member.id);
+                        return (
+                          <button
+                            key={member.id}
+                            onClick={() => toggleMemberSelection(member.id)}
+                            className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all min-w-[80px] flex-shrink-0 ${isSelected
+                              ? "bg-[#FF9B82] shadow-md scale-100"
+                              : "bg-[#F9FAFB] hover:bg-[#F3F4F6]"
+                              }`}
+                          >
+                            <div
+                              className={`w-10 h-10 rounded-full flex items-center justify-center text-xl transition-all relative ${isSelected
+                                ? "bg-white"
+                                : "bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82]"
+                                }`}
+                            >
+                              {member.emoji}
+                            </div>
+                            <span
+                              className={`text-xs font-medium ${isSelected ? "text-white" : "text-[#6B7280]"
+                                }`}
+                            >
+                              {member.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <DayCalendar
+                    todos={todos}
+                    familyMembers={familyMembers}
+                    selectedMembers={selectedMembers}
+                    selectedDate={selectedDate}
+                    onDateChange={(date) => setSelectedDate(date)}
+                    onTodoUpdate={handleTodoUpdate}
+                    onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
+                  />
+                </>
               )}
             </div>
           </div>

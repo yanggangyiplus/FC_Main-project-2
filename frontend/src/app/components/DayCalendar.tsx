@@ -3,6 +3,13 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { RoutineItem } from "./RoutineView";
 import { formatDuration } from "@/utils/formatDuration";
 
+interface FamilyMember {
+  id: string;
+  name: string;
+  emoji: string;
+  color: string;
+}
+
 interface DayCalendarProps {
   todos: Array<{
     id: string;
@@ -13,15 +20,19 @@ interface DayCalendarProps {
     category: string;
     date?: string;
     endDate?: string; // 종료 날짜 (기간 일정)
+    memberId?: string;
+    assignedMemberIds?: string[];
   }>;
   routines?: RoutineItem[];
+  familyMembers?: FamilyMember[]; // 프로필 목록
+  selectedMembers?: string[]; // 선택된 프로필 ID 목록
   selectedDate?: string | null; // 선택된 날짜
   onDateChange?: (date: string) => void; // 날짜 변경 콜백
   onTodoUpdate?: (id: string, updates: { time: string; duration: number }) => void;
   onTodoClick?: (todoId: string) => void;
 }
 
-export function DayCalendar({ todos, routines = [], selectedDate, onDateChange, onTodoUpdate, onTodoClick }: DayCalendarProps) {
+export function DayCalendar({ todos, routines = [], familyMembers = [], selectedMembers = [], selectedDate, onDateChange, onTodoUpdate, onTodoClick }: DayCalendarProps) {
   const [currentDate, setCurrentDate] = useState(() => selectedDate ? new Date(selectedDate) : new Date());
 
   // selectedDate가 변경되면 currentDate도 업데이트
@@ -69,6 +80,34 @@ export function DayCalendar({ todos, routines = [], selectedDate, onDateChange, 
     let regularTodos = todos.filter((todo) => {
       if (!todo.date) return false;
 
+      // 프로필 필터링 (assignedMemberIds 지원)
+      if (selectedMembers.length > 0) {
+        // 프로필이 선택되어 있는 경우:
+        // - 담당 프로필이 있는 일정: 선택된 프로필에 포함되어야 함
+        // - 담당 프로필이 없는 일정: 표시 (프로필이 선택되어 있어도 담당 프로필 없는 일정은 표시)
+        const hasAssignedMembers = todo.assignedMemberIds && Array.isArray(todo.assignedMemberIds) && todo.assignedMemberIds.length > 0;
+        const hasMemberId = todo.memberId;
+        
+        if (hasAssignedMembers) {
+          // assignedMemberIds 중 하나라도 선택된 프로필에 포함되어야 함
+          const assignedIds = todo.assignedMemberIds.map((id: any) => String(id));
+          const selectedIds = selectedMembers.map((id: string) => String(id));
+          const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+          if (!hasSelectedMember) {
+            return false;
+          }
+        } else if (hasMemberId && !selectedMembers.includes(String(todo.memberId))) {
+          return false;
+        }
+        // 담당 프로필이 없으면 표시
+      } else {
+        // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+        const hasAssignedMembers = todo.assignedMemberIds && Array.isArray(todo.assignedMemberIds) && todo.assignedMemberIds.length > 0;
+        if (todo.memberId || hasAssignedMembers) {
+          return false;
+        }
+      }
+
       // 시작일과 동일한 경우
       if (todo.date === dateStr) return true;
 
@@ -90,7 +129,29 @@ export function DayCalendar({ todos, routines = [], selectedDate, onDateChange, 
     });
 
     if (dateStr === todayStr) {
-      const todayMockTodos = todos.filter(t => !t.date || t.date === todayStr);
+      const todayMockTodos = todos.filter(t => {
+        // 프로필 필터링 적용 (assignedMemberIds 지원)
+        if (selectedMembers.length > 0) {
+          const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+          const hasMemberId = t.memberId;
+          
+          if (hasAssignedMembers) {
+            const hasSelectedMember = t.assignedMemberIds.some((id: string) => selectedMembers.includes(String(id)));
+            if (!hasSelectedMember) {
+              return false;
+            }
+          } else if (hasMemberId && !selectedMembers.includes(String(t.memberId))) {
+            return false;
+          }
+        } else {
+          // 모든 프로필이 꺼져 있으면 담당 프로필이 없는 일정만 표시
+          const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+          if (t.memberId || hasAssignedMembers) {
+            return false;
+          }
+        }
+        return !t.date || t.date === todayStr;
+      });
       regularTodos = [...regularTodos, ...todayMockTodos.filter(t => !regularTodos.find(rt => rt.id === t.id))];
     }
 

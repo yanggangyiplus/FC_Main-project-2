@@ -2,6 +2,13 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { RoutineItem } from "./RoutineView";
 
+interface FamilyMember {
+  id: string;
+  name: string;
+  emoji: string;
+  color: string;
+}
+
 interface MonthCalendarProps {
   todos: Array<{
     id: string;
@@ -12,14 +19,18 @@ interface MonthCalendarProps {
     category: string;
     date?: string;
     endDate?: string; // 종료 날짜 (기간 일정)
+    memberId?: string;
+    assignedMemberIds?: string[];
   }>;
   routines?: RoutineItem[]; // Added routines prop
+  familyMembers?: FamilyMember[]; // 프로필 목록
+  selectedMembers?: string[]; // 선택된 프로필 ID 목록
   selectedDate?: string | null; // 선택된 날짜
   onDateSelect?: (date: string) => void;
   onTodoClick?: (todoId: string) => void;
 }
 
-export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect, onTodoClick }: MonthCalendarProps) {
+export function MonthCalendar({ todos, routines = [], familyMembers = [], selectedMembers = [], selectedDate, onDateSelect, onTodoClick }: MonthCalendarProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [hoveredDate, setHoveredDate] = useState<number | null>(null);
 
@@ -58,6 +69,34 @@ export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect
     const dayTodos = todos
       .filter((todo) => {
         if (!todo.date) return false;
+        
+        // 프로필 필터링 (assignedMemberIds 지원)
+        if (selectedMembers.length > 0) {
+          // 프로필이 선택되어 있는 경우:
+          // - 담당 프로필이 있는 일정: 선택된 프로필에 포함되어야 함
+          // - 담당 프로필이 없는 일정: 표시 (프로필이 선택되어 있어도 담당 프로필 없는 일정은 표시)
+          const hasAssignedMembers = todo.assignedMemberIds && Array.isArray(todo.assignedMemberIds) && todo.assignedMemberIds.length > 0;
+          const hasMemberId = todo.memberId;
+          
+          if (hasAssignedMembers) {
+            // assignedMemberIds 중 하나라도 선택된 프로필에 포함되어야 함
+            const assignedIds = todo.assignedMemberIds.map((id: any) => String(id));
+            const selectedIds = selectedMembers.map((id: string) => String(id));
+            const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+            if (!hasSelectedMember) {
+              return false;
+            }
+          } else if (hasMemberId && !selectedMembers.includes(String(todo.memberId))) {
+            return false;
+          }
+          // 담당 프로필이 없으면 표시
+        } else {
+          // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+          const hasAssignedMembers = todo.assignedMemberIds && Array.isArray(todo.assignedMemberIds) && todo.assignedMemberIds.length > 0;
+          if (todo.memberId || hasAssignedMembers) {
+            return false;
+          }
+        }
         
         // 시작일과 동일한 경우
         if (todo.date === dateStr) return true;
