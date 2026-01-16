@@ -43,6 +43,7 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
   const [popupPosition, setPopupPosition] = useState<{ x: number; y: number } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [hasMoved, setHasMoved] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Helper to remove duplicated logic and ensure consistent dates
   const getWeekDates = (date: Date) => {
@@ -331,6 +332,55 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
 
   const activeTodoId = selectedTodo || hoveredTodo;
 
+  // 일정이 있는 첫 번째 시간대부터 스크롤
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+      // 모든 날짜의 일정 중 가장 이른 시간 찾기
+      let earliestTime: string | null = null;
+      
+      weekDates.forEach((date) => {
+        const dayTodos = getTodosForDate(date);
+        const regularTodos = dayTodos.filter(todo => {
+          const isAllDay = todo.isAllDay || !todo.time || todo.time === '';
+          return !isAllDay;
+        });
+        
+        regularTodos.forEach(todo => {
+          if (todo.time) {
+            if (!earliestTime) {
+              earliestTime = todo.time;
+            } else {
+              const [h1, m1] = todo.time.split(':').map(Number);
+              const [h2, m2] = earliestTime.split(':').map(Number);
+              const time1 = h1 * 60 + m1;
+              const time2 = h2 * 60 + m2;
+              if (time1 < time2) {
+                earliestTime = todo.time;
+              }
+            }
+          }
+        });
+      });
+
+      if (earliestTime) {
+        // 시간 위치 계산 (0시부터의 비율)
+        const [hours, minutes] = earliestTime.split(':').map(Number);
+        const totalMinutes = hours * 60 + minutes;
+        // 8개 time slot * 64px (h-16) = 512px 총 높이
+        const totalHeight = 8 * 64;
+        const scrollPercentage = (totalMinutes / (24 * 60)) * 100;
+        const scrollPosition = (scrollPercentage / 100) * totalHeight - 100; // 약간 위로 여유 공간
+
+        // 스크롤 적용
+        setTimeout(() => {
+          if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = Math.max(0, scrollPosition);
+          }
+        }, 100);
+      }
+    }
+  }, [todos, weekDates, selectedMembers]);
+
   return (
     <div className="bg-white relative select-none">
       {/* Calendar Header */}
@@ -379,6 +429,7 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
 
         {/* Time Grid */}
         <div
+          ref={scrollContainerRef}
           className="overflow-auto max-h-[500px]"
           onMouseMove={handleMouseMove}
           onMouseUp={handleGlobalMouseUp}

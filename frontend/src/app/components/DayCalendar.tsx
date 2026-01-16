@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { RoutineItem } from "./RoutineView";
 import { formatDuration } from "@/utils/formatDuration";
@@ -36,6 +36,7 @@ export function DayCalendar({ todos, routines = [], selectedDate, onDateChange, 
   const [dragStartTime, setDragStartTime] = useState("");
   const [dragStartDuration, setDragStartDuration] = useState(0);
   const [hasMoved, setHasMoved] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const timeSlots = [
     "00:00", "02:00", "04:00", "06:00", "08:00", "10:00",
@@ -238,6 +239,41 @@ export function DayCalendar({ todos, routines = [], selectedDate, onDateChange, 
 
   const dayTodos = getTodosForDate();
 
+  // 일정이 있는 첫 번째 시간대부터 스크롤
+  useEffect(() => {
+    if (scrollContainerRef.current && dayTodos.length > 0) {
+      // 하루종일 일정을 제외한 일반 일정 중 가장 이른 시간 찾기
+      const regularTodos = dayTodos.filter(todo => todo.time && todo.time !== '');
+      if (regularTodos.length > 0) {
+        const earliestTime = regularTodos.reduce((earliest, todo) => {
+          if (!todo.time || !earliest) return earliest || todo.time;
+          const [h1, m1] = (todo.time || '09:00').split(':').map(Number);
+          const [h2, m2] = (earliest || '09:00').split(':').map(Number);
+          const time1 = h1 * 60 + m1;
+          const time2 = h2 * 60 + m2;
+          return time1 < time2 ? todo.time : earliest;
+        }, '' as string | undefined);
+
+        if (earliestTime) {
+          // 시간 위치 계산 (0시부터의 비율)
+          const [hours, minutes] = earliestTime.split(':').map(Number);
+          const totalMinutes = hours * 60 + minutes;
+          // 12개 time slot * 96px (h-24) = 1152px 총 높이
+          const totalHeight = 12 * 96;
+          const scrollPercentage = (totalMinutes / (24 * 60)) * 100;
+          const scrollPosition = (scrollPercentage / 100) * totalHeight - 100; // 약간 위로 여유 공간
+
+          // 스크롤 적용
+          setTimeout(() => {
+            if (scrollContainerRef.current) {
+              scrollContainerRef.current.scrollTop = Math.max(0, scrollPosition);
+            }
+          }, 100);
+        }
+      }
+    }
+  }, [dayTodos, selectedDate]);
+
   // Overlap Layout Algorithm
   const getOverlapLayout = (items: typeof dayTodos) => {
     // 1. Filter out items without valid time and set default time if needed
@@ -347,6 +383,7 @@ export function DayCalendar({ todos, routines = [], selectedDate, onDateChange, 
 
       {/* Time Grid */}
       <div
+        ref={scrollContainerRef}
         className="overflow-auto max-h-[600px]"
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
