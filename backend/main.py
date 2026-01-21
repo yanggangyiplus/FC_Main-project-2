@@ -4,6 +4,7 @@ Always Plan API - Main Application
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 import logging
 import os
 from dotenv import load_dotenv
@@ -15,12 +16,29 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+# Cloud Run HTTPS 프록시 미들웨어
+class ProxyHeadersMiddleware(BaseHTTPMiddleware):
+    """
+    Cloud Run에서 X-Forwarded-Proto 헤더를 처리하여
+    HTTPS 리다이렉트가 올바르게 동작하도록 함
+    """
+    async def dispatch(self, request: Request, call_next):
+        # X-Forwarded-Proto 헤더가 있으면 scheme 업데이트
+        if request.headers.get("x-forwarded-proto") == "https":
+            request.scope["scheme"] = "https"
+        return await call_next(request)
+
+
 # FastAPI 앱 생성
 app = FastAPI(
     title="Always Plan API",
     description="가족 일정 관리 및 음성 인식 기반 할일 추가 플랫폼",
     version="1.0.0"
 )
+
+# 프록시 헤더 미들웨어 추가 (CORS보다 먼저)
+app.add_middleware(ProxyHeadersMiddleware)
 
 # CORS 설정 (google-issue.md 참고 - Phase 1)
 from app.config import settings, get_cors_origins
