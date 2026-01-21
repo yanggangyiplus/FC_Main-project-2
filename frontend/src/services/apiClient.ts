@@ -7,8 +7,15 @@ class APIClient {
   private client: AxiosInstance
 
   constructor() {
+    const apiBaseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+    
+    // 디버깅: 실제 baseURL 확인
+    console.log('[API Client] VITE_API_BASE_URL:', import.meta.env.VITE_API_BASE_URL)
+    console.log('[API Client] Final baseURL:', apiBaseURL)
+    console.log('[API Client] baseURL starts with https:', apiBaseURL.startsWith('https://'))
+    
     this.client = axios.create({
-      baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
+      baseURL: apiBaseURL,
       withCredentials: true, // httpOnly 쿠키 전송
       headers: {
         'Content-Type': 'application/json',
