@@ -1036,7 +1036,39 @@ export function CalendarHomeScreen() {
     );
   });
 
-  const displayTodos = todos.filter(t => !t.isRoutine && t.date).sort((a, b) => {
+  const displayTodos = todos.filter(t => {
+    if (t.isRoutine || !t.date) return false;
+    
+    // 프로필 필터링 (assignedMemberIds 지원)
+    if (selectedMembers.length > 0) {
+      // 프로필이 선택되어 있는 경우:
+      // - 담당 프로필이 있는 일정: 선택된 프로필에 포함되어야 함
+      // - 담당 프로필이 없는 일정: 표시 (프로필이 선택되어 있어도 담당 프로필 없는 일정은 표시)
+      const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+      const hasMemberId = t.memberId;
+      
+      if (hasAssignedMembers) {
+        // assignedMemberIds 중 하나라도 선택된 프로필에 포함되어야 함
+        const assignedIds = t.assignedMemberIds.map((id: any) => String(id));
+        const selectedIds = selectedMembers.map((id: string) => String(id));
+        const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+        if (!hasSelectedMember) {
+          return false;
+        }
+      } else if (hasMemberId && !selectedMembers.includes(String(t.memberId))) {
+        return false;
+      }
+      // 담당 프로필이 없으면 표시
+    } else {
+      // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+      const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+      if (t.memberId || hasAssignedMembers) {
+        return false;
+      }
+    }
+    
+    return true;
+  }).sort((a, b) => {
     if (a.date !== b.date) {
       return (a.date || '').localeCompare(b.date || '');
     }
@@ -2146,8 +2178,47 @@ export function CalendarHomeScreen() {
             {/* Month Calendar - 모바일 뷰에서만 표시 */}
             {calendarView === "month" && isMobile && (
               <>
+                {/* 프로필 선택 영역 */}
+                <div className="bg-white px-4 pt-4 pb-3 border-b border-[#F3F4F6] mb-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-semibold text-[#1F2937]">프로필</h4>
+                  </div>
+                  {/* 가로 스크롤 가능한 프로필 목록 */}
+                  <div className="flex gap-3 overflow-x-auto pt-2 pb-2 -mx-4 px-4 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
+                    {familyMembers.map((member) => {
+                      const isSelected = selectedMembers.includes(member.id);
+                      return (
+                        <button
+                          key={member.id}
+                          onClick={() => toggleMemberSelection(member.id)}
+                          className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all min-w-[80px] flex-shrink-0 ${isSelected
+                            ? "bg-[#FF9B82] shadow-md scale-100"
+                            : "bg-[#F9FAFB] hover:bg-[#F3F4F6]"
+                            }`}
+                        >
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center text-xl transition-all relative ${isSelected
+                              ? "bg-white"
+                              : "bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82]"
+                              }`}
+                          >
+                            {member.emoji}
+                          </div>
+                          <span
+                            className={`text-xs font-medium ${isSelected ? "text-white" : "text-[#6B7280]"
+                              }`}
+                          >
+                            {member.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
                 <MonthCalendar
                   todos={todos}
+                  familyMembers={familyMembers}
+                  selectedMembers={selectedMembers}
                   selectedDate={selectedDate}
                   onDateSelect={(date) => {
                     setSelectedDate(date);
@@ -2168,6 +2239,34 @@ export function CalendarHomeScreen() {
 
                       return todos.filter(t => {
                         if (t.isRoutine || !t.date) return false;
+
+                        // 프로필 필터링 (assignedMemberIds 지원)
+                        if (selectedMembers.length > 0) {
+                          // 프로필이 선택되어 있는 경우:
+                          // - 담당 프로필이 있는 일정: 선택된 프로필에 포함되어야 함
+                          // - 담당 프로필이 없는 일정: 표시 (프로필이 선택되어 있어도 담당 프로필 없는 일정은 표시)
+                          const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                          const hasMemberId = t.memberId;
+                          
+                          if (hasAssignedMembers) {
+                            // assignedMemberIds 중 하나라도 선택된 프로필에 포함되어야 함
+                            const assignedIds = t.assignedMemberIds.map((id: any) => String(id));
+                            const selectedIds = selectedMembers.map((id: string) => String(id));
+                            const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+                            if (!hasSelectedMember) {
+                              return false;
+                            }
+                          } else if (hasMemberId && !selectedMembers.includes(String(t.memberId))) {
+                            return false;
+                          }
+                          // 담당 프로필이 없으면 표시
+                        } else {
+                          // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+                          const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                          if (t.memberId || hasAssignedMembers) {
+                            return false;
+                          }
+                        }
 
                         // 시작일과 동일한 경우
                         if (t.date === selectedDate) return true;
@@ -2246,7 +2345,7 @@ export function CalendarHomeScreen() {
             {calendarView === "week" && isMobile && (
               <>
                 {/* 프로필 선택 영역 */}
-                <div className="bg-white px-4 pt-4 pb-3 border-b border-[#F3F4F6]">
+                <div className="bg-white px-4 pt-4 pb-3 border-b border-[#F3F4F6] mb-4">
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="font-semibold text-[#1F2937]">프로필</h4>
                   </div>
@@ -2300,6 +2399,35 @@ export function CalendarHomeScreen() {
                     {(() => {
                       const selectedDateTodos = todos.filter(t => {
                         if (t.isRoutine || !t.date) return false;
+                        
+                        // 프로필 필터링 (assignedMemberIds 지원)
+                        if (selectedMembers.length > 0) {
+                          // 프로필이 선택되어 있는 경우:
+                          // - 담당 프로필이 있는 일정: 선택된 프로필에 포함되어야 함
+                          // - 담당 프로필이 없는 일정: 표시 (프로필이 선택되어 있어도 담당 프로필 없는 일정은 표시)
+                          const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                          const hasMemberId = t.memberId;
+                          
+                          if (hasAssignedMembers) {
+                            // assignedMemberIds 중 하나라도 선택된 프로필에 포함되어야 함
+                            const assignedIds = t.assignedMemberIds.map((id: any) => String(id));
+                            const selectedIds = selectedMembers.map((id: string) => String(id));
+                            const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+                            if (!hasSelectedMember) {
+                              return false;
+                            }
+                          } else if (hasMemberId && !selectedMembers.includes(String(t.memberId))) {
+                            return false;
+                          }
+                          // 담당 프로필이 없으면 표시
+                        } else {
+                          // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+                          const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                          if (t.memberId || hasAssignedMembers) {
+                            return false;
+                          }
+                        }
+                        
                         if (t.date === selectedDate) return true;
                         if (t.endDate && t.date <= selectedDate && t.endDate >= selectedDate) return true;
                         return false;
@@ -2355,6 +2483,43 @@ export function CalendarHomeScreen() {
             {/* Day Calendar - 모바일 뷰에서만 표시 */}
             {calendarView === "day" && isMobile && (
               <div className="flex flex-col gap-4">
+                {/* 프로필 선택 영역 */}
+                <div className="bg-white px-4 pt-4 pb-3 border-b border-[#F3F4F6] mb-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-semibold text-[#1F2937]">프로필</h4>
+                  </div>
+                  {/* 가로 스크롤 가능한 프로필 목록 */}
+                  <div className="flex gap-3 overflow-x-auto pt-2 pb-2 -mx-4 px-4 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
+                    {familyMembers.map((member) => {
+                      const isSelected = selectedMembers.includes(member.id);
+                      return (
+                        <button
+                          key={member.id}
+                          onClick={() => toggleMemberSelection(member.id)}
+                          className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all min-w-[80px] flex-shrink-0 ${isSelected
+                            ? "bg-[#FF9B82] shadow-md scale-100"
+                            : "bg-[#F9FAFB] hover:bg-[#F3F4F6]"
+                            }`}
+                        >
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center text-xl transition-all relative ${isSelected
+                              ? "bg-white"
+                              : "bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82]"
+                              }`}
+                          >
+                            {member.emoji}
+                          </div>
+                          <span
+                            className={`text-xs font-medium ${isSelected ? "text-white" : "text-[#6B7280]"
+                              }`}
+                          >
+                            {member.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
                 {/* 선택된 날짜의 할 일 리스트 - 캘린더 위에 표시 */}
                 <div className="space-y-3 px-4">
                   <h3 className="text-lg font-bold text-[#1F2937] mb-4">
@@ -2367,6 +2532,30 @@ export function CalendarHomeScreen() {
                     const displayDate = selectedDate || currentDate;
                     const todayTodos = todos.filter(t => {
                       if (t.isRoutine || !t.date) return false;
+                      
+                      // 프로필 필터링 (assignedMemberIds 지원)
+                      if (selectedMembers.length > 0) {
+                        const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                        const hasMemberId = t.memberId;
+                        
+                        if (hasAssignedMembers) {
+                          const assignedIds = t.assignedMemberIds.map((id: any) => String(id));
+                          const selectedIds = selectedMembers.map((id: string) => String(id));
+                          const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+                          if (!hasSelectedMember) {
+                            return false;
+                          }
+                        } else if (hasMemberId && !selectedMembers.includes(String(t.memberId))) {
+                          return false;
+                        }
+                      } else {
+                        // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+                        const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                        if (t.memberId || hasAssignedMembers) {
+                          return false;
+                        }
+                      }
+                      
                       if (t.date === displayDate) return true;
                       if (t.endDate && t.date <= displayDate && t.endDate >= displayDate) return true;
                       return false;
@@ -2420,6 +2609,8 @@ export function CalendarHomeScreen() {
                 </div>
                 <DayCalendar
                   todos={todos}
+                  familyMembers={familyMembers}
+                  selectedMembers={selectedMembers}
                   selectedDate={selectedDate || currentDate}
                   onDateChange={(date) => setSelectedDate(date)}
                   onTodoUpdate={handleTodoUpdate}
