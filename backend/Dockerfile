@@ -24,5 +24,5 @@ COPY . .
 ENV PORT=8080
 EXPOSE 8080
 
-# 서버 시작
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT}"]
+# 서버 시작 (--proxy-headers로 Cloud Run의 X-Forwarded-Proto 헤더 처리)
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips='*'"]
