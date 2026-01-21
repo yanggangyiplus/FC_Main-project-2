@@ -27,22 +27,25 @@ router = APIRouter(
 @router.get("/", response_model=List[TodoResponse])
 async def get_todos(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 100000,
     status_filter: str = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Get all todos for current user with optional filtering"""
     from sqlalchemy.orm import joinedload
-    
+
     query = db.query(Todo).options(joinedload(Todo.checklist_items)).filter(
         Todo.user_id == current_user.id,
         Todo.deleted_at.is_(None)
     )
-    
+
     if status_filter:
         query = query.filter(Todo.status == status_filter)
-    
+
+    # 날짜순 정렬 (최신 날짜 우선)
+    query = query.order_by(Todo.date.desc())
+
     todos = query.offset(skip).limit(limit).all()
     
     # 응답 형식 변환
