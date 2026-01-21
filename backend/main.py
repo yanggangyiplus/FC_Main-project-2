@@ -108,9 +108,13 @@ app.include_router(notifications.router)
 from app.api.routes import memos
 app.include_router(memos.router)
 
-# 데이터베이스 초기화
+# 데이터베이스 초기화 (에러 발생 시에도 앱 시작 가능하도록 try-except)
 from app.database import init_db
-init_db()
+try:
+    init_db()
+except Exception as e:
+    logger.error(f"Database initialization failed: {e}")
+    logger.warning("App will continue, but database operations may fail")
 
 # 알림 스케줄러 시작
 from app.services.scheduler_service import scheduler
