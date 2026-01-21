@@ -1844,6 +1844,81 @@ async def disable_calendar_sync(
     }
 
 
+@router.delete("/imported-todos")
+async def delete_imported_google_calendar_todos(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    date_from: str = None,  # Optional: 특정 날짜 이후의 일정만 삭제 (YYYY-MM-DD)
+    delete_all: bool = False  # True면 모든 가져온 일정 삭제
+):
+    """
+    Google Calendar에서 가져온 일정 삭제 (잘못된 날짜로 가져온 일정 정리용)
+
+    - source가 'google_calendar'인 일정만 삭제
+    - date_from: 특정 날짜 이후의 일정만 삭제 (예: '2027-01-01')
+    - delete_all: True면 모든 가져온 일정 삭제
+    """
+    from app.models.models import Todo
+
+    try:
+        logger.info(f"[DELETE_IMPORTED] 가져온 일정 삭제 시작 - user: {current_user.email}, date_from: {date_from}, delete_all: {delete_all}")
+
+        # 기본 쿼리: Google Calendar에서 가져온 일정 (source='google_calendar')
+        query = db.query(Todo).filter(
+            Todo.user_id == current_user.id,
+            Todo.deleted_at.is_(None),
+            Todo.source == "google_calendar"  # Google Calendar에서 가져온 일정만
+        )
+
+        # 날짜 필터 적용
+        if date_from and not delete_all:
+            try:
+                from_date = datetime.strptime(date_from, '%Y-%m-%d').date()
+                query = query.filter(Todo.date >= from_date)
+                logger.info(f"[DELETE_IMPORTED] 날짜 필터 적용: {from_date} 이후")
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="날짜 형식이 올바르지 않습니다. YYYY-MM-DD 형식으로 입력해주세요."
+                )
+        elif not delete_all:
+            # date_from도 없고 delete_all도 아니면 2027년 이후만 삭제 (기본값)
+            default_date = datetime.strptime('2027-01-01', '%Y-%m-%d').date()
+            query = query.filter(Todo.date >= default_date)
+            logger.info(f"[DELETE_IMPORTED] 기본 날짜 필터 적용: 2027-01-01 이후")
+
+        # 삭제할 일정 조회
+        todos_to_delete = query.all()
+        deleted_count = len(todos_to_delete)
+
+        logger.info(f"[DELETE_IMPORTED] 삭제할 일정 수: {deleted_count}개")
+
+        # 일정 삭제 (soft delete가 아닌 실제 삭제)
+        for todo in todos_to_delete:
+            logger.info(f"[DELETE_IMPORTED] 삭제: todo_id={todo.id}, title={todo.title}, date={todo.date}")
+            db.delete(todo)
+
+        db.commit()
+
+        logger.info(f"[DELETE_IMPORTED] 가져온 일정 삭제 완료: {deleted_count}개 삭제됨")
+
+        return {
+            "success": True,
+            "deleted_count": deleted_count,
+            "message": f"Google Calendar에서 가져온 일정 {deleted_count}개가 삭제되었습니다. 다시 동기화하여 올바른 날짜로 가져올 수 있습니다."
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[DELETE_IMPORTED] 일정 삭제 중 오류: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"일정 삭제 실패: {str(e)}"
+        )
+
+
 @router.post("/google-callback")
 async def google_calendar_callback(
     request: GoogleCallbackRequest,
