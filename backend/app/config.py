@@ -34,10 +34,10 @@ class Settings(BaseSettings):
     
     # Google OAuth (google-issue.md - Redirect URI 환경별 관리)
     # 프론트엔드에서 처리하므로 프론트엔드 URL로 설정
-    google_redirect_uri: str = (
-        "http://localhost:5173"
-        if os.getenv("ENVIRONMENT", "development") == "development"
-        else "https://always-plan.com"
+    google_redirect_uri: str = os.getenv(
+        "GOOGLE_REDIRECT_URI",
+        "http://localhost:5173" if os.getenv("ENVIRONMENT", "development") == "development"
+        else "https://always-plan-fc.web.app"
     )
     
     # 서버
