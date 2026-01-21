@@ -1,55 +1,49 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Bell,
   Pencil,
   Check,
-  Edit2,
   User,
   Settings,
   Users,
   HelpCircle,
   LogOut,
   ChevronRight,
-  Mic,
-  Camera,
   FileText,
   X,
   Clock,
   Tag,
   Calendar,
-  Repeat,
-  Trash2,
   MapPin,
-  Plus,
+  Repeat,
 } from "lucide-react";
-import { MemberAddSheet } from "./MemberAddSheet";
-import { WorkContactAddSheet } from "./WorkContactAddSheet";
 import { CommunityScreen } from "./CommunityScreen";
 import { MyPageScreen } from "./MyPageScreen";
 import { SettingsScreen } from "./SettingsScreen";
 import { ProfileManagementScreen } from "./ProfileManagementScreen";
 import { NotificationPanel } from "./NotificationPanel";
 import { InputMethodModal } from "./InputMethodModal";
-import { AddTodoModal, TodoFormData } from "./AddTodoModal";
+import { AddTodoModal } from "./AddTodoModal";
 import { MonthCalendar } from "./MonthCalendar";
 import { WeekCalendar } from "./WeekCalendar";
 import { DayCalendar } from "./DayCalendar";
 import { toast } from "sonner";
 import { apiClient } from "@/services/apiClient";
 import { formatDuration } from "@/utils/formatDuration";
+import { useIsMobile } from "./ui/use-mobile";
 
 export function CalendarHomeScreen() {
-  const [showMemberAddSheet, setShowMemberAddSheet] = useState(false);
-  const [showWorkContactAddSheet, setShowWorkContactAddSheet] = useState(false);
+  const isMobile = useIsMobile();
   const [showCommunityScreen, setShowCommunityScreen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"todo" | "calendar">("todo");
+  const [showCustomerService, setShowCustomerService] = useState(false);
+  const [showUserGuide, setShowUserGuide] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showMyPageScreen, setShowMyPageScreen] = useState(false);
   const [showSettingsScreen, setShowSettingsScreen] = useState(false);
   const [showProfileManagementScreen, setShowProfileManagementScreen] = useState(false);
   const [showNotificationPanel, setShowNotificationPanel] = useState(false);
+
   // 읽음 상태를 localStorage에서 불러오기
-  // 예정된 알림과 지나간 알림의 읽음 상태를 분리하여 관리
   const [readUpcomingNotificationIds, setReadUpcomingNotificationIds] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem('readUpcomingNotificationIds');
@@ -62,6 +56,7 @@ export function CalendarHomeScreen() {
     }
     return new Set();
   });
+
   const [readPastNotificationIds, setReadPastNotificationIds] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem('readPastNotificationIds');
@@ -74,6 +69,7 @@ export function CalendarHomeScreen() {
     }
     return new Set();
   });
+
   // 기존 호환성을 위한 readNotificationIds (지나간 알림용)
   const readNotificationIds = readPastNotificationIds;
   const [showTodoDetailFromNotification, setShowTodoDetailFromNotification] = useState(false);
@@ -94,11 +90,11 @@ export function CalendarHomeScreen() {
       console.error("읽음 지나간 알림 상태 저장 실패:", error);
     }
   }, [readPastNotificationIds]);
+
   const [calendarView, setCalendarView] = useState<"month" | "week" | "day">("month");
   const [userEmail, setUserEmail] = useState("always-plan@email.com");
   const [userName, setUserName] = useState("나");
   const [selectedEmoji, setSelectedEmoji] = useState("🐼");
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   // Family members for user selection
   interface FamilyMember {
@@ -186,7 +182,6 @@ export function CalendarHomeScreen() {
   const handleFabMouseUp = () => {
     if (isDragging && !hasMoved) {
       // 일정 추가 모달을 열 때 이전 입력값 초기화
-      setExtractedText("");
       setExtractedTodoInfo(null);
       setShowInputMethodModal(true);
     }
@@ -219,7 +214,6 @@ export function CalendarHomeScreen() {
     const handleMouseUp = () => {
       if (isDragging && !hasMoved) {
         // 일정 추가 모달을 열 때 이전 입력값 초기화
-        setExtractedText("");
         setExtractedTodoInfo(null);
         setShowInputMethodModal(true);
       }
@@ -229,7 +223,6 @@ export function CalendarHomeScreen() {
     const handleTouchEnd = () => {
       if (isDragging && !hasMoved) {
         // 일정 추가 모달을 열 때 이전 입력값 초기화
-        setExtractedText("");
         setExtractedTodoInfo(null);
         setShowInputMethodModal(true);
       }
@@ -301,1986 +294,1012 @@ export function CalendarHomeScreen() {
     handleGoogleCalendarCallback();
   }, []);
 
-  // Google Calendar 동기화 상태 관리
+  // 알림 상태 관리
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error' | 'disabled'>('idle');
-  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
-  // ref로 관리하여 함수 재생성 방지 (UI 표시는 state로)
-  const isSyncInFlightRef = useRef(false);
-  const lastSyncTimestampRef = useRef<number>(0);
-  const SYNC_COOLDOWN_MS = 30000; // 30초 쿨다운
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
 
-  // Google Calendar 이벤트 가져오기 함수 (재사용 가능하도록 분리)
-  const loadGoogleCalendarEvents = useCallback(async (force: boolean = false) => {
-    // 쿨다운 체크
-    const now = Date.now();
-    if (!force && (isSyncInFlightRef.current || (now - lastSyncTimestampRef.current < SYNC_COOLDOWN_MS))) {
-      const remainingSeconds = Math.ceil((SYNC_COOLDOWN_MS - (now - lastSyncTimestampRef.current)) / 1000);
-      console.log(`[Google Calendar] 동기화 쿨다운 중... (${remainingSeconds}초 남음)`);
-      return;
-    }
-
-    isSyncInFlightRef.current = true;
-    setSyncStatus('syncing');
-    setSyncError(null);
-    lastSyncTimestampRef.current = now;
-
-    try {
-      const calendarStatusResponse = await apiClient.getCalendarStatus();
-      const googleCalendarEnabled = calendarStatusResponse.data?.enabled || false;
-      const googleCalendarConnected = calendarStatusResponse.data?.connected || false;
-      const googleCalendarImportEnabled = calendarStatusResponse.data?.import_enabled || false;
-
-      // 가져오기가 활성화되어 있고 연동이 되어 있을 때만 Google Calendar 이벤트 가져오기
-      if (googleCalendarEnabled && googleCalendarConnected && googleCalendarImportEnabled) {
-        console.log('[Google Calendar] 가져오기 활성화됨, 이벤트 가져오기 시작...');
-
-        // 시간 범위 설정 (2주 전 ~ 6주 후)
-        const now = new Date();
-        const timeMin = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000); // 2주 전
-        const timeMax = new Date(now.getTime() + 42 * 24 * 60 * 60 * 1000); // 6주 후
-
-        const timeMinISO = timeMin.toISOString();
-        const timeMaxISO = timeMax.toISOString();
-
-        console.log('[Google Calendar] 이벤트 요청:', { timeMin: timeMinISO, timeMax: timeMaxISO });
-
-        try {
-          const eventsResponse = await apiClient.getGoogleCalendarEvents(timeMinISO, timeMaxISO);
-          console.log('[Google Calendar] 이벤트 응답:', eventsResponse.data);
-
-          if (eventsResponse.data?.success && eventsResponse.data?.events) {
-            const googleEvents = eventsResponse.data.events;
-            console.log(`[Google Calendar] ${googleEvents.length}개 이벤트 받음`);
-
-            // Google Calendar 이벤트를 Todo 형식으로 변환
-            const formattedGoogleEvents = googleEvents.map((event: any) => {
-              const dateStr = event.date || new Date().toISOString().split('T')[0];
-              const endDateStr = event.end_date || undefined;
-              const isAllDay = event.all_day || false;
-
-              // duration 계산 (하루종일이 아닌 경우만)
-              let duration = 60;
-              if (!isAllDay && event.start_time && event.end_time) {
-                const [startHours, startMinutes] = event.start_time.split(':').map(Number);
-                const [endHours, endMinutes] = event.end_time.split(':').map(Number);
-                const startTotal = startHours * 60 + startMinutes;
-                const endTotal = endHours * 60 + endMinutes;
-                duration = endTotal - startTotal;
-              } else if (isAllDay && endDateStr) {
-                // 하루종일이고 여러 날짜에 걸친 경우, 날짜 차이로 duration 계산
-                const startDate = new Date(dateStr);
-                const endDate = new Date(endDateStr);
-                const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-                duration = daysDiff * 24 * 60; // 일수를 분으로 변환
-              }
-
-              // notification_reminders 파싱
-              let notificationReminders: Array<{ value: number; unit: 'minutes' | 'hours' | 'days' | 'weeks' }> = [];
-              if (event.notification_reminders) {
-                try {
-                  const parsed = Array.isArray(event.notification_reminders)
-                    ? event.notification_reminders
-                    : (typeof event.notification_reminders === 'string'
-                      ? JSON.parse(event.notification_reminders)
-                      : []);
-                  if (Array.isArray(parsed)) {
-                    notificationReminders = parsed.map((r: any) => ({
-                      value: Number(r.value) || 30,
-                      unit: r.unit || 'minutes'
-                    }));
-                  }
-                } catch (e) {
-                  console.error('Failed to parse notification_reminders:', e);
-                }
-              }
-
-              // repeat_pattern 파싱
-              let repeatPattern: any = undefined;
-              if (event.repeat_pattern) {
-                try {
-                  repeatPattern = typeof event.repeat_pattern === 'string'
-                    ? JSON.parse(event.repeat_pattern)
-                    : event.repeat_pattern;
-                } catch (e) {
-                  console.error('Failed to parse repeat_pattern:', e);
-                }
-              }
-
-              // repeat_end_date 파싱
-              let repeatEndDate: string | undefined = undefined;
-              if (event.repeat_end_date) {
-                if (typeof event.repeat_end_date === 'string') {
-                  repeatEndDate = event.repeat_end_date;
-                } else if (event.repeat_end_date instanceof Date) {
-                  const year = event.repeat_end_date.getFullYear();
-                  const month = event.repeat_end_date.getMonth() + 1;
-                  const day = event.repeat_end_date.getDate();
-                  repeatEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                }
-              }
-
-              return {
-                // 구글 캘린더 이벤트 ID를 사용 (중복 제거를 위해 중요)
-                id: event.google_calendar_event_id || `google_${event.id}`,
-                title: event.title || '제목 없음',
-                time: isAllDay ? '' : (event.start_time || "09:00"), // 하루종일이면 빈 문자열
-                duration: duration > 0 ? duration : 60,
-                completed: false,
-                category: "구글",
-                date: dateStr,
-                endDate: endDateStr, // 종료 날짜 추가
-                startTime: isAllDay ? undefined : event.start_time, // 하루종일이면 undefined
-                endTime: isAllDay ? undefined : event.end_time, // 하루종일이면 undefined
-                isAllDay: isAllDay,
-                memo: event.description || "",
-                location: event.location || "",
-                hasNotification: notificationReminders.length > 0,
-                alarmTimes: [],
-                notificationReminders: notificationReminders, // 알림 정보 추가
-                repeatType: event.repeat_type || "none", // 반복 타입 추가
-                repeatEndDate: repeatEndDate, // 반복 종료 날짜 추가
-                repeatPattern: repeatPattern, // 반복 패턴 추가
-                checklistItems: [],
-                memberId: undefined,
-                isRoutine: false,
-                source: 'google_calendar' as const,
-                // 구글 캘린더 이벤트 ID (중복 제거의 핵심)
-                googleCalendarEventId: event.id || event.google_calendar_event_id,
-                sourceId: event.source_id, // Always Plan의 Todo ID (중복 제거용)
-              };
-            });
-
-            // 기존 일정과 병합 (중복 제거)
-            setTodos((prevTodos) => {
-              // Always Plan 일정만 유지 (Google Calendar 이벤트는 새로 가져온 것으로 교체)
-              // 단, bulkSynced=True인 Todo는 "동기화 후 저장"으로 영구 저장된 것이므로 항상 유지
-              const alwaysPlanTodos = prevTodos.filter(t => {
-                // bulkSynced=True인 Todo는 항상 유지
-                if (t.bulkSynced === true) {
-                  return true;
-                }
-                // source가 'always_plan'이거나 없는 경우만 유지
-                return t.source === 'always_plan' || !t.source;
-              });
-
-              // 기존 일정 ID와 Google Calendar 이벤트 ID를 모두 체크
-              const existingIds = new Set(alwaysPlanTodos.map(t => t.id));
-
-              // Always Plan 일정 중 google_calendar_event_id가 있는 것들의 이벤트 ID 수집
-              const alwaysPlanGoogleEventIds = new Set(
-                alwaysPlanTodos
-                  .filter(t => t.googleCalendarEventId)
-                  .map(t => t.googleCalendarEventId!)
-              );
-
-              // sourceId로 매칭된 일정 ID 수집 (더 정확한 중복 제거)
-              const alwaysPlanSourceIds = new Set(
-                alwaysPlanTodos
-                  .map(t => t.id)
-              );
-
-              // 중복되지 않는 Google Calendar 이벤트만 추가
-              // ID 기반 중복 제거 (제목+날짜+시간 기반은 제거 - 사용자 의도 반영)
-              const newGoogleEvents = formattedGoogleEvents.filter(
-                (event: any) => {
-                  // 구글 캘린더 이벤트 ID (중복 제거의 핵심)
-                  const googleEventId = event.googleCalendarEventId || event.id;
-
-                  // 1. 프론트엔드에서 생성한 ID로 중복 체크
-                  if (existingIds.has(event.id)) {
-                    console.log(`[Google Calendar] 중복 제거 (프론트엔드 ID): ${event.id}`);
-                    return false;
-                  }
-
-                  // 2. Always Plan 일정과 이미 매칭된 Google Calendar 이벤트는 표시하지 않음
-                  // (googleCalendarEventId로 매칭된 일정은 이미 동기화된 것으로 간주)
-                  // 이것이 가장 중요한 중복 제거: 내가 만든 일정이 구글에 동기화되면 google_calendar_event_id가 저장됨
-                  if (googleEventId && alwaysPlanGoogleEventIds.has(googleEventId)) {
-                    console.log(`[Google Calendar] 중복 제거 (내가 동기화한 일정 - googleCalendarEventId): ${googleEventId}`);
-                    return false;
-                  }
-
-                  // 3. sourceId로 중복 체크 (extendedProperties 또는 description에서 추출)
-                  // 내가 만든 일정이 구글에 동기화될 때 sourceId가 설정됨
-                  if (event.sourceId) {
-                    if (alwaysPlanSourceIds.has(event.sourceId)) {
-                      console.log(`[Google Calendar] 중복 제거 (내가 만든 일정 - sourceId): ${event.sourceId}`);
-                      return false;
-                    }
-                  }
-
-                  // 4. 제목+날짜+시간 기반 중복 제거는 제거 (사용자가 비슷한 일정을 만들 수 있도록)
-                  return true;
-                }
-              );
-
-              const matchedCount = alwaysPlanGoogleEventIds.size;
-              console.log(`[Google Calendar] Always Plan 일정: ${alwaysPlanTodos.length}개 (${matchedCount}개가 Google Calendar와 매칭됨), 새 Google 이벤트: ${newGoogleEvents.length}개`);
-
-              // Always Plan 일정과 새로 가져온 Google Calendar 이벤트 병합
-              const mergedTodos = [...alwaysPlanTodos, ...newGoogleEvents];
-
-              // 최종적으로 ID 기반 중복 제거만 수행 (제목+날짜+시간 기반은 제거)
-              const finalUniqueTodos: any[] = [];
-              const finalSeenIds = new Set<string>();
-
-              for (const todo of mergedTodos) {
-                // ID가 있으면 ID로, 없으면 생성
-                const todoId = todo.id || `temp_${Date.now()}_${Math.random()}`;
-
-                if (!finalSeenIds.has(todoId)) {
-                  finalSeenIds.add(todoId);
-                  finalUniqueTodos.push(todo);
-                } else {
-                  console.log(`[최종 중복 제거] ID: ${todoId} (${todo.title})`);
-                }
-              }
-
-              console.log(`[최종] 중복 제거 전: ${mergedTodos.length}개, 제거 후: ${finalUniqueTodos.length}개`);
-
-              return finalUniqueTodos;
-            });
-
-            // 동기화 성공
-            setSyncStatus('success');
-            setLastSyncTime(new Date());
-            setSyncError(null);
-          } else {
-            console.warn('[Google Calendar] 이벤트가 없거나 실패:', eventsResponse.data);
-            setSyncStatus('error');
-            setSyncError('이벤트 데이터를 받지 못했습니다.');
-          }
-        } catch (error: any) {
-          console.error('[Google Calendar] 이벤트 가져오기 실패:', error);
-          console.error('[Google Calendar] 에러 상세:', error.response?.data || error.message);
-          setSyncStatus('error');
-          setSyncError(error.response?.data?.detail || error.message || '동기화에 실패했습니다.');
-        }
-      } else {
-        console.log('[Google Calendar] 연동 비활성화됨 또는 연결 안됨');
-
-        // Google Calendar 연동이 비활성화된 경우, Google Calendar 이벤트 제거
-        // 단, bulkSynced=True인 Todo는 "동기화 후 저장"으로 영구 저장된 것이므로 유지
-        setTodos((prevTodos) => {
-          const filteredTodos = prevTodos.filter(
-            (todo: any) => {
-              // bulkSynced=True인 Todo는 항상 유지 (동기화 후 저장으로 영구 저장됨)
-              if (todo.bulkSynced === true) {
-                return true;
-              }
-              // source가 'google_calendar'이거나 googleCalendarEventId가 있지만 bulkSynced가 아닌 경우만 제거
-              return todo.source !== 'google_calendar' && !todo.googleCalendarEventId;
-            }
-          );
-          const removedCount = prevTodos.length - filteredTodos.length;
-          if (removedCount > 0) {
-            console.log(`[Google Calendar] ${removedCount}개 이벤트 제거됨 (연동 비활성화, bulkSynced=True인 일정은 유지)`);
-          }
-          return filteredTodos;
-        });
-
-        // 동기화 상태를 비활성화로 설정
-        setSyncStatus('disabled');
-      }
-    } catch (error: any) {
-      console.error('[Google Calendar] 상태 확인 실패:', error);
-      setSyncStatus('error');
-      setSyncError(error.response?.data?.detail || error.message || '상태 확인에 실패했습니다.');
-    } finally {
-      isSyncInFlightRef.current = false;
-    }
-  }, []); // 의존성 배열 비움 - ref 사용하므로 재생성 불필요
-
-  // 알림 발송 주기적 체크 (5분마다)
+  // 사용자 정보 로드
   useEffect(() => {
-    const checkNotifications = async () => {
+    const loadUser = async () => {
       try {
-        await apiClient.sendScheduledNotifications();
+        const response = await apiClient.getCurrentUser();
+        setUserEmail(response.data.email);
+        setUserName(response.data.name);
+        // avatar_emoji 필드 사용 (emoji가 아닌)
+        setSelectedEmoji(response.data.avatar_emoji || response.data.emoji || "🐼");
+        console.log('User loaded:', response.data);
       } catch (error) {
-        console.error("알림 발송 체크 실패:", error);
+        console.error('Failed to load user:', error);
       }
     };
 
-    // 즉시 한 번 실행
-    checkNotifications();
-
-    // 5분마다 실행
-    const interval = setInterval(checkNotifications, 5 * 60 * 1000);
-
-    return () => clearInterval(interval);
+    loadUser();
   }, []);
 
+  // Google Calendar 상태 확인
   useEffect(() => {
-    const loadInitialData = async () => {
-      // 사용자 정보 변수 (모든 try-catch 블록에서 사용 가능하도록 함수 최상단에 선언)
-      let currentUserName = "나";
-      let currentUserEmoji = "🐼";
-
-      // 1. 사용자 정보 로드 (별도 try-catch로 분리)
+    const checkGoogleCalendarStatus = async () => {
       try {
-        const userResponse = await apiClient.getCurrentUser();
-        if (userResponse.data) {
-          currentUserName = userResponse.data.name || "나";
-          currentUserEmoji = userResponse.data.avatar_emoji || "🐼";
-          setUserName(currentUserName);
-          setUserEmail(userResponse.data.email || "always-plan@email.com");
-          setSelectedEmoji(currentUserEmoji);
-        }
-      } catch (error) {
-        console.error("사용자 정보 로드 실패:", error);
-        // 에러가 발생해도 기본값 사용
-      }
-
-      // 2. 일정 로드 (Google Calendar 이벤트와 병합하기 전에 먼저 로드)
-      let baseTodos: any[] = [];
-      try {
-        const todosResponse = await apiClient.getTodos();
-        if (todosResponse.data && Array.isArray(todosResponse.data)) {
-          const formattedTodos = todosResponse.data.map((todo: any) => {
-            // duration 계산 (start_time과 end_time이 있는 경우)
-            let duration = 60;
-            if (todo.start_time && todo.end_time) {
-              const [startHours, startMinutes] = todo.start_time.split(':').map(Number);
-              const [endHours, endMinutes] = todo.end_time.split(':').map(Number);
-              const startTotal = startHours * 60 + startMinutes;
-              const endTotal = endHours * 60 + endMinutes;
-              duration = endTotal - startTotal;
-            }
-
-            // notification_times 파싱 (구버전 호환)
-            let alarmTimes: string[] = [];
-            if (todo.notification_times) {
-              try {
-                alarmTimes = typeof todo.notification_times === 'string'
-                  ? JSON.parse(todo.notification_times)
-                  : todo.notification_times;
-              } catch (e) {
-                alarmTimes = [];
-              }
-            }
-
-            // notification_reminders 파싱 (새로운 형식)
-            let notificationReminders: Array<{ value: number; unit: 'minutes' | 'hours' | 'days' | 'weeks' }> = [];
-            if (todo.notification_reminders) {
-              try {
-                const parsed = typeof todo.notification_reminders === 'string'
-                  ? JSON.parse(todo.notification_reminders)
-                  : todo.notification_reminders;
-                if (Array.isArray(parsed)) {
-                  notificationReminders = parsed.map((r: any) => ({
-                    value: Number(r.value) || 30,
-                    unit: r.unit || 'minutes'
-                  }));
-                }
-              } catch (e) {
-                console.error('Failed to parse notification_reminders:', e);
-                notificationReminders = [];
-              }
-            }
-
-            // repeat_end_date 파싱
-            let repeatEndDate: string | undefined = undefined;
-            if (todo.repeat_end_date) {
-              if (todo.repeat_end_date instanceof Date) {
-                const year = todo.repeat_end_date.getFullYear();
-                const month = todo.repeat_end_date.getMonth() + 1;
-                const day = todo.repeat_end_date.getDate();
-                repeatEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              } else if (typeof todo.repeat_end_date === 'string') {
-                repeatEndDate = todo.repeat_end_date;
-              }
-            }
-
-            // repeat_pattern 파싱
-            let repeatPattern: any = undefined;
-            if (todo.repeat_pattern) {
-              try {
-                repeatPattern = typeof todo.repeat_pattern === 'string'
-                  ? JSON.parse(todo.repeat_pattern)
-                  : todo.repeat_pattern;
-              } catch (e) {
-                console.error('Failed to parse repeat_pattern:', e);
-                repeatPattern = undefined;
-              }
-            }
-
-            // family_member_ids 파싱
-            let memberId: string | undefined;
-            let assignedMemberIds: string[] = [];
-            if (todo.family_member_ids) {
-              try {
-                const memberIds = typeof todo.family_member_ids === 'string'
-                  ? JSON.parse(todo.family_member_ids)
-                  : todo.family_member_ids;
-                if (Array.isArray(memberIds)) {
-                  assignedMemberIds = memberIds;
-                  memberId = memberIds.length > 0 ? memberIds[0] : undefined;
-                } else {
-                  assignedMemberIds = memberIds ? [memberIds] : [];
-                  memberId = memberIds || undefined;
-                }
-              } catch (e) {
-                memberId = undefined;
-                assignedMemberIds = [];
-              }
-            }
-
-            // 날짜 형식 변환 (Date 객체인 경우 문자열로 변환)
-            let todoDate = todo.date;
-            if (todoDate) {
-              if (todoDate instanceof Date) {
-                const year = todoDate.getFullYear();
-                const month = todoDate.getMonth() + 1;
-                const day = todoDate.getDate();
-                todoDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              } else if (typeof todoDate === 'string') {
-                // 이미 문자열인 경우 그대로 사용
-                todoDate = todoDate;
-              }
-            }
-
-            // 종료 날짜 형식 변환 (기간 일정인 경우)
-            let todoEndDate: string | undefined = undefined;
-            if (todo.end_date) {
-              if (todo.end_date instanceof Date) {
-                const year = todo.end_date.getFullYear();
-                const month = todo.end_date.getMonth() + 1;
-                const day = todo.end_date.getDate();
-                todoEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              } else if (typeof todo.end_date === 'string') {
-                todoEndDate = todo.end_date;
-              }
-            }
-
-            return {
-              id: todo.id,
-              title: todo.title,
-              // 하루종일 일정은 time을 빈 문자열로 설정
-              time: todo.all_day ? '' : (todo.start_time || "09:00"),
-              duration: duration > 0 ? duration : 60,
-              completed: todo.status === 'completed',
-              category: todo.category || "기타",
-              date: todoDate,
-              endDate: todoEndDate,  // 종료 날짜 추가
-              startTime: todo.all_day ? undefined : todo.start_time,
-              endTime: todo.all_day ? undefined : todo.end_time,
-              isAllDay: todo.all_day || false,
-              memo: todo.memo || todo.description || "",
-              location: todo.location || "",
-              hasNotification: todo.has_notification || false,
-              alarmTimes: alarmTimes, // 구버전 호환
-              notificationReminders: notificationReminders, // 새로운 알림 형식
-              repeatType: todo.repeat_type || "none",
-              repeatEndDate: repeatEndDate, // 반복 종료 날짜
-              repeatPattern: repeatPattern, // 반복 패턴
-              checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
-              memberId: memberId,
-              assignedMemberIds: assignedMemberIds, // 담당 프로필 ID 배열 저장
-              isRoutine: false,
-              source: 'always_plan' as const, // 기존 일정임을 명시
-              googleCalendarEventId: todo.google_calendar_event_id || undefined, // Google Calendar 이벤트 ID 추가
-              bulkSynced: todo.bulk_synced || false, // 동기화 후 저장 여부 (새로고침 후에도 유지되도록)
-              todoGroupId: todo.todo_group_id || undefined, // 일정 그룹 ID (여러 날짜에 걸친 일정 묶기)
-            };
-          });
-          baseTodos = formattedTodos;
-
-          // Always Plan 일정들 사이에서도 중복 제거 (제목+날짜+시간 기준)
-          const uniqueTodos: any[] = [];
-          const seenKeys = new Set<string>();
-
-          for (const todo of formattedTodos) {
-            const dateStr = todo.date || '';
-            const timeStr = todo.startTime || (todo.isAllDay ? 'all_day' : '');
-            const key = `${todo.title}_${dateStr}_${timeStr}`.toLowerCase().trim();
-
-            if (!seenKeys.has(key)) {
-              seenKeys.add(key);
-              uniqueTodos.push(todo);
-            } else {
-              console.log(`[Always Plan] 중복 제거: ${todo.title} ${dateStr} ${timeStr}`);
+        const response = await apiClient.getCalendarStatus();
+        if (response.data) {
+          const importEnabled = response.data.import_enabled || false;
+          const exportEnabled = response.data.export_enabled || false;
+          // 두 토글 중 하나도 활성화되어 있지 않으면 동기화 비활성화
+          if (!importEnabled && !exportEnabled) {
+            setSyncStatus('disabled');
+            setLastSyncTime(null); // 동기화 비활성화시 마지막 동기화 시간 초기화
+          } else {
+            // 동기화가 활성화되어 있고 현재 disabled 상태면 idle로 변경
+            if (syncStatus === 'disabled') {
+              setSyncStatus('idle');
             }
           }
-
-          console.log(`[Always Plan] 중복 제거 전: ${formattedTodos.length}개, 제거 후: ${uniqueTodos.length}개`);
-
-          // 기존 일정을 먼저 설정
-          setTodos(uniqueTodos);
-          console.log(`[Always Plan] 기존 일정 ${formattedTodos.length}개 로드 완료`);
+        } else {
+          setSyncStatus('disabled');
+          setLastSyncTime(null);
         }
       } catch (error) {
-        console.error("일정 로드 실패:", error);
+        console.error('Failed to check Google Calendar status:', error);
+        setSyncStatus('disabled');
+        setLastSyncTime(null);
       }
+    };
 
-      // 3. 가족 구성원 로드 (사용자 정보 로드 후 실행)
+    checkGoogleCalendarStatus();
+    // 주기적으로 상태 확인 (30초마다)
+    const interval = setInterval(checkGoogleCalendarStatus, 30000);
+    return () => clearInterval(interval);
+  }, [syncStatus]);
+
+  // 가족 구성원 로드
+  useEffect(() => {
+    const loadFamilyMembers = async () => {
       try {
-        const familyResponse = await apiClient.getFamilyMembers();
-        if (familyResponse.data && Array.isArray(familyResponse.data)) {
-          // 기본 색상 배열
-          const defaultColors = [
-            "#9B82FF", // 연한 보라색 (가족구성원 1)
-            "#9ae3a9", // 연한 초록색
-            "#FFD482", // 연한 노란색
-            "#82D4FF", // 연한 파란색
-            "#FF82D4", // 연한 분홍색
-            "#FF9B82", // 연한 주황색 (나의 색상과 구분)
-          ];
-
-          const formattedMembers = familyResponse.data.map((member: any, index: number) => {
-            // color_code가 있으면 사용, 없으면 기본 색상 배열에서 순차적으로 할당
-            let memberColor = member.color_code || member.color;
-
-            // 색상이 없거나 빈 문자열이면 기본 색상 배열에서 할당
-            if (!memberColor || memberColor.trim() === '') {
-              memberColor = defaultColors[index % defaultColors.length];
-            }
-
-            return {
-              id: member.id,
-              name: member.name,
-              emoji: member.emoji || "🐼",
-              color: memberColor,
-              phone: member.phone_number,
-              memo: member.notes,
-            };
-          });
-          // "나" 항목을 항상 맨 앞에 추가 (현재 사용자 정보 기반)
-          formattedMembers.unshift({
-            id: "me", // 특별한 ID로 표시 (DB에 저장되지 않음)
-            name: currentUserName,
-            emoji: currentUserEmoji,
+        const response = await apiClient.getFamilyMembers();
+        const formattedMembers = [
+          {
+            id: "me",
+            name: userName,
+            emoji: selectedEmoji,
             color: "rgba(255, 155, 130, 0.6)",
             phone: undefined,
             memo: undefined,
-          });
-          setFamilyMembers(formattedMembers);
-        }
+          },
+          ...response.data.map((member: any) => ({
+            id: member.id,
+            name: member.name,
+            emoji: member.emoji || "👤",
+            color: member.color || "rgba(99, 102, 241, 0.6)",
+            phone: member.phone,
+            memo: member.memo,
+          })),
+        ];
+        setFamilyMembers(formattedMembers);
       } catch (error) {
-        console.error("가족 구성원 로드 실패:", error);
-        // 에러가 발생해도 "나" 항목은 표시
-        setFamilyMembers([{
-          id: "me",
-          name: currentUserName,
-          emoji: currentUserEmoji,
-          color: "rgba(255, 155, 130, 0.6)",
-          phone: undefined,
-          memo: undefined,
-        }]);
-      }
-
-      // 5. Google Calendar 연동 상태 확인 및 이벤트 가져오기
-      await loadGoogleCalendarEvents(true); // 초기 로드는 강제 실행
-    };
-
-    loadInitialData();
-  }, []); // 컴포넌트 마운트 시 한 번만 실행
-
-  // Google Calendar 초기 상태 확인 및 이벤트 로드 (마운트 시 한 번만)
-  useEffect(() => {
-    const initialCheck = async () => {
-      console.log('[Google Calendar] 초기 상태 확인 실행...');
-      try {
-        const calendarStatusResponse = await apiClient.getCalendarStatus();
-        const googleCalendarEnabled = calendarStatusResponse.data?.enabled || false;
-        const googleCalendarConnected = calendarStatusResponse.data?.connected || false;
-        const googleCalendarImportEnabled = calendarStatusResponse.data?.import_enabled || false;
-
-        if (googleCalendarEnabled && googleCalendarConnected && googleCalendarImportEnabled) {
-          console.log('[Google Calendar] 초기 이벤트 가져오기 시작...');
-          await loadGoogleCalendarEvents(true); // 초기 로드는 강제 실행
-        } else {
-          console.log('[Google Calendar] 초기 로드 스킵 (토글 비활성화 또는 연결 안됨)');
-          setSyncStatus('disabled');
-        }
-      } catch (error) {
-        console.error('[Google Calendar] 초기 이벤트 가져오기 실패:', error);
+        console.error('Failed to load family members:', error);
+        // 기본 사용자만 설정
+        setFamilyMembers([
+          {
+            id: "me",
+            name: userName,
+            emoji: selectedEmoji,
+            color: "rgba(255, 155, 130, 0.6)",
+            phone: undefined,
+            memo: undefined,
+          },
+        ]);
       }
     };
 
-    // 약간의 지연 후 실행 (초기 로드 완료 후)
-    const timeoutId = setTimeout(initialCheck, 2000);
+    if (userName) {
+      loadFamilyMembers();
+    }
+  }, [userName, selectedEmoji]);
 
-    return () => {
-      clearTimeout(timeoutId);
-    };
-  }, [loadGoogleCalendarEvents]);
+  // 할 일 로드
+  const loadTodos = useCallback(async () => {
+    try {
+      const response = await apiClient.getTodos();
+      console.log('Todos loaded:', response.data);
 
-  // 화면이 포커스될 때 Google Calendar 이벤트 가져오기 (쿨다운 적용)
-  useEffect(() => {
-    const handleVisibilityChange = async () => {
-      if (document.visibilityState === 'visible') {
-        console.log('[Google Calendar] 화면 포커스 감지...');
-        try {
-          const calendarStatusResponse = await apiClient.getCalendarStatus();
-          const googleCalendarEnabled = calendarStatusResponse.data?.enabled || false;
-          const googleCalendarConnected = calendarStatusResponse.data?.connected || false;
-          const googleCalendarImportEnabled = calendarStatusResponse.data?.import_enabled || false;
+      if (response.data && Array.isArray(response.data)) {
+        const formattedTodos = response.data.map((todo: any) => {
+          // duration 계산: start_time과 end_time으로부터 계산
+          let calculatedDuration = 60; // 기본값
+          if (!todo.all_day && todo.start_time && todo.end_time) {
+            try {
+              const startTimeStr = typeof todo.start_time === 'string' ? todo.start_time : todo.start_time;
+              const endTimeStr = typeof todo.end_time === 'string' ? todo.end_time : todo.end_time;
 
-          if (googleCalendarEnabled && googleCalendarConnected && googleCalendarImportEnabled) {
-            console.log('[Google Calendar] 화면 포커스 시 이벤트 가져오기 시작... (쿨다운 적용)');
-            await loadGoogleCalendarEvents(false); // 쿨다운 적용
+              // "HH:MM" 형식 파싱
+              const [startHours, startMinutes] = startTimeStr.split(':').map((s: string) => {
+                const num = parseInt(s, 10);
+                return isNaN(num) ? 0 : num;
+              });
+              const [endHours, endMinutes] = endTimeStr.split(':').map((s: string) => {
+                const num = parseInt(s, 10);
+                return isNaN(num) ? 0 : num;
+              });
+
+              const startTotal = startHours * 60 + startMinutes;
+              const endTotal = endHours * 60 + endMinutes;
+              calculatedDuration = endTotal - startTotal;
+
+              if (calculatedDuration <= 0 || isNaN(calculatedDuration)) {
+                calculatedDuration = 60; // 최소 1시간
+              }
+            } catch (e) {
+              console.error('Duration 계산 오류:', e, todo);
+              calculatedDuration = 60;
+            }
+          } else if (todo.all_day) {
+            calculatedDuration = 24 * 60; // 하루종일 일정은 24시간
           }
-        } catch (error) {
-          console.error('[Google Calendar] 화면 포커스 시 이벤트 가져오기 실패:', error);
+
+          // todo.duration이 있으면 우선 사용, 없으면 계산된 값 사용
+          const finalDuration = (todo.duration && !isNaN(todo.duration) && todo.duration > 0)
+            ? todo.duration
+            : calculatedDuration;
+
+          return {
+            id: todo.id,
+            title: todo.title,
+            description: todo.description,
+            time: todo.start_time ? `${todo.start_time}` : undefined,
+            rule: todo.category,
+            completed: todo.status === 'completed',
+            draft: todo.status === 'draft',
+            overdue: todo.status === 'overdue',
+            status: todo.status,
+            priority: todo.priority,
+            date: todo.date,
+            endDate: todo.end_date,
+            startTime: todo.start_time,
+            endTime: todo.end_time,
+            isAllDay: todo.all_day,
+            duration: finalDuration,
+            location: todo.location,
+            memo: todo.memo,
+            category: todo.category,
+            hasNotification: todo.has_notification,
+            notificationTimes: todo.notification_times || [],
+            notificationReminders: todo.notification_reminders || [],
+            repeatType: todo.repeat_type || "none",
+            repeatEndDate: todo.repeat_end_date,
+            repeatPattern: todo.repeat_pattern,
+            checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
+            memberId: todo.member_id,
+            assignedMemberIds: Array.isArray(todo.family_member_ids)
+              ? todo.family_member_ids
+              : (Array.isArray(todo.assigned_member_ids)
+                ? todo.assigned_member_ids
+                : (todo.family_member_ids ? [todo.family_member_ids] : (todo.assigned_member_ids ? [todo.assigned_member_ids] : []))),
+            isRoutine: todo.is_routine || false,
+            source: todo.source || 'always_plan',
+            googleCalendarEventId: todo.google_calendar_event_id || undefined,
+            bulkSynced: todo.bulk_synced || false,
+            todoGroupId: todo.todo_group_id || undefined,
+          };
+        });
+        setTodos(formattedTodos);
+        console.log('[할 일 로드] 완료:', formattedTodos.length, '개');
+      }
+    } catch (error) {
+      console.error('Failed to load todos:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTodos();
+  }, [loadTodos]);
+
+  // Google Calendar 이벤트 로드
+  const loadGoogleCalendarEvents = useCallback(async (force: boolean = false) => {
+    // 동기화 상태 확인: import_enabled 또는 export_enabled 중 하나 이상이 활성화되어 있어야 함
+    try {
+      const statusResponse = await apiClient.getCalendarStatus();
+      const importEnabled = statusResponse.data?.import_enabled || false;
+      const exportEnabled = statusResponse.data?.export_enabled || false;
+
+      // 두 토글 중 하나도 활성화되어 있지 않으면 동기화 비활성화 (force여도 무시)
+      if (!importEnabled && !exportEnabled) {
+        setSyncStatus('disabled');
+        setLastSyncTime(null);
+        console.log('[동기화] 비활성화 상태 - 동기화 중단');
+        return;
+      }
+
+      // 동기화가 비활성화되어 있고 force가 아니면 동기화하지 않음
+      if (syncStatus === 'disabled' && !force) {
+        console.log('[동기화] 비활성화 상태 - 동기화 중단');
+        return;
+      }
+    } catch (error) {
+      console.error('Failed to check calendar status:', error);
+      setSyncStatus('disabled');
+      setLastSyncTime(null);
+      return;
+    }
+
+    setSyncStatus('syncing');
+    console.log('[동기화] Google Calendar 동기화 시작...', force ? '(강제 실행)' : '');
+    try {
+      const response = await apiClient.syncGoogleCalendar();
+      console.log('[동기화] Google Calendar 동기화 완료:', response.data);
+      setSyncStatus('success');
+      setSyncError(null);
+      setLastSyncTime(new Date());
+
+      // 동기화 결과 메시지 표시
+      if (response.data?.message) {
+        console.log('[동기화] 결과:', response.data.message);
+        console.log('[동기화] 저장 통계:', {
+          imported: response.data.imported_count,
+          synced: response.data.synced_count,
+          matched: response.data.matched_count,
+          skipped: response.data.skipped_counts
+        });
+      }
+
+      // 전체 응답 데이터 로깅 (디버깅용)
+      console.log('[동기화] 전체 응답 데이터:', response.data);
+
+      // 문제 진단: 왜 일정이 저장되지 않았는지 확인
+      if (response.data.imported_count === 0) {
+        console.warn('[동기화] ⚠️ Google Calendar 이벤트가 저장되지 않았습니다.');
+        console.log('[동기화] 진단 정보:');
+        console.log('  - import_enabled 토글이 켜져있는지 확인하세요:', response.data.import_enabled);
+        console.log('  - Google Calendar에서 가져온 전체 이벤트 수:', response.data.total_events_from_google);
+        console.log('  - 새로 처리해야 할 이벤트 수:', response.data.new_events_count);
+        console.log('  - 건너뛴 이벤트 수:', response.data.skipped_counts);
+        console.log('  - Always Plan 이벤트:', response.data.skipped_counts?.always_plan_events || 0, '개 (이것들은 건너뛰는 것이 정상)');
+        console.log('  - 이미 저장된 이벤트:', response.data.skipped_counts?.already_saved || 0, '개');
+        console.log('  - 저장 실패한 이벤트 수:', response.data.imported_failed_count);
+
+        // 실패한 이벤트 상세 정보 출력
+        if (response.data.failed_events_info && response.data.failed_events_info.length > 0) {
+          console.error('[동기화] ❌ 저장 실패한 이벤트 상세 정보:');
+          response.data.failed_events_info.forEach((failedEvent: any, index: number) => {
+            console.error(`  [${index + 1}] 이벤트 ID: ${failedEvent.event_id}`);
+            console.error(`      제목: ${failedEvent.title}`);
+            console.error(`      에러 타입: ${failedEvent.error_type}`);
+            console.error(`      에러 메시지: ${failedEvent.error_message}`);
+            console.error(`      시작 시간: ${failedEvent.start}`);
+          });
+        }
+      }
+    } catch (error: any) {
+      console.error('[동기화] Google Calendar 동기화 실패:', error);
+      setSyncStatus('error');
+      setSyncError(error.response?.data?.detail || error.message);
+    }
+  }, [syncStatus]);
+
+  // 초기 Google Calendar 상태 확인 및 동기화
+  useEffect(() => {
+    const initializeSync = async () => {
+      try {
+        const response = await apiClient.getCalendarStatus();
+        if (response.data) {
+          const importEnabled = response.data.import_enabled || false;
+          const exportEnabled = response.data.export_enabled || false;
+
+          // 두 토글 중 하나도 활성화되어 있지 않으면 동기화 비활성화
+          if (!importEnabled && !exportEnabled) {
+            setSyncStatus('disabled');
+            setLastSyncTime(null);
+          } else {
+            // 동기화가 활성화되어 있으면 초기 로드 (토글 활성화 시 1회)
+            setSyncStatus('idle');
+            loadGoogleCalendarEvents(true);
+          }
+        } else {
+          setSyncStatus('disabled');
+          setLastSyncTime(null);
+        }
+      } catch (error) {
+        console.error('Failed to check Google Calendar status:', error);
+        // 에러 발생 시도 disabled로 설정
+        setSyncStatus('disabled');
+        setLastSyncTime(null);
+      }
+    };
+
+    initializeSync();
+  }, []);
+
+  // 앱이 백그라운드→포그라운드로 돌아왔을 때 동기화 (30~60초 쿨다운)
+  useEffect(() => {
+    const currentSyncStatus = syncStatus;
+    if (currentSyncStatus === 'disabled') {
+      return;
+    }
+
+    let lastFocusTime = Date.now();
+    let cooldownTime = 30000; // 30초 쿨다운
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const now = Date.now();
+        // 쿨다운 시간이 지났을 때만 동기화
+        if (now - lastFocusTime >= cooldownTime) {
+          // 동기화 상태 확인: import_enabled 또는 export_enabled 중 하나 이상이 활성화되어 있어야 함
+          apiClient.getCalendarStatus().then((response) => {
+            const importEnabled = response.data?.import_enabled || false;
+            const exportEnabled = response.data?.export_enabled || false;
+            if (importEnabled || exportEnabled) {
+              loadGoogleCalendarEvents(true);
+              lastFocusTime = now;
+            }
+          }).catch(() => {
+            // 에러 무시
+          });
         }
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [loadGoogleCalendarEvents]);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [loadGoogleCalendarEvents, syncStatus]);
 
-
-
-  // Todo Item Interface
-  interface TodoItem {
-    source?: 'always_plan' | 'google_calendar';
-    googleCalendarEventId?: string;
-    bulkSynced?: boolean; // 동기화 후 저장 여부 (새로고침 후에도 유지되도록)
-    todoGroupId?: string; // 여러 날짜에 걸친 일정을 묶기 위한 그룹 ID
-    id: string;
-    title: string;
-    time: string;
-    duration: number;
-    completed: boolean;
-    category: string;
-    date?: string;
-    endDate?: string; // 종료 날짜 (여러 날 선택 시)
-    startTime?: string;
-    endTime?: string;
-    isAllDay?: boolean;
-    memo?: string;
-    location?: string;
-    hasNotification?: boolean;
-    alarmTimes?: string[]; // 구버전 호환
-    notificationReminders?: Array<{ value: number; unit: 'minutes' | 'hours' | 'days' | 'weeks' }>; // 새로운 알림 형식
-    repeatType?: "none" | "daily" | "weekly" | "monthly" | "yearly" | "weekdays" | "weekends" | "custom";
-    repeatEndDate?: string; // 반복 종료 날짜
-    repeatPattern?: any; // 반복 패턴 JSON
-    type?: "todo" | "checklist";
-    checklistItems?: string[];
-    postponeMinutes?: number;
-    postponeToNextDay?: boolean;
-    memberId?: string;
-    assignedMemberIds?: string[]; // 담당 프로필 ID 배열
-    isRoutine?: boolean;
-  }
-
-  const [todos, setTodos] = useState<TodoItem[]>([]);
-
-  // 검색 로직: 일정 이름, 메모, 체크리스트, 장소 검색
-  const filteredTodos = searchQuery.trim()
-    ? todos.filter((todo) => {
-      const query = searchQuery.toLowerCase();
-      // 일정 이름 검색
-      const titleMatch = todo.title?.toLowerCase().includes(query);
-      // 메모 검색
-      const memoMatch = todo.memo?.toLowerCase().includes(query);
-      // 장소 검색
-      const locationMatch = todo.location?.toLowerCase().includes(query);
-      // 체크리스트 검색
-      const checklistMatch = todo.checklistItems?.some((item) =>
-        item.toLowerCase().includes(query)
-      );
-      // 카테고리 검색
-      const categoryMatch = todo.category?.toLowerCase().includes(query);
-
-      return titleMatch || memoMatch || locationMatch || checklistMatch || categoryMatch;
-    })
-    : [];
-
-  // 검색어 변경 핸들러
+  // 검색 처리
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setSearchQuery(value);
-    setShowSearchResults(value.trim().length > 0);
+    const query = e.target.value;
+    setSearchQuery(query);
+    setShowSearchResults(query.trim().length > 0);
   };
 
-  // 검색창 포커스 핸들러
   const handleSearchFocus = () => {
     if (searchQuery.trim().length > 0) {
       setShowSearchResults(true);
     }
   };
 
-  // 검색창 블러 핸들러
   const handleSearchBlur = () => {
-    // 약간의 지연을 두어 클릭 이벤트가 먼저 처리되도록 함
-    setTimeout(() => {
-      setShowSearchResults(false);
-    }, 200);
+    // 검색 결과 유지
   };
 
-  const handleBack = () => {
-    window.location.reload();
-  };
-
-  const handleSaveTodo = (todo: any) => {
-    const newTodo = {
-      id: Date.now().toString(),
-      title: todo.title || "새로운 할 일",
-      time: todo.time || "09:00",
-      duration: 60,
-      completed: false,
-      category: todo.category || "기타",
-    };
-
-    setTodos((prev) =>
-      [...prev, newTodo].sort((a, b) => {
-        // 하루종일 일정은 맨 위에 (빈 문자열이 먼저 오도록)
-        if (!a.time && b.time) return -1;
-        if (a.time && !b.time) return 1;
-        return (a.time || '').localeCompare(b.time || '');
-      })
-    );
-    toast.success("일정이 추가되었습니다.");
-  };
-
-  const handleSaveDetailedTodo = async (formData: TodoFormData) => {
-    // Calculate duration from start and end time (only if not all day)
-    let duration = 60; // 기본값
-    if (!formData.isAllDay && formData.startTime && formData.endTime) {
-      try {
-        const [startHours, startMinutes] = formData.startTime.split(':').map(Number);
-        const [endHours, endMinutes] = formData.endTime.split(':').map(Number);
-        duration = (endHours * 60 + endMinutes) - (startHours * 60 + startMinutes);
-        if (duration <= 0) duration = 60; // 최소 1시간
-      } catch (e) {
-        duration = 60;
-      }
-    }
-
-    try {
-      if (editingTodoId) {
-        console.log("일정 수정 시작:", editingTodoId, formData);
-        // 수정 모드 - API 호출
-        // 기존 일정 정보 가져오기
-        const existingTodo = todos.find(t => t.id === editingTodoId);
-
-        // Google Calendar 이벤트는 수정할 수 없음 (DB에 저장되지 않음)
-        if (existingTodo?.source === 'google_calendar' || existingTodo?.googleCalendarEventId) {
-          toast.error("Google Calendar에서 가져온 일정은 수정할 수 없습니다. Google Calendar에서 직접 수정해주세요.");
-          setEditingTodoId(null);
-          return;
-        }
-
-        // 날짜 형식 정규화 함수
-        const normalizeDate = (date: any): string => {
-          if (typeof date === 'string') {
-            return date;
-          } else if (date && typeof date === 'object' && 'getFullYear' in date) {
-            const d = date as Date;
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          } else {
-            return String(date || '');
-          }
-        };
-
-        // 날짜 형식 정규화
-        const newDateStr = normalizeDate(formData.date);
-        const newEndDateStr = formData.endDate && formData.endDate !== formData.date
-          ? normalizeDate(formData.endDate)
-          : null;
-
-        // all_day가 true일 때는 start_time과 end_time을 null로 설정
-        // 알림 설정값: 수정하지 않으면 기존 값 유지, 수정하면 새 값 사용
-        const notificationReminders = formData.hasNotification && formData.notificationReminders && formData.notificationReminders.length > 0
-          ? formData.notificationReminders.map(r => ({ value: r.value, unit: r.unit }))
-          : (formData.hasNotification && existingTodo?.notificationReminders && existingTodo.notificationReminders.length > 0
-            ? existingTodo.notificationReminders.map((r: any) => ({ value: r.value, unit: r.unit }))
-            : []);
-
-        const todoData: any = {
-          title: formData.title,
-          description: formData.memo || "",
-          memo: formData.memo || "",
-          location: formData.location || "",
-          date: newDateStr, // 시작 날짜는 항상 전송 (사용자가 변경할 수 있도록)
-          end_date: newEndDateStr || undefined, // 종료 날짜 (기간 수정 가능)
-          all_day: formData.isAllDay,
-          category: formData.category,
-          status: existingTodo?.completed ? 'completed' : 'pending',
-          has_notification: formData.hasNotification,
-          notification_times: formData.alarmTimes || [], // 구버전 호환
-          notification_reminders: notificationReminders,
-          repeat_type: formData.repeatType || "none",
-          repeat_end_date: formData.repeatType === 'custom'
-            ? (formData.customRepeatEndType === 'date' ? formData.customRepeatEndDate :
-              (formData.customRepeatEndType === 'count' ? undefined : formData.repeatEndDate || undefined))
-            : (formData.repeatEndDate || undefined),
-          repeat_pattern: formData.repeatType === 'custom' ? {
-            freq: formData.customRepeatUnit || 'days',
-            interval: formData.customRepeatInterval || 1,
-            days: formData.customRepeatDays || [],
-            endType: formData.customRepeatEndType || 'never',
-            endDate: formData.customRepeatEndType === 'date' ? formData.customRepeatEndDate : undefined,
-            count: formData.customRepeatEndType === 'count' ? formData.customRepeatCount : undefined,
-          } : (formData.repeatPattern || undefined),
-          checklist_items: formData.checklistItems.filter(item => item.trim() !== ''),
-          family_member_ids: formData.assignedMemberIds && formData.assignedMemberIds.length > 0 ? formData.assignedMemberIds : undefined,
-        };
-
-        // all_day가 false일 때만 start_time과 end_time 설정
-        // 빈 문자열이나 "24:00" 같은 잘못된 값은 null로 변환
-        if (!formData.isAllDay && formData.startTime && formData.endTime) {
-          // 빈 문자열이나 유효하지 않은 시간은 null로 설정
-          const startTime = formData.startTime.trim() === '' || formData.startTime === '24:00' ? null : formData.startTime;
-          const endTime = formData.endTime.trim() === '' || formData.endTime === '24:00' ? null : formData.endTime;
-          todoData.start_time = startTime;
-          todoData.end_time = endTime;
-        } else {
-          // all_day가 true이거나 시간이 없으면 null로 설정
-          todoData.start_time = null;
-          todoData.end_time = null;
-        }
-
-        console.log("일정 수정 데이터:", todoData);
-        console.log("일정 수정 데이터 JSON:", JSON.stringify(todoData, null, 2));
-
-        try {
-          const response = await apiClient.updateTodo(editingTodoId, todoData);
-          console.log("일정 수정 응답:", response);
-
-          if (response && response.data) {
-            // 날짜 형식 정규화
-            const normalizedDate = normalizeDate(response.data.date || formData.date);
-
-            // 응답에서 종료 날짜 가져오기
-            let normalizedEndDate = newEndDateStr;
-            if (response.data.end_date) {
-              if (response.data.end_date instanceof Date) {
-                const year = response.data.end_date.getFullYear();
-                const month = response.data.end_date.getMonth() + 1;
-                const day = response.data.end_date.getDate();
-                normalizedEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              } else if (typeof response.data.end_date === 'string') {
-                normalizedEndDate = response.data.end_date;
-              }
-            }
-
-            // 응답에서 알림 정보 가져오기
-            let notificationReminders: Array<{ value: number; unit: 'minutes' | 'hours' | 'days' | 'weeks' }> = [];
-            if (response.data.notification_reminders) {
-              try {
-                const parsed = typeof response.data.notification_reminders === 'string'
-                  ? JSON.parse(response.data.notification_reminders)
-                  : response.data.notification_reminders;
-                if (Array.isArray(parsed)) {
-                  notificationReminders = parsed.map((r: any) => ({
-                    value: Number(r.value) || 30,
-                    unit: r.unit || 'minutes'
-                  }));
-                }
-              } catch (e) {
-                console.error('Failed to parse notification_reminders from response:', e);
-                // 파싱 실패 시 formData 사용
-                notificationReminders = formData.notificationReminders || [];
-              }
-            } else {
-              // 응답에 없으면 formData 사용
-              notificationReminders = formData.notificationReminders || [];
-            }
-
-            // family_member_ids 파싱
-            let memberId: string | undefined;
-            let assignedMemberIds: string[] = [];
-            if (response.data.family_member_ids) {
-              try {
-                const memberIds = typeof response.data.family_member_ids === 'string'
-                  ? JSON.parse(response.data.family_member_ids)
-                  : response.data.family_member_ids;
-                if (Array.isArray(memberIds)) {
-                  assignedMemberIds = memberIds;
-                  memberId = memberIds.length > 0 ? memberIds[0] : undefined;
-                } else {
-                  assignedMemberIds = memberIds ? [memberIds] : [];
-                  memberId = memberIds || undefined;
-                }
-              } catch (e) {
-                console.error('Failed to parse family_member_ids from response:', e);
-                assignedMemberIds = formData.assignedMemberIds || [];
-                memberId = formData.assignedMemberIds && formData.assignedMemberIds.length > 0 ? formData.assignedMemberIds[0] : undefined;
-              }
-            } else {
-              assignedMemberIds = formData.assignedMemberIds || [];
-              memberId = formData.assignedMemberIds && formData.assignedMemberIds.length > 0 ? formData.assignedMemberIds[0] : undefined;
-            }
-
-            const updatedTodo = {
-              id: editingTodoId,
-              title: formData.title,
-              // 하루종일 일정은 time을 빈 문자열로 설정
-              time: formData.isAllDay ? '' : (formData.startTime || "09:00"),
-              duration: duration > 0 ? duration : 60,
-              completed: response.data.status === 'completed' || todos.find(t => t.id === editingTodoId)?.completed || false,
-              category: formData.category,
-              date: normalizedDate,
-              endDate: normalizedEndDate || undefined,  // 종료 날짜 추가
-              startTime: formData.isAllDay ? undefined : formData.startTime,
-              endTime: formData.isAllDay ? undefined : formData.endTime,
-              isAllDay: formData.isAllDay,
-              memo: formData.memo || "",
-              location: formData.location || "",
-              hasNotification: response.data.has_notification !== undefined ? response.data.has_notification : formData.hasNotification,
-              alarmTimes: response.data.notification_times ? (typeof response.data.notification_times === 'string' ? JSON.parse(response.data.notification_times) : response.data.notification_times) : formData.alarmTimes,
-              notificationReminders: notificationReminders, // 응답에서 가져온 알림 리마인더
-              repeatType: formData.repeatType,
-              checklistItems: formData.checklistItems.filter(item => item.trim() !== ''),
-              postponeToNextDay: formData.postponeToNextDay,
-              memberId: memberId, // 담당 프로필 ID
-              assignedMemberIds: assignedMemberIds, // 담당 프로필 ID 배열 저장
-              source: 'always_plan' as const, // 수정된 일정임을 명시
-            };
-
-            // 반복 설정이 변경된 경우, 모든 일정을 다시 로드
-            const oldRepeatType = existingTodo?.repeatType || "none";
-            const newRepeatType = formData.repeatType || "none";
-
-            if (oldRepeatType !== newRepeatType || (formData.repeatType && formData.repeatType !== 'none')) {
-              console.log('[일정 수정] 반복 설정 변경됨:', oldRepeatType, '->', newRepeatType, ', 모든 일정 다시 로드');
-              // 잠시 후 todos를 다시 로드 (백엔드에서 반복 일정 생성 완료 후)
-              setTimeout(async () => {
-                try {
-                  const todosResponse = await apiClient.getTodos();
-                  if (todosResponse.data && Array.isArray(todosResponse.data)) {
-                    const formattedTodos = todosResponse.data.map((todo: any) => {
-                      // duration 계산
-                      let duration = 60;
-                      if (todo.start_time && todo.end_time) {
-                        const [startHours, startMinutes] = todo.start_time.split(':').map(Number);
-                        const [endHours, endMinutes] = todo.end_time.split(':').map(Number);
-                        const startTotal = startHours * 60 + startMinutes;
-                        const endTotal = endHours * 60 + endMinutes;
-                        duration = endTotal - startTotal;
-                      }
-
-                      // end_date 파싱
-                      let endDate: string | undefined = undefined;
-                      if (todo.end_date) {
-                        if (todo.end_date instanceof Date) {
-                          const year = todo.end_date.getFullYear();
-                          const month = todo.end_date.getMonth() + 1;
-                          const day = todo.end_date.getDate();
-                          endDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                        } else if (typeof todo.end_date === 'string') {
-                          endDate = todo.end_date;
-                        }
-                      }
-
-                      // notification_reminders 파싱
-                      let notificationReminders: Array<{ value: number; unit: 'minutes' | 'hours' | 'days' | 'weeks' }> = [];
-                      if (todo.notification_reminders) {
-                        try {
-                          const parsed = typeof todo.notification_reminders === 'string'
-                            ? JSON.parse(todo.notification_reminders)
-                            : todo.notification_reminders;
-                          if (Array.isArray(parsed)) {
-                            notificationReminders = parsed.map((r: any) => ({
-                              value: Number(r.value) || 30,
-                              unit: r.unit || 'minutes'
-                            }));
-                          }
-                        } catch (e) {
-                          console.error('Failed to parse notification_reminders:', e);
-                        }
-                      }
-
-                      // repeat_end_date 파싱
-                      let repeatEndDate: string | undefined = undefined;
-                      if (todo.repeat_end_date) {
-                        if (todo.repeat_end_date instanceof Date) {
-                          const year = todo.repeat_end_date.getFullYear();
-                          const month = todo.repeat_end_date.getMonth() + 1;
-                          const day = todo.repeat_end_date.getDate();
-                          repeatEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                        } else if (typeof todo.repeat_end_date === 'string') {
-                          repeatEndDate = todo.repeat_end_date;
-                        }
-                      }
-
-                      // repeat_pattern 파싱
-                      let repeatPattern: any = undefined;
-                      if (todo.repeat_pattern) {
-                        try {
-                          repeatPattern = typeof todo.repeat_pattern === 'string'
-                            ? JSON.parse(todo.repeat_pattern)
-                            : todo.repeat_pattern;
-                        } catch (e) {
-                          console.error('Failed to parse repeat_pattern:', e);
-                        }
-                      }
-
-                      // family_member_ids 파싱
-                      let memberId: string | undefined;
-                      let assignedMemberIds: string[] = [];
-                      if (todo.family_member_ids) {
-                        try {
-                          const memberIds = typeof todo.family_member_ids === 'string'
-                            ? JSON.parse(todo.family_member_ids)
-                            : todo.family_member_ids;
-                          if (Array.isArray(memberIds)) {
-                            assignedMemberIds = memberIds;
-                            memberId = memberIds.length > 0 ? memberIds[0] : undefined;
-                          } else {
-                            assignedMemberIds = memberIds ? [memberIds] : [];
-                            memberId = memberIds || undefined;
-                          }
-                        } catch (e) {
-                          console.error('Failed to parse family_member_ids:', e);
-                        }
-                      }
-
-                      return {
-                        id: todo.id,
-                        title: todo.title || '',
-                        time: todo.start_time || "09:00",
-                        duration: duration > 0 ? duration : 60,
-                        completed: todo.status === 'completed',
-                        category: todo.category || "기타",
-                        date: todo.date ? (typeof todo.date === 'string' ? todo.date : todo.date.split('T')[0]) : undefined,
-                        endDate: endDate,
-                        startTime: todo.start_time,
-                        endTime: todo.end_time,
-                        isAllDay: todo.all_day || false,
-                        memo: todo.memo || "",
-                        location: todo.location || "",
-                        hasNotification: todo.has_notification || false,
-                        alarmTimes: todo.notification_times ? (typeof todo.notification_times === 'string' ? JSON.parse(todo.notification_times) : todo.notification_times) : [],
-                        notificationReminders: notificationReminders,
-                        repeatType: todo.repeat_type || "none",
-                        repeatEndDate: repeatEndDate,
-                        repeatPattern: repeatPattern,
-                        checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
-                        memberId: memberId,
-                        assignedMemberIds: assignedMemberIds, // 담당 프로필 ID 배열 저장
-                        isRoutine: false,
-                        source: 'always_plan' as const,
-                        googleCalendarEventId: todo.google_calendar_event_id || undefined,
-                        bulkSynced: todo.bulk_synced || false,
-                        todoGroupId: todo.todo_group_id || undefined,
-                      };
-                    });
-                    setTodos(formattedTodos);
-                    console.log('[일정 수정] 반복 일정 포함 모든 일정 로드 완료:', formattedTodos.length, '개');
-                  }
-                } catch (error) {
-                  console.error('[일정 수정] 반복 일정 로드 실패:', error);
-                }
-              }, 500); // 0.5초 후 다시 로드 (백엔드에서 반복 일정 생성 완료 대기)
-
-              if (formData.repeatType && formData.repeatType !== 'none') {
-                toast.success("일정이 수정되었습니다. 반복 일정이 생성되었습니다.");
-              } else {
-                toast.success("일정이 수정되었습니다.");
-              }
-            } else {
-              setTodos((prev) =>
-                prev.map(t => t.id === editingTodoId ? updatedTodo : t)
-                  .sort((a, b) => {
-                    // 날짜와 시간으로 정렬
-                    if (a.date !== b.date) {
-                      return (a.date || '').localeCompare(b.date || '');
-                    }
-                    // 하루종일 일정은 맨 위에 (빈 문자열이 먼저 오도록)
-                    if (!a.time && b.time) return -1;
-                    if (a.time && !b.time) return 1;
-                    return (a.time || '').localeCompare(b.time || '');
-                  })
-              );
-              toast.success("일정이 수정되었습니다.");
-            }
-            setEditingTodoId(null);
-          } else {
-            console.error("응답 데이터 없음:", response);
-            toast.error("일정 수정에 실패했습니다. 응답 데이터가 없습니다.");
-          }
-        } catch (updateError: any) {
-          console.error("일정 수정 API 에러:", updateError);
-          if (updateError.response?.status === 404) {
-            toast.error("일정을 찾을 수 없습니다. 이미 삭제되었을 수 있습니다.");
-          } else {
-            toast.error(`일정 수정에 실패했습니다: ${updateError.response?.data?.detail || updateError.message}`);
-          }
-          throw updateError;
-        }
-      } else {
-        console.log("일정 추가 시작:", formData);
-
-        // 날짜 형식 정규화 함수
-        const normalizeDate = (date: any): string => {
-          if (typeof date === 'string') {
-            return date;
-          } else if (date && typeof date === 'object' && 'getFullYear' in date) {
-            const d = date as Date;
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          } else {
-            return String(date || '');
-          }
-        };
-
-        // 시작 날짜와 종료 날짜 정규화
-        const startDate = normalizeDate(formData.date);
-        const endDate = formData.endDate && formData.endDate !== startDate ? normalizeDate(formData.endDate) : null;
-
-        // 기간 일정을 하나의 일정으로 생성 (시작날짜/시간에서 종료날짜/시간까지)
-        const todoData: any = {
-          title: formData.title,
-          description: formData.memo || "",
-          memo: formData.memo || "",
-          location: formData.location || "",
-          date: startDate,  // 시작 날짜
-          end_date: endDate,  // 종료 날짜 (기간 일정인 경우)
-          // 하루종일 일정은 start_time과 end_time을 null로 설정
-          start_time: formData.isAllDay ? null : (formData.startTime || null),
-          end_time: formData.isAllDay ? null : (formData.endTime || null),
-          all_day: formData.isAllDay,
-          category: formData.category,
-          status: 'pending',
-          has_notification: formData.hasNotification,
-          notification_times: formData.alarmTimes || [], // 구버전 호환
-          notification_reminders: formData.notificationReminders && formData.notificationReminders.length > 0
-            ? formData.notificationReminders.map(r => ({ value: r.value, unit: r.unit }))
-            : [],
-          repeat_type: formData.repeatType || "none",
-          repeat_end_date: formData.repeatType === 'custom'
-            ? (formData.customRepeatEndType === 'date' ? formData.customRepeatEndDate :
-              (formData.customRepeatEndType === 'count' ? undefined : formData.repeatEndDate || null))
-            : (formData.repeatEndDate || null),
-          repeat_pattern: formData.repeatType === 'custom' ? {
-            freq: formData.customRepeatUnit || 'days',
-            interval: formData.customRepeatInterval || 1,
-            days: formData.customRepeatDays || [],
-            endType: formData.customRepeatEndType || 'never',
-            endDate: formData.customRepeatEndType === 'date' ? formData.customRepeatEndDate : undefined,
-            count: formData.customRepeatEndType === 'count' ? formData.customRepeatCount : undefined,
-          } : (formData.repeatPattern || null),
-          checklist_items: formData.checklistItems.filter(item => item.trim() !== ''),
-          family_member_ids: formData.assignedMemberIds && formData.assignedMemberIds.length > 0 ? formData.assignedMemberIds : undefined,
-        };
-
-        console.log(`일정 추가: ${startDate}${endDate ? ` ~ ${endDate}` : ''} (하나의 일정으로 생성)`);
-        console.log("일정 추가 데이터:", todoData);
-
-        try {
-          const response = await apiClient.createTodo(todoData);
-          console.log("일정 추가 응답:", response);
-
-          if (response && response.data) {
-            // API 응답에서 날짜 형식 확인 및 변환
-            let todoDate = startDate;
-            if (response.data.date) {
-              if (response.data.date instanceof Date) {
-                const year = response.data.date.getFullYear();
-                const month = response.data.date.getMonth() + 1;
-                const day = response.data.date.getDate();
-                todoDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              } else if (typeof response.data.date === 'string') {
-                todoDate = response.data.date;
-              }
-            }
-
-            let todoEndDate: string | undefined = endDate || undefined;
-            if (response.data.end_date) {
-              if (response.data.end_date instanceof Date) {
-                const year = response.data.end_date.getFullYear();
-                const month = response.data.end_date.getMonth() + 1;
-                const day = response.data.end_date.getDate();
-                todoEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              } else if (typeof response.data.end_date === 'string') {
-                todoEndDate = response.data.end_date;
-              }
-            } else {
-              // API 응답에 end_date가 없으면 null로 설정
-              todoEndDate = undefined;
-            }
-
-            // notification_reminders 파싱 (API 응답에서 받은 데이터 사용)
-            let notificationReminders: Array<{ value: number; unit: 'minutes' | 'hours' | 'days' | 'weeks' }> = [];
-            if (response.data.notification_reminders) {
-              try {
-                const parsed = typeof response.data.notification_reminders === 'string'
-                  ? JSON.parse(response.data.notification_reminders)
-                  : response.data.notification_reminders;
-                if (Array.isArray(parsed)) {
-                  notificationReminders = parsed.map((r: any) => ({
-                    value: Number(r.value) || 30,
-                    unit: r.unit || 'minutes'
-                  }));
-                }
-              } catch (e) {
-                console.error('Failed to parse notification_reminders:', e);
-                // 폼 데이터에서 가져오기
-                notificationReminders = formData.notificationReminders || [];
-              }
-            } else {
-              // API 응답에 없으면 폼 데이터에서 가져오기
-              notificationReminders = formData.notificationReminders || [];
-            }
-
-            // repeat_end_date 파싱
-            let repeatEndDate: string | undefined = undefined;
-            if (response.data.repeat_end_date) {
-              if (response.data.repeat_end_date instanceof Date) {
-                const year = response.data.repeat_end_date.getFullYear();
-                const month = response.data.repeat_end_date.getMonth() + 1;
-                const day = response.data.repeat_end_date.getDate();
-                repeatEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              } else if (typeof response.data.repeat_end_date === 'string') {
-                repeatEndDate = response.data.repeat_end_date;
-              }
-            } else {
-              repeatEndDate = formData.repeatEndDate;
-            }
-
-            // repeat_pattern 파싱
-            let repeatPattern: any = undefined;
-            if (response.data.repeat_pattern) {
-              try {
-                repeatPattern = typeof response.data.repeat_pattern === 'string'
-                  ? JSON.parse(response.data.repeat_pattern)
-                  : response.data.repeat_pattern;
-              } catch (e) {
-                console.error('Failed to parse repeat_pattern:', e);
-                repeatPattern = formData.repeatPattern;
-              }
-            } else {
-              repeatPattern = formData.repeatPattern;
-            }
-
-            // family_member_ids 파싱
-            let memberId: string | undefined;
-            let assignedMemberIds: string[] = [];
-            if (response.data.family_member_ids) {
-              try {
-                const memberIds = typeof response.data.family_member_ids === 'string'
-                  ? JSON.parse(response.data.family_member_ids)
-                  : response.data.family_member_ids;
-                if (Array.isArray(memberIds)) {
-                  assignedMemberIds = memberIds;
-                  memberId = memberIds.length > 0 ? memberIds[0] : undefined;
-                } else {
-                  assignedMemberIds = memberIds ? [memberIds] : [];
-                  memberId = memberIds || undefined;
-                }
-              } catch (e) {
-                console.error('Failed to parse family_member_ids from response:', e);
-                assignedMemberIds = formData.assignedMemberIds || [];
-                memberId = formData.assignedMemberIds && formData.assignedMemberIds.length > 0 ? formData.assignedMemberIds[0] : undefined;
-              }
-            } else {
-              assignedMemberIds = formData.assignedMemberIds || [];
-              memberId = formData.assignedMemberIds && formData.assignedMemberIds.length > 0 ? formData.assignedMemberIds[0] : undefined;
-            }
-
-            const newTodo = {
-              id: response.data.id,
-              title: formData.title,
-              // 하루종일 일정은 time을 빈 문자열로 설정
-              time: formData.isAllDay ? '' : (formData.startTime || "09:00"),
-              duration: duration > 0 ? duration : 60,
-              completed: false,
-              category: formData.category,
-              date: todoDate,
-              endDate: todoEndDate,  // 종료 날짜 추가
-              startTime: formData.isAllDay ? undefined : formData.startTime,
-              endTime: formData.isAllDay ? undefined : formData.endTime,
-              isAllDay: formData.isAllDay,
-              memo: formData.memo || "",
-              location: formData.location || "",
-              hasNotification: formData.hasNotification,
-              alarmTimes: formData.alarmTimes,
-              notificationReminders: notificationReminders, // 새로운 알림 형식
-              repeatType: formData.repeatType,
-              repeatEndDate: repeatEndDate, // 반복 종료 날짜
-              repeatPattern: repeatPattern, // 반복 패턴
-              checklistItems: formData.checklistItems.filter(item => item.trim() !== ''),
-              postponeToNextDay: formData.postponeToNextDay,
-              memberId: memberId, // 담당 프로필 ID 추가
-              assignedMemberIds: assignedMemberIds, // 담당 프로필 ID 배열 저장
-              isRoutine: false,
-              source: 'always_plan' as const,
-              todoGroupId: response.data.todo_group_id, // 그룹 ID 저장
-            };
-
-            // 생성된 Todo를 상태에 추가
-            console.log('[일정 추가] newTodo 객체:', newTodo);
-            setTodos((prev) => {
-              const updated = [...prev, newTodo];
-              // 날짜와 시간으로 정렬
-              const sorted = updated.sort((a, b) => {
-                if (a.date !== b.date) {
-                  return (a.date || '').localeCompare(b.date || '');
-                }
-                // 하루종일 일정은 맨 위에 (빈 문자열이 먼저 오도록)
-                if (!a.time && b.time) return -1;
-                if (a.time && !b.time) return 1;
-                return (a.time || '').localeCompare(b.time || '');
-              });
-              console.log('[일정 추가] 상태 업데이트 후 todos 개수:', sorted.length);
-              console.log('[일정 추가] 새로 추가된 일정:', sorted.find(t => t.id === newTodo.id));
-              return sorted;
-            });
-
-            // 반복 일정이 생성된 경우, 모든 일정을 다시 로드
-            if (formData.repeatType && formData.repeatType !== 'none') {
-              console.log('[일정 추가] 반복 일정이 생성되었으므로 모든 일정을 다시 로드합니다.');
-              // 잠시 후 todos를 다시 로드 (백엔드에서 반복 일정 생성 완료 후)
-              setTimeout(async () => {
-                try {
-                  const todosResponse = await apiClient.getTodos();
-                  if (todosResponse.data && Array.isArray(todosResponse.data)) {
-                    const formattedTodos = todosResponse.data.map((todo: any) => {
-                      // duration 계산
-                      let duration = 60;
-                      if (todo.start_time && todo.end_time) {
-                        const [startHours, startMinutes] = todo.start_time.split(':').map(Number);
-                        const [endHours, endMinutes] = todo.end_time.split(':').map(Number);
-                        const startTotal = startHours * 60 + startMinutes;
-                        const endTotal = endHours * 60 + endMinutes;
-                        duration = endTotal - startTotal;
-                      }
-
-                      // end_date 파싱
-                      let endDate: string | undefined = undefined;
-                      if (todo.end_date) {
-                        if (todo.end_date instanceof Date) {
-                          const year = todo.end_date.getFullYear();
-                          const month = todo.end_date.getMonth() + 1;
-                          const day = todo.end_date.getDate();
-                          endDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                        } else if (typeof todo.end_date === 'string') {
-                          endDate = todo.end_date;
-                        }
-                      }
-
-                      // notification_reminders 파싱
-                      let notificationReminders: Array<{ value: number; unit: 'minutes' | 'hours' | 'days' | 'weeks' }> = [];
-                      if (todo.notification_reminders) {
-                        try {
-                          const parsed = typeof todo.notification_reminders === 'string'
-                            ? JSON.parse(todo.notification_reminders)
-                            : todo.notification_reminders;
-                          if (Array.isArray(parsed)) {
-                            notificationReminders = parsed.map((r: any) => ({
-                              value: Number(r.value) || 30,
-                              unit: r.unit || 'minutes'
-                            }));
-                          }
-                        } catch (e) {
-                          console.error('Failed to parse notification_reminders:', e);
-                        }
-                      }
-
-                      // repeat_end_date 파싱
-                      let repeatEndDate: string | undefined = undefined;
-                      if (todo.repeat_end_date) {
-                        if (todo.repeat_end_date instanceof Date) {
-                          const year = todo.repeat_end_date.getFullYear();
-                          const month = todo.repeat_end_date.getMonth() + 1;
-                          const day = todo.repeat_end_date.getDate();
-                          repeatEndDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                        } else if (typeof todo.repeat_end_date === 'string') {
-                          repeatEndDate = todo.repeat_end_date;
-                        }
-                      }
-
-                      // repeat_pattern 파싱
-                      let repeatPattern: any = undefined;
-                      if (todo.repeat_pattern) {
-                        try {
-                          repeatPattern = typeof todo.repeat_pattern === 'string'
-                            ? JSON.parse(todo.repeat_pattern)
-                            : todo.repeat_pattern;
-                        } catch (e) {
-                          console.error('Failed to parse repeat_pattern:', e);
-                        }
-                      }
-
-                      // family_member_ids 파싱
-                      let memberId: string | undefined;
-                      if (todo.family_member_ids) {
-                        try {
-                          const memberIds = typeof todo.family_member_ids === 'string'
-                            ? JSON.parse(todo.family_member_ids)
-                            : todo.family_member_ids;
-                          if (Array.isArray(memberIds) && memberIds.length > 0) {
-                            memberId = memberIds[0];
-                          }
-                        } catch (e) {
-                          console.error('Failed to parse family_member_ids:', e);
-                        }
-                      }
-
-                      return {
-                        id: todo.id,
-                        title: todo.title || '',
-                        time: todo.start_time || "09:00",
-                        duration: duration > 0 ? duration : 60,
-                        completed: todo.status === 'completed',
-                        category: todo.category || "기타",
-                        date: todo.date ? (typeof todo.date === 'string' ? todo.date : todo.date.split('T')[0]) : undefined,
-                        endDate: endDate,
-                        startTime: todo.start_time,
-                        endTime: todo.end_time,
-                        isAllDay: todo.all_day || false,
-                        memo: todo.memo || "",
-                        location: todo.location || "",
-                        hasNotification: todo.has_notification || false,
-                        alarmTimes: todo.notification_times ? (typeof todo.notification_times === 'string' ? JSON.parse(todo.notification_times) : todo.notification_times) : [],
-                        notificationReminders: notificationReminders,
-                        repeatType: todo.repeat_type || "none",
-                        repeatEndDate: repeatEndDate,
-                        repeatPattern: repeatPattern,
-                        checklistItems: todo.checklist_items?.map((item: any) => item.text || item) || [],
-                        memberId: memberId,
-                        isRoutine: false,
-                        source: 'always_plan' as const,
-                        googleCalendarEventId: todo.google_calendar_event_id || undefined,
-                        bulkSynced: todo.bulk_synced || false,
-                        todoGroupId: todo.todo_group_id || undefined,
-                      };
-                    });
-                    setTodos(formattedTodos);
-                    console.log('[일정 추가] 반복 일정 포함 모든 일정 로드 완료:', formattedTodos.length, '개');
-                  }
-                } catch (error) {
-                  console.error('[일정 추가] 반복 일정 로드 실패:', error);
-                }
-              }, 500); // 0.5초 후 다시 로드 (백엔드에서 반복 일정 생성 완료 대기)
-
-              if (endDate) {
-                toast.success(`일정이 생성되었습니다. (${startDate} ~ ${endDate})`);
-              } else {
-                toast.success("일정이 추가되었습니다. 반복 일정이 생성되었습니다.");
-              }
-            } else {
-              if (endDate) {
-                toast.success(`일정이 생성되었습니다. (${startDate} ~ ${endDate})`);
-              } else {
-                toast.success("일정이 추가되었습니다.");
-              }
-            }
-          } else {
-            toast.error("일정 추가에 실패했습니다.");
-          }
-        } catch (error: any) {
-          console.error("일정 추가 실패:", error);
-          toast.error(`일정 추가에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
-        }
-
-        // 모달 닫기 및 입력값 초기화
-        setEditingTodoId(null);
-        setExtractedText("");
-        setExtractedTodoInfo(null);
-      }
-    } catch (error: any) {
-      console.error("일정 추가 API 에러:", error);
-      console.error("에러 응답:", error.response);
-      console.error("에러 데이터:", error.response?.data);
-      toast.error(`일정 저장 실패: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
-    }
-  };
-
-  const toggleTodoComplete = async (id: string) => {
-    try {
-      const todo = todos.find(t => t.id === id);
-      if (todo) {
-        const newStatus = todo.completed ? 'pending' : 'completed';
-        console.log("일정 상태 변경 시작:", id, newStatus);
-        const response = await apiClient.updateTodo(id, { status: newStatus });
-        console.log("일정 상태 변경 응답:", response);
-
-        if (response && response.data) {
-          setTodos((prev) =>
-            prev.map((t) =>
-              t.id === id ? { ...t, completed: !t.completed } : t
-            )
-          );
-        } else {
-          console.error("응답 데이터 없음:", response);
-          toast.error("일정 상태 변경에 실패했습니다. 응답 데이터가 없습니다.");
-        }
-      }
-    } catch (error: any) {
-      console.error("일정 상태 변경 실패:", error);
-      console.error("에러 상세:", error.response?.data || error.message);
-      toast.error(`일정 상태 변경에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
-    }
-  };
-
-  const deleteTodo = async (id: string) => {
-    try {
-      console.log("일정 삭제 시작:", id);
-
-      // 삭제할 일정 찾기 (최신 상태에서 찾기)
-      const todoToDelete = todos.find(t => t.id === id);
-      if (!todoToDelete) {
-        console.warn("삭제할 일정을 찾을 수 없습니다:", id);
-        toast.error("일정을 찾을 수 없습니다.");
-        return;
-      }
-
-      // Google Calendar 이벤트인 경우 Google Calendar에서 삭제
-      if (todoToDelete.source === 'google_calendar' || todoToDelete.googleCalendarEventId) {
-        const eventId = todoToDelete.googleCalendarEventId || todoToDelete.id;
-        console.log("Google Calendar 이벤트 삭제 시도:", eventId);
-
-        try {
-          // Google Calendar 이벤트 삭제를 위한 API 호출
-          const response = await apiClient.deleteGoogleCalendarEvent(eventId);
-          console.log("Google Calendar 이벤트 삭제 응답:", response);
-
-          if (response && response.data?.success) {
-            // 프론트엔드에서 제거
-            setTodos((prev) => prev.filter((todo) => todo.id !== id));
-            toast.success("Google Calendar 이벤트가 삭제되었습니다.");
-          } else {
-            throw new Error("삭제 응답이 성공이 아닙니다.");
-          }
-          return;
-        } catch (error: any) {
-          console.error("Google Calendar 이벤트 삭제 실패:", error);
-          toast.error(`Google Calendar 이벤트 삭제에 실패했습니다: ${error.response?.data?.detail || error.message}`);
-          return;
-        }
-      }
-
-      // Always Plan 일정인 경우 백엔드에 삭제 요청
-      // 같은 그룹의 모든 일정 찾기
-      const todosToDelete: TodoItem[] = [];
-      if (todoToDelete.todoGroupId) {
-        // 같은 그룹의 모든 일정 찾기
-        const groupTodos = todos.filter(t => t.todoGroupId === todoToDelete.todoGroupId);
-        todosToDelete.push(...groupTodos);
-        console.log(`같은 그룹의 일정 ${groupTodos.length}개 발견: todoGroupId=${todoToDelete.todoGroupId}`);
-      } else {
-        // 그룹 ID가 없으면 현재 일정만 삭제
-        todosToDelete.push(todoToDelete);
-      }
-
-      // 백엔드에 삭제 요청 (첫 번째 일정 ID로 삭제하면 백엔드에서 같은 그룹의 모든 일정 삭제)
-      try {
-        const response = await apiClient.deleteTodo(id);
-        console.log("일정 삭제 응답:", response);
-        console.log("일정 삭제 응답 상태:", response?.status);
-
-        // API 호출 성공 여부 확인 (204 No Content는 응답 본문이 없을 수 있음)
-        if (response && (response.status === 204 || response.status === 200)) {
-          // 프론트엔드 상태에서 제거 (성공 후에만 제거)
-          setTodos((prev) => {
-            const filtered = prev.filter((todo) => !todosToDelete.some(td => td.id === todo.id));
-            console.log(`프론트엔드에서 일정 ${todosToDelete.length}개 제거 완료, 남은 일정 수:`, filtered.length);
-            return filtered;
-          });
-
-          console.log("백엔드 삭제 성공 확인됨");
-          if (todosToDelete.length > 1) {
-            toast.success(`${todosToDelete.length}개 날짜의 일정이 모두 삭제되었습니다.`);
-          } else {
-            toast.success("일정이 삭제되었습니다.");
-          }
-        } else {
-          console.error("일정 삭제 실패: 예상치 못한 응답", response);
-          toast.error("일정 삭제에 실패했습니다. 응답을 확인할 수 없습니다.");
-        }
-      } catch (error: any) {
-        console.error("일정 삭제 실패:", error);
-        console.error("에러 상세:", error.response?.data || error.message);
-        console.error("에러 상태:", error.response?.status);
-
-        // 404 에러는 이미 삭제된 것으로 간주하고 프론트엔드에서 제거
-        if (error.response?.status === 404) {
-          console.log("일정이 이미 삭제되었거나 존재하지 않음. 프론트엔드에서 제거합니다.");
-          setTodos((prev) => prev.filter((todo) => !todosToDelete.some(td => td.id === todo.id)));
-          toast.success("일정이 삭제되었습니다.");
-        } else {
-          toast.error(`일정 삭제에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
-        }
-      }
-    } catch (error: any) {
-      console.error("일정 삭제 처리 중 오류:", error);
-      toast.error(`일정 삭제 중 오류가 발생했습니다: ${error.message || "알 수 없는 오류"}`);
-    }
-  };
-
-  const getCategoryColor = (category: string) => {
-    const colors: { [key: string]: string } = {
-      공부: "bg-[#E0F2FE] border-l-[#0EA5E9]",
-      업무: "bg-[#F3E8FF] border-l-[#A855F7]",
-      약속: "bg-[#FCE7F3] border-l-[#EC4899]",
-      생활: "bg-[#D1FAE5] border-l-[#10B981]",
-      건강: "bg-[#FFF0EB] border-l-[#FF9B82]",
-      구글: "bg-[#E8F5E9] border-l-[#00085c]",
-      기타: "bg-[#FEF3C7] border-l-[#F59E0B]",
-    };
-    return colors[category] || colors["기타"];
-  };
-
-  /**
-   * 사용자 추가/수정 핸들러
-   */
-  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
-
-  const handleSaveMember = async (member: any) => {
-    try {
-      if (editingMemberId) {
-        console.log("가족 구성원 수정 시작:", editingMemberId, member);
-
-        // "나" 항목(id가 "me")인 경우 사용자 정보 업데이트
-        if (editingMemberId === "me") {
-          const userData = {
-            name: member.name,
-            avatar_emoji: member.emoji,
-          };
-
-          console.log("사용자 정보 수정 데이터:", userData);
-          const userResponse = await apiClient.updateUser(userData);
-          console.log("사용자 정보 수정 응답:", userResponse);
-
-          if (userResponse && userResponse.data) {
-            setUserName(member.name);
-            setSelectedEmoji(member.emoji);
-            setFamilyMembers((prev) =>
-              prev.map((m) =>
-                m.id === "me"
-                  ? {
-                    ...m,
-                    name: member.name || m.name,
-                    emoji: member.emoji || m.emoji,
-                  }
-                  : m
-              )
-            );
-            toast.success(`${member.name}님이 수정되었습니다!`);
-            setEditingMemberId(null);
-            setShowMemberAddSheet(false);
-          } else {
-            console.error("응답 데이터 없음:", userResponse);
-            toast.error("사용자 정보 수정에 실패했습니다. 응답 데이터가 없습니다.");
-          }
-          return;
-        }
-
-        // 일반 가족 구성원 수정 - API 호출
-        const memberData = {
-          name: member.name,
-          emoji: member.emoji,
-          color: member.color,
-          relation: member.relation || "other",
-          phone_number: member.phone,
-          notes: member.memo,
-        };
-
-        console.log("가족 구성원 수정 데이터:", memberData);
-        const response = await apiClient.updateFamilyMember(editingMemberId, memberData);
-        console.log("가족 구성원 수정 응답:", response);
-
-        if (response && response.data) {
-          setFamilyMembers((prev) =>
-            prev.map((m) =>
-              m.id === editingMemberId
-                ? {
-                  ...m,
-                  name: member.name || m.name,
-                  emoji: member.emoji || m.emoji,
-                  phone: member.phone || m.phone,
-                  memo: member.memo || m.memo,
-                  color: member.color || m.color,
-                }
-                : m
-            )
-          );
-          toast.success(`${member.name}님이 수정되었습니다!`);
-          setEditingMemberId(null);
-          setShowMemberAddSheet(false);
-        } else {
-          console.error("응답 데이터 없음:", response);
-          toast.error("가족 구성원 수정에 실패했습니다. 응답 데이터가 없습니다.");
-        }
-      } else {
-        console.log("가족 구성원 추가 시작:", member);
-        // 추가 모드 - API 호출
-        const memberData = {
-          name: member.name,
-          emoji: member.emoji || "🐼",
-          color: member.color || `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 0.6)`,
-          relation: "other",
-          phone_number: member.phone,
-          notes: member.memo,
-        };
-
-        console.log("가족 구성원 추가 데이터:", memberData);
-        const response = await apiClient.createFamilyMember(memberData);
-        console.log("가족 구성원 추가 응답:", response);
-
-        if (response && response.data) {
-          const newMember: FamilyMember = {
-            id: response.data.id,
-            name: member.name,
-            emoji: member.emoji || "🐼",
-            color: member.color || `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 0.6)`,
-            phone: member.phone,
-            memo: member.memo,
-          };
-          setFamilyMembers((prev) => [...prev, newMember]);
-          toast.success(`${member.name}님이 추가되었습니다!`);
-          setShowMemberAddSheet(false);
-        } else {
-          console.error("응답 데이터 없음:", response);
-          toast.error("가족 구성원 추가에 실패했습니다. 응답 데이터가 없습니다.");
-        }
-      }
-    } catch (error: any) {
-      console.error("가족 구성원 저장 실패:", error);
-      console.error("에러 상세:", error.response?.data || error.message);
-      toast.error(`가족 구성원 저장에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
-    }
-  };
-
-  const handleDeleteMember = async (memberId: string) => {
-    const member = familyMembers.find(m => m.id === memberId);
-    if (member && window.confirm(`${member.name}님을 삭제하시겠습니까?`)) {
-      try {
-        // "나"는 삭제하지 않음
-        if (memberId === "me") {
-          toast.error("기본 사용자는 삭제할 수 없습니다.");
-          return;
-        }
-
-        console.log("가족 구성원 삭제 시작:", memberId);
-        const response = await apiClient.deleteFamilyMember(memberId);
-        console.log("가족 구성원 삭제 응답:", response);
-
-        setFamilyMembers((prev) => prev.filter((m) => m.id !== memberId));
-        setSelectedMembers((prev) => {
-          const newSelection = prev.filter((id) => id !== memberId);
-          // localStorage에 저장
-          try {
-            localStorage.setItem('selectedMembers', JSON.stringify(newSelection));
-          } catch (error) {
-            console.error("선택된 구성원 저장 실패:", error);
-          }
-          return newSelection;
-        });
-        toast.success(`${member.name}님이 삭제되었습니다.`);
-      } catch (error: any) {
-        console.error("가족 구성원 삭제 실패:", error);
-        console.error("에러 상세:", error.response?.data || error.message);
-        toast.error(`가족 구성원 삭제에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
-      }
-    }
-  };
-
-  const handleSaveWorkContact = (contact: any) => {
-    toast.success(`${contact.name}님의 연락처가 저장되었습니다!`);
-    console.log("New Work Contact:", contact);
-  };
-
-  const handleTodoUpdate = async (id: string, updates: { time: string; duration: number }) => {
-    // duration으로부터 endTime 계산
-    const [startHours, startMinutes] = updates.time.split(":").map(Number);
-    const startTotalMinutes = startHours * 60 + startMinutes;
-    const endTotalMinutes = startTotalMinutes + updates.duration;
-    const endHours = Math.floor(endTotalMinutes / 60) % 24;
-    const endMins = endTotalMinutes % 60;
-    const endTime = `${String(endHours).padStart(2, "0")}:${String(endMins).padStart(2, "0")}`;
-
-    // 먼저 Todo를 찾아서 업데이트 가능한지 확인
-    const updatedTodo = todos.find(t => t.id === id);
-    if (!updatedTodo) {
-      console.warn('업데이트할 일정을 찾을 수 없습니다:', id);
-      return;
-    }
-
-    // 프론트엔드 상태 먼저 업데이트 (즉시 반영)
-    setTodos((prev) => {
-      return prev.map((todo) =>
-        todo.id === id
-          ? {
-            ...todo,
-            time: updates.time,
-            startTime: updates.time,
-            endTime: endTime,
-            duration: updates.duration
-          }
-          : todo
-      );
-    });
-
-    // 백엔드에 저장 - Google Calendar 이벤트나 Routine 인스턴스는 제외
-    if (
-      updatedTodo.id &&
-      !updatedTodo.id.startsWith('routine-') &&
-      updatedTodo.source !== 'google_calendar' &&
-      !updatedTodo.googleCalendarEventId
-    ) {
-      // UUID 형식인지 확인 (36자 문자열: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
-      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(updatedTodo.id);
-
-      if (isUUID) {
-        // 실제 DB의 Todo ID인 경우에만 백엔드 업데이트
-        try {
-          console.log('[일정 시간 업데이트] 백엔드에 저장:', {
-            id: updatedTodo.id,
-            start_time: updates.time,
-            end_time: endTime
-          });
-
-          const updateData = {
-            start_time: updates.time,
-            end_time: endTime,
-            // duration은 계산된 값이므로 별도로 전달하지 않음
-          };
-
-          console.log('[일정 시간 업데이트] 백엔드 API 호출:', {
-            id: updatedTodo.id,
-            data: updateData
-          });
-
-          const response = await apiClient.updateTodo(updatedTodo.id, updateData);
-
-          console.log('[일정 시간 업데이트] 백엔드 응답:', response.data);
-
-          console.log('[일정 시간 업데이트] 백엔드 저장 성공');
-          toast.success("일정 시간이 변경되었습니다.");
-        } catch (error: any) {
-          console.error('일정 시간 업데이트 실패:', error);
-
-          // 에러 발생 시 프론트엔드 상태를 원래대로 되돌림
-          setTodos((prev) => {
-            return prev.map((todo) =>
-              todo.id === id
-                ? {
-                  ...todo,
-                  time: updatedTodo.time || updatedTodo.startTime || "09:00",
-                  startTime: updatedTodo.startTime,
-                  endTime: updatedTodo.endTime,
-                  duration: updatedTodo.duration || 60
-                }
-                : todo
-            );
-          });
-
-          // 404 에러는 Google Calendar 이벤트 등 실제 DB에 없는 경우이므로 조용히 처리
-          if (error.response?.status !== 404) {
-            toast.error('일정 시간 업데이트에 실패했습니다.');
-          }
-        }
-      } else {
-        // UUID가 아닌 경우 (예: routine-, google_ 등) 프론트엔드 상태만 업데이트
-        console.log('[일정 시간 업데이트] 프론트엔드만 업데이트 (UUID 아님):', updatedTodo.id);
-        toast.success("일정 시간이 변경되었습니다.");
-      }
-    } else {
-      // Google Calendar 이벤트나 Routine 인스턴스는 프론트엔드 상태만 업데이트
-      console.log('[일정 시간 업데이트] 프론트엔드만 업데이트 (Google Calendar/Routine):', id);
-      toast.success("일정 시간이 변경되었습니다.");
-    }
-
-    // Routine 인스턴스 처리
-  };
-
-  // STT/OCR로 추출된 텍스트 및 일정 정보 상태
-  const [extractedText, setExtractedText] = useState<string>("");
+  const [todos, setTodos] = useState<any[]>([]);
   const [extractedTodoInfo, setExtractedTodoInfo] = useState<any>(null);
 
-  // 로컬 날짜를 YYYY-MM-DD 형식으로 변환하는 헬퍼 함수
-  const formatLocalDate = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-  };
+  // 현재 날짜/시간
+  const currentDate = new Date().toISOString().split('T')[0];
 
-  const handleInputMethodSelect = (method: 'voice' | 'camera' | 'text', extractedText?: string, todoInfo?: any) => {
-    setShowInputMethodModal(false);
+  // 새로고침 시 오늘 날짜로 초기화
+  const [selectedDate, setSelectedDate] = useState<string | null>(currentDate);
 
-    if (method === 'voice') {
-      toast.info('음성 입력을 시작합니다.');
-    } else if (method === 'camera') {
-      toast.info('이미지 촬영을 시작합니다.');
-    } else {
-      // 텍스트 입력 또는 STT/OCR로 추출된 텍스트와 일정 정보가 있으면 설정
-      // 새로운 입력이 있으면 기존 값 초기화 후 설정
-      if (extractedText) {
-        setExtractedText(extractedText);
-      } else {
-        setExtractedText(""); // 새로운 입력이 없으면 초기화
+  // Todo 관련 함수들 (임시 구현)
+  const handleTodoUpdate = async (todoId: string, updates: any) => {
+    try {
+      // time과 duration을 start_time과 end_time으로 변환
+      const apiUpdates: any = { ...updates };
+
+      // completed를 status로 변환
+      if (updates.completed !== undefined) {
+        apiUpdates.status = updates.completed ? 'completed' : 'pending';
+        delete apiUpdates.completed;
       }
-      if (todoInfo) {
-        console.log("일정 정보 받음:", todoInfo);
-        setExtractedTodoInfo(todoInfo);
-      } else {
-        setExtractedTodoInfo(null); // 새로운 일정 정보가 없으면 초기화
+
+      if (updates.time !== undefined || updates.duration !== undefined) {
+        const todo = todos.find(t => t.id === todoId);
+        if (todo) {
+          // 업데이트할 시간과 duration
+          const newTime = updates.time !== undefined ? updates.time : todo.time;
+          const newDuration = updates.duration !== undefined ? updates.duration : todo.duration;
+
+          if (newTime && !isNaN(newDuration) && newDuration > 0) {
+            try {
+              // "HH:MM" 형식 파싱
+              const [hours, minutes] = newTime.split(':').map((s: string) => {
+                const num = parseInt(s, 10);
+                return isNaN(num) ? 0 : num;
+              });
+
+              const startTotalMinutes = hours * 60 + minutes;
+              const endTotalMinutes = startTotalMinutes + newDuration;
+
+              const endHours = Math.floor(endTotalMinutes / 60) % 24;
+              const endMins = endTotalMinutes % 60;
+
+              apiUpdates.start_time = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+              apiUpdates.end_time = `${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}`;
+
+              // time과 duration 제거 (백엔드에서는 start_time과 end_time만 사용)
+              delete apiUpdates.time;
+              delete apiUpdates.duration;
+            } catch (e) {
+              console.error('시간 변환 오류:', e);
+            }
+          }
+        }
       }
-      setShowAddTodoModal(true);
+
+      const response = await apiClient.updateTodo(todoId, apiUpdates);
+
+      // 응답 데이터를 프론트엔드 형식으로 변환
+      if (response.data) {
+        const updatedTodo = {
+          id: response.data.id,
+          title: response.data.title,
+          description: response.data.description || response.data.memo || '',
+          time: response.data.start_time ? `${response.data.start_time}` : undefined,
+          rule: response.data.category || '기타',
+          completed: response.data.status === 'completed',
+          draft: response.data.status === 'draft',
+          overdue: response.data.status === 'overdue',
+          status: response.data.status || 'pending',
+          priority: response.data.priority,
+          date: response.data.date,
+          endDate: response.data.end_date,
+          startTime: response.data.start_time || undefined,
+          endTime: response.data.end_time || undefined,
+          isAllDay: response.data.all_day === true || response.data.all_day === 'true',
+          duration: (() => {
+            if (response.data.start_time && response.data.end_time) {
+              try {
+                const [startHours, startMinutes] = response.data.start_time.split(':').map((s: string) => {
+                  const num = parseInt(s, 10);
+                  return isNaN(num) ? 0 : num;
+                });
+                const [endHours, endMinutes] = response.data.end_time.split(':').map((s: string) => {
+                  const num = parseInt(s, 10);
+                  return isNaN(num) ? 0 : num;
+                });
+                const startTotal = startHours * 60 + startMinutes;
+                const endTotal = endHours * 60 + endMinutes;
+                const calcDuration = endTotal - startTotal;
+                return (calcDuration > 0 && !isNaN(calcDuration)) ? calcDuration : 60;
+              } catch (e) {
+                return 60;
+              }
+            }
+            return response.data.duration || 60;
+          })(),
+          location: response.data.location,
+          memo: response.data.memo || response.data.description || '',
+          category: response.data.category || '기타',
+          hasNotification: response.data.has_notification || false,
+          notificationTimes: response.data.notification_times || [],
+          notificationReminders: response.data.notification_reminders ? (typeof response.data.notification_reminders === 'string' ? JSON.parse(response.data.notification_reminders) : response.data.notification_reminders) : [],
+          repeatType: response.data.repeat_type || 'none',
+          repeatEndDate: response.data.repeat_end_date,
+          repeatPattern: response.data.repeat_pattern ? (typeof response.data.repeat_pattern === 'string' ? JSON.parse(response.data.repeat_pattern) : response.data.repeat_pattern) : undefined,
+          checklistItems: response.data.checklist_items?.map((item: any) => item.text || item) || [],
+          memberId: response.data.member_id,
+          assignedMemberIds: Array.isArray(response.data.family_member_ids)
+            ? response.data.family_member_ids
+            : (Array.isArray(response.data.assigned_member_ids)
+              ? response.data.assigned_member_ids
+              : (response.data.family_member_ids ? [response.data.family_member_ids] : (response.data.assigned_member_ids ? [response.data.assigned_member_ids] : []))),
+          isRoutine: response.data.is_routine || false,
+          source: response.data.source || 'always_plan',
+          googleCalendarEventId: response.data.google_calendar_event_id || undefined,
+          bulkSynced: response.data.bulk_synced || false,
+          todoGroupId: response.data.todo_group_id || undefined,
+        };
+
+        setTodos(prev => prev.map(t => t.id === todoId ? updatedTodo : t));
+      } else {
+        // 응답 데이터가 없으면 기존 방식으로 fallback
+        setTodos(prev => prev.map(t => t.id === todoId ? { ...t, ...updates } : t));
+      }
+    } catch (error) {
+      console.error('Failed to update todo:', error);
     }
   };
 
-  /* Helper to get Todos for a specific date (시간표와 분리) */
-  const getTodosForDate = (targetDate: Date) => {
-    // 로컬 날짜를 직접 포맷팅 (UTC 변환으로 인한 날짜 밀림 방지)
-    const year = targetDate.getFullYear();
-    const month = targetDate.getMonth() + 1;
-    const day = targetDate.getDate();
-    const dateString = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    const currentDateObj = new Date(dateString);
-    currentDateObj.setHours(0, 0, 0, 0);
+  const toggleTodoComplete = async (todoId: string) => {
+    const todo = todos.find(t => t.id === todoId);
+    if (!todo) return;
 
-    // Regular Todos만 반환 (시간표는 제외)
-    // 기간 일정인 경우 시작일부터 종료일까지 모든 날짜에 표시
-    const regularTodos = todos.filter(t => {
-      if (t.isRoutine) return false;
-      if (!t.date) return false;
+    const newCompleted = !todo.completed;
+    await handleTodoUpdate(todoId, { completed: newCompleted });
+  };
+
+  const handleTodoDelete = async (todoId: string) => {
+    try {
+      await apiClient.deleteTodo(todoId);
+      setTodos(prev => prev.filter(t => t.id !== todoId));
+      toast.success("일정이 삭제되었습니다.");
+    } catch (error: any) {
+      console.error('Failed to delete todo:', error);
+      toast.error(`일정 삭제에 실패했습니다: ${error.response?.data?.detail || error.message || '알 수 없는 오류'}`);
+    }
+  };
+
+  const handleTodoSubmit = async (formData: any) => {
+    try {
+      // 담당 프로필 디버깅
+      console.log('[일정 저장] 담당 프로필 데이터:', {
+        assignedMemberIds: formData.assignedMemberIds,
+        type: typeof formData.assignedMemberIds,
+        isArray: Array.isArray(formData.assignedMemberIds),
+        length: formData.assignedMemberIds?.length,
+        editingTodoId
+      });
+
+      // 시간 계산 (startTime과 endTime으로부터 duration 계산)
+      let duration = 60; // 기본값
+      if (!formData.isAllDay && formData.startTime && formData.endTime) {
+        try {
+          const [startHours, startMinutes] = formData.startTime.split(':').map(Number);
+          const [endHours, endMinutes] = formData.endTime.split(':').map(Number);
+          const startTotal = startHours * 60 + startMinutes;
+          const endTotal = endHours * 60 + endMinutes;
+          duration = endTotal - startTotal;
+          if (duration <= 0) duration = 60; // 최소 1시간
+        } catch (e) {
+          duration = 60;
+        }
+      }
+
+      // 담당 프로필 ID 배열 정규화
+      const assignedMemberIdsArray = Array.isArray(formData.assignedMemberIds)
+        ? formData.assignedMemberIds
+        : (formData.assignedMemberIds ? [formData.assignedMemberIds] : []);
+
+      // API에 전송할 데이터 변환
+      const todoData: any = {
+        title: formData.title,
+        description: formData.memo || "",
+        memo: formData.memo || "",
+        location: formData.location || "",
+        date: formData.date,
+        // end_date: 종료 날짜가 시작 날짜와 같거나 없으면 빈 문자열로 설정 (백엔드에서 None으로 처리)
+        // 수정 모드에서는 항상 end_date를 보내야 함 (없으면 빈 문자열로)
+        end_date: formData.endDate && formData.endDate !== formData.date ? formData.endDate : (editingTodoId ? "" : undefined),
+        start_time: formData.isAllDay ? undefined : (formData.startTime || undefined),
+        end_time: formData.isAllDay ? undefined : (formData.endTime || undefined),
+        all_day: formData.isAllDay === true,
+        category: formData.category || "기타",
+        status: 'pending',
+        has_notification: formData.hasNotification || false,
+        notification_reminders: formData.hasNotification && formData.notificationReminders && formData.notificationReminders.length > 0
+          ? formData.notificationReminders.map((r: any) => ({ value: r.value, unit: r.unit }))
+          : undefined,
+        repeat_type: formData.repeatType || "none",
+        repeat_end_date: formData.repeatEndDate || undefined,
+        // 맞춤 반복인 경우 repeat_pattern 생성
+        repeat_pattern: formData.repeatType === 'custom' ? {
+          // 요일이 선택되어 있으면 자동으로 주 단위로 설정
+          freq: (formData.customRepeatDays && formData.customRepeatDays.length > 0) ? 'weeks' : (formData.customRepeatUnit || 'days'),
+          interval: formData.customRepeatInterval || 1,
+          days: formData.customRepeatDays || [],
+          endType: formData.customRepeatEndType || 'never',
+          endDate: formData.customRepeatEndType === 'date' ? formData.customRepeatEndDate : undefined,
+          count: formData.customRepeatEndType === 'count' ? formData.customRepeatCount : undefined,
+        } : (formData.repeatPattern || undefined),
+        checklist_items: formData.checklistItems && formData.checklistItems.length > 0
+          ? formData.checklistItems.filter((item: string) => item.trim())
+          : undefined,
+        // 수정 모드에서는 항상 family_member_ids를 보내야 함 (백엔드가 None이 아닐 때만 업데이트하기 때문)
+        // 생성 모드에서도 빈 배열이라도 보내야 함
+        family_member_ids: assignedMemberIdsArray,
+      };
+
+      console.log('[일정 저장] 전송할 데이터:', {
+        ...todoData,
+        family_member_ids: assignedMemberIdsArray
+      });
+
+      if (editingTodoId) {
+        // 수정 모드
+        const response = await apiClient.updateTodo(editingTodoId, todoData);
+
+        // 응답 데이터를 프론트엔드 형식으로 변환 (loadTodos와 동일한 형식)
+        const updatedTodo = {
+          id: response.data.id,
+          title: response.data.title,
+          description: response.data.description || response.data.memo || '',
+          time: response.data.start_time ? `${response.data.start_time}` : undefined,
+          rule: response.data.category || '기타',
+          completed: response.data.status === 'completed',
+          draft: response.data.status === 'draft',
+          overdue: response.data.status === 'overdue',
+          status: response.data.status || 'pending',
+          priority: response.data.priority,
+          date: response.data.date,
+          endDate: response.data.end_date,
+          startTime: response.data.start_time || undefined,
+          endTime: response.data.end_time || undefined,
+          isAllDay: response.data.all_day === true || response.data.all_day === 'true',
+          duration: response.data.start_time && response.data.end_time ? duration : (response.data.duration || duration),
+          location: response.data.location,
+          memo: response.data.memo || response.data.description || '',
+          category: response.data.category || '기타',
+          hasNotification: response.data.has_notification || false,
+          notificationTimes: response.data.notification_times || [],
+          notificationReminders: response.data.notification_reminders ? (typeof response.data.notification_reminders === 'string' ? JSON.parse(response.data.notification_reminders) : response.data.notification_reminders) : [],
+          repeatType: response.data.repeat_type || 'none',
+          repeatEndDate: response.data.repeat_end_date,
+          repeatPattern: response.data.repeat_pattern ? (typeof response.data.repeat_pattern === 'string' ? JSON.parse(response.data.repeat_pattern) : response.data.repeat_pattern) : undefined,
+          checklistItems: response.data.checklist_items?.map((item: any) => item.text || item) || [],
+          memberId: response.data.member_id,
+          assignedMemberIds: Array.isArray(response.data.family_member_ids)
+            ? response.data.family_member_ids
+            : (Array.isArray(response.data.assigned_member_ids)
+              ? response.data.assigned_member_ids
+              : (response.data.family_member_ids ? [response.data.family_member_ids] : (response.data.assigned_member_ids ? [response.data.assigned_member_ids] : []))),
+          isRoutine: response.data.is_routine || false,
+          source: response.data.source || 'always_plan',
+          googleCalendarEventId: response.data.google_calendar_event_id || undefined,
+          bulkSynced: response.data.bulk_synced || false,
+          todoGroupId: response.data.todo_group_id || undefined,
+        };
+
+        console.log('[일정 수정] 업데이트된 일정:', updatedTodo);
+        setTodos(prev => {
+          const updated = prev.map(t => t.id === editingTodoId ? updatedTodo : t);
+          console.log('[일정 수정] 업데이트된 todos:', updated.length, '개');
+          return updated;
+        });
+        setEditingTodoId(null);
+        setShowAddTodoModal(false);
+        toast.success("일정이 수정되었습니다.");
+      } else {
+        // 생성 모드
+        const response = await apiClient.createTodo(todoData);
+
+        // 응답 데이터를 프론트엔드 형식으로 변환 (loadTodos와 동일한 형식)
+        const newTodo = {
+          id: response.data.id,
+          title: response.data.title,
+          description: response.data.description || response.data.memo || '',
+          time: response.data.start_time ? `${response.data.start_time}` : undefined,
+          rule: response.data.category || '기타',
+          completed: response.data.status === 'completed',
+          draft: response.data.status === 'draft',
+          overdue: response.data.status === 'overdue',
+          status: response.data.status || 'pending',
+          priority: response.data.priority,
+          date: response.data.date,
+          endDate: response.data.end_date,
+          startTime: response.data.start_time || undefined,
+          endTime: response.data.end_time || undefined,
+          isAllDay: response.data.all_day === true || response.data.all_day === 'true',
+          duration: response.data.start_time && response.data.end_time ? duration : (response.data.duration || duration),
+          location: response.data.location,
+          memo: response.data.memo || response.data.description || '',
+          category: response.data.category || '기타',
+          hasNotification: response.data.has_notification || false,
+          notificationTimes: response.data.notification_times || [],
+          notificationReminders: response.data.notification_reminders ? (typeof response.data.notification_reminders === 'string' ? JSON.parse(response.data.notification_reminders) : response.data.notification_reminders) : [],
+          repeatType: response.data.repeat_type || 'none',
+          repeatEndDate: response.data.repeat_end_date,
+          repeatPattern: response.data.repeat_pattern ? (typeof response.data.repeat_pattern === 'string' ? JSON.parse(response.data.repeat_pattern) : response.data.repeat_pattern) : undefined,
+          checklistItems: response.data.checklist_items?.map((item: any) => item.text || item) || [],
+          memberId: response.data.member_id,
+          assignedMemberIds: Array.isArray(response.data.family_member_ids)
+            ? response.data.family_member_ids
+            : (Array.isArray(response.data.assigned_member_ids)
+              ? response.data.assigned_member_ids
+              : (response.data.family_member_ids ? [response.data.family_member_ids] : (response.data.assigned_member_ids ? [response.data.assigned_member_ids] : []))),
+          isRoutine: response.data.is_routine || false,
+          source: response.data.source || 'always_plan',
+          googleCalendarEventId: response.data.google_calendar_event_id || undefined,
+          bulkSynced: response.data.bulk_synced || false,
+          todoGroupId: response.data.todo_group_id || undefined,
+        };
+
+        console.log('[일정 추가] 새 일정:', newTodo);
+        // 일정을 즉시 상태에 추가하고, 그 다음 전체 목록 새로고침
+        setTodos(prev => {
+          const updated = [...prev, newTodo];
+          console.log('[일정 추가] 로컬 상태 업데이트 완료:', updated.length, '개');
+          return updated;
+        });
+        // 전체 목록 새로고침 (서버와 동기화)
+        await loadTodos();
+        setShowAddTodoModal(false);
+        setExtractedTodoInfo(null); // AI 추출 정보 초기화
+        toast.success("일정이 추가되었습니다.");
+      }
+    } catch (error) {
+      console.error('Failed to save todo:', error);
+      toast.error(editingTodoId ? "일정 수정에 실패했습니다." : "일정 추가에 실패했습니다.");
+    }
+  };
+
+  const handleInputMethodSelect = (method: 'voice' | 'camera' | 'text', _extractedText?: string, _todoInfo?: any) => {
+    // STT/OCR에서 직접 작성 탭으로 전환할 때 extractedTodoInfo 설정
+    // 이 함수는 InputMethodModal 내부에서 탭 전환 시 호출되지 않음
+    // 직접 작성 탭으로 전환은 InputMethodModal 내부에서 setActiveMethod(null)로 처리됨
+    if (method === 'text') {
+      // 직접 작성 선택 시 AddTodoModal 열기
+      if (_todoInfo) {
+        console.log('[일정 추가] 추출된 일정 정보:', _todoInfo);
+        setExtractedTodoInfo(_todoInfo);
+      } else {
+        setExtractedTodoInfo(null);
+      }
+      setEditingTodoId(null);
+      setShowInputMethodModal(false);
+      setShowAddTodoModal(true);
+    } else {
+      setInputMethodInitialMode(method);
+      setShowInputMethodModal(false);
+    }
+  };
+
+  // 검색 결과 필터링
+  const filteredTodos = todos.filter((todo) => {
+    if (!searchQuery.trim()) return false;
+    const query = searchQuery.toLowerCase();
+    return (
+      todo.title.toLowerCase().includes(query) ||
+      todo.description?.toLowerCase().includes(query) ||
+      todo.category?.toLowerCase().includes(query) ||
+      todo.location?.toLowerCase().includes(query)
+    );
+  });
+
+  const displayTodos = todos.filter(t => {
+    if (t.isRoutine || !t.date) return false;
+    
+    // 프로필 필터링 (assignedMemberIds 지원)
+    if (selectedMembers.length > 0) {
+      // 프로필이 선택되어 있는 경우:
+      // - 담당 프로필이 있는 일정: 선택된 프로필에 포함되어야 함
+      // - 담당 프로필이 없는 일정: 표시 (프로필이 선택되어 있어도 담당 프로필 없는 일정은 표시)
+      const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+      const hasMemberId = t.memberId;
+      
+      if (hasAssignedMembers) {
+        // assignedMemberIds 중 하나라도 선택된 프로필에 포함되어야 함
+        const assignedIds = t.assignedMemberIds.map((id: any) => String(id));
+        const selectedIds = selectedMembers.map((id: string) => String(id));
+        const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+        if (!hasSelectedMember) {
+          return false;
+        }
+      } else if (hasMemberId && !selectedMembers.includes(String(t.memberId))) {
+        return false;
+      }
+      // 담당 프로필이 없으면 표시
+    } else {
+      // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+      const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+      if (t.memberId || hasAssignedMembers) {
+        return false;
+      }
+    }
+    
+    return true;
+  }).sort((a, b) => {
+    if (a.date !== b.date) {
+      return (a.date || '').localeCompare(b.date || '');
+    }
+    if (!a.time && b.time) return -1;
+    if (a.time && !b.time) return 1;
+    return (a.time || '').localeCompare(b.time || '');
+  });
+
+  const formatLastSyncTime = () => {
+    if (!lastSyncTime) return '';
+    const now = new Date();
+    const diff = now.getTime() - lastSyncTime.getTime();
+    const minutes = Math.floor(diff / (1000 * 60));
+
+    if (minutes < 1) return '방금 전';
+    if (minutes < 60) return `${minutes}분 전`;
+
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}시간 전`;
+
+    const days = Math.floor(hours / 24);
+    return `${days}일 전`;
+  };
+
+  // 프로필 메뉴 렌더링 함수
+  const renderProfileMenu = () => (
+    <div className="h-full flex flex-col bg-white border-r border-[#E5E7EB]">
+      {/* User Info Section */}
+      <div className="px-5 py-6 bg-gradient-to-r from-[#FFF0EB] to-[#FFE8E0] border-b border-[#FFD4C8]">
+        <div className="space-y-3">
+          {/* Profile Emoji */}
+          <div className="flex items-center justify-center mb-2">
+            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82] flex items-center justify-center">
+              <span className="text-4xl">{selectedEmoji}</span>
+            </div>
+          </div>
+          {/* User Name */}
+          <div className="flex items-center justify-center">
+            <span className="text-base font-medium text-[#1F2937]">{userName}</span>
+          </div>
+          {/* Email */}
+          <div className="flex items-center justify-center">
+            <span className="text-sm text-[#6B7280]">{userEmail}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Menu Items */}
+      <div className="flex-1 py-2 overflow-y-auto">
+        <button
+          onClick={() => setShowMyPageScreen(true)}
+          className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <User size={20} className="text-[#6B7280]" />
+            <span className="text-[#1F2937]">마이페이지</span>
+          </div>
+          <ChevronRight size={18} className="text-[#9CA3AF]" />
+        </button>
+
+        <button
+          onClick={() => setShowProfileManagementScreen(true)}
+          className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <Users size={20} className="text-[#6B7280]" />
+            <span className="text-[#1F2937]">프로필 관리</span>
+          </div>
+          <ChevronRight size={18} className="text-[#9CA3AF]" />
+        </button>
+
+        <button
+          onClick={() => setShowSettingsScreen(true)}
+          className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <Settings size={20} className="text-[#6B7280]" />
+            <span className="text-[#1F2937]">설정</span>
+          </div>
+          <ChevronRight size={18} className="text-[#9CA3AF]" />
+        </button>
+
+        <button
+          onClick={() => setShowCommunityScreen(true)}
+          className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <Users size={20} className="text-[#6B7280]" />
+            <span className="text-[#1F2937]">커뮤니티</span>
+          </div>
+          <ChevronRight size={18} className="text-[#9CA3AF]" />
+        </button>
+
+        <button
+          onClick={() => setShowCustomerService(true)}
+          className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <HelpCircle size={20} className="text-[#6B7280]" />
+            <span className="text-[#1F2937]">고객센터</span>
+          </div>
+          <ChevronRight size={18} className="text-[#9CA3AF]" />
+        </button>
+
+        <button
+          onClick={() => setShowUserGuide(true)}
+          className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <FileText size={20} className="text-[#6B7280]" />
+            <span className="text-[#1F2937]">사용설명서</span>
+          </div>
+          <ChevronRight size={18} className="text-[#9CA3AF]" />
+        </button>
+      </div>
+
+      {/* Divider */}
+      <div className="h-2 bg-[#F3F4F6]" />
+
+      {/* Logout */}
+      <button
+        onClick={async () => {
+          try {
+            // 백엔드에 로그아웃 요청
+            try {
+              await apiClient.logout();
+            } catch (error) {
+              console.error('Logout API error:', error);
+            }
+
+            // 로컬 스토리지에서 토큰 삭제
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
+            localStorage.removeItem('remember_me');
+
+            toast.success("로그아웃 되었습니다.");
+
+            // 페이지 리로드하여 로그인 화면으로 전환
+            setTimeout(() => {
+              window.location.href = '/';
+            }, 500);
+          } catch (error) {
+            console.error('Logout error:', error);
+            toast.error("로그아웃 중 오류가 발생했습니다.");
+          }
+        }}
+        className="w-full px-5 py-3.5 flex items-center gap-3 hover:bg-[#FEF2F2] transition-colors"
+      >
+        <LogOut size={20} className="text-[#EF4444]" />
+        <span className="text-[#EF4444]">로그아웃</span>
+      </button>
+    </div>
+  );
+
+  // 선택된 날짜의 일정 필터링 함수
+  const getSelectedDateTodos = () => {
+    if (!selectedDate) return [];
+    const selectedDateObj = new Date(selectedDate);
+    selectedDateObj.setHours(0, 0, 0, 0);
+
+    return todos.filter(t => {
+      if (t.isRoutine || !t.date) return false;
+
+      // 프로필 필터링 (assignedMemberIds 지원)
+      if (selectedMembers.length > 0) {
+        // 프로필이 선택되어 있는 경우:
+        // - 담당 프로필이 있는 일정: 선택된 프로필에 포함되어야 함
+        // - 담당 프로필이 없는 일정: 표시 (프로필이 선택되어 있어도 담당 프로필 없는 일정은 표시)
+        const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+        const hasMemberId = t.memberId;
+        
+        if (hasAssignedMembers) {
+          // assignedMemberIds 중 하나라도 선택된 프로필에 포함되어야 함
+          const assignedIds = t.assignedMemberIds.map((id: any) => String(id));
+          const selectedIds = selectedMembers.map((id: string) => String(id));
+          const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+          if (!hasSelectedMember) {
+            return false;
+          }
+        } else if (hasMemberId && !selectedMembers.includes(String(t.memberId))) {
+          return false;
+        }
+        // 담당 프로필이 없으면 표시
+      } else {
+        // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+        const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+        if (t.memberId || hasAssignedMembers) {
+          return false;
+        }
+      }
 
       // 시작일과 동일한 경우
-      if (t.date === dateString) return true;
+      if (t.date === selectedDate) return true;
 
       // 기간 일정인 경우: 시작일과 종료일 사이에 포함되는지 확인
       if (t.endDate && t.endDate !== t.date) {
         const startDate = new Date(t.date);
         const endDate = new Date(t.endDate);
 
-        // 날짜 비교 (시간 제외)
         startDate.setHours(0, 0, 0, 0);
         endDate.setHours(0, 0, 0, 0);
 
-        return currentDateObj >= startDate && currentDateObj <= endDate;
+        return selectedDateObj >= startDate && selectedDateObj <= endDate;
       }
 
       return false;
-    });
-
-    return regularTodos.sort((a, b) => {
-      // 하루종일 일정은 맨 위에 (빈 문자열이 먼저 오도록)
-      if (!a.time && b.time) return -1;
-      if (a.time && !b.time) return 1;
-      return (a.time || '').localeCompare(b.time || '');
-    });
+    }).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
   };
 
-  // For Todo List tab (Today)
-  const displayTodos = getTodosForDate(new Date());
-
-  // 동기화 상태 표시 포맷팅
-  const formatLastSyncTime = () => {
-    if (!lastSyncTime) return '';
-    const now = new Date();
-    const diffMs = now.getTime() - lastSyncTime.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return '방금 전';
-    if (diffMins < 60) return `${diffMins}분 전`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}시간 전`;
-    const diffDays = Math.floor(diffHours / 24);
-    return `${diffDays}일 전`;
+  const getCategoryColor = (category: string) => {
+    const colors: Record<string, string> = {
+      '병원': 'bg-red-50 border-red-200',
+      '학교': 'bg-blue-50 border-blue-200',
+      '학원': 'bg-green-50 border-green-200',
+      '약속': 'bg-purple-50 border-purple-200',
+      '기념일': 'bg-pink-50 border-pink-200',
+      '업무': 'bg-gray-50 border-gray-200',
+      '개인': 'bg-yellow-50 border-yellow-200',
+    };
+    // 디버깅: category 값 확인
+    if (!category || category.trim() === '') {
+      console.log('Empty category for todo, using default color');
+      return 'bg-blue-50 border-blue-200'; // 기본 색상을 파란색으로 변경
+    }
+    return colors[category] || 'bg-blue-50 border-blue-200'; // 기본 색상도 파란색으로 변경
   };
 
   return (
-    <div className="min-h-screen bg-[#FAFAFA] flex flex-col max-w-[375px] mx-auto relative pb-4">
+    <div className={`min-h-screen bg-[#FAFAFA] flex flex-col w-full ${!isMobile ? 'max-w-full' : 'max-w-full md:max-w-2xl lg:max-w-4xl xl:max-w-6xl mx-auto'} relative pb-4 md:pb-6`}>
       {/* Google Calendar 동기화 상태 표시 */}
-      {syncStatus !== 'idle' && (
+      {(syncStatus === 'disabled' || syncStatus === 'syncing' || syncStatus === 'success' || syncStatus === 'error') && (
         <div className={`px-4 py-2 text-xs flex items-center justify-between ${syncStatus === 'syncing' ? 'bg-[#E0F2FE] text-[#0EA5E9]' :
           syncStatus === 'success' ? 'bg-[#D1FAE5] text-[#10B981]' :
             syncStatus === 'disabled' ? 'bg-[#F3F4F6] text-[#6B7280]' :
@@ -2290,12 +1309,12 @@ export function CalendarHomeScreen() {
             {syncStatus === 'syncing' && <Clock size={12} className="animate-spin" />}
             {syncStatus === 'success' && <Check size={12} />}
             {syncStatus === 'error' && <X size={12} />}
-            {syncStatus === 'disabled' && <Clock size={12} />}
+            {syncStatus === 'disabled' && <X size={12} />}
             <span>
               {syncStatus === 'syncing' && '동기화 중...'}
               {syncStatus === 'success' && `마지막 동기화: ${formatLastSyncTime()}`}
               {syncStatus === 'error' && `동기화 실패: ${syncError || '알 수 없는 오류'}`}
-              {syncStatus === 'disabled' && '동기화 비활성화'}
+              {syncStatus === 'disabled' && '동기화가 비활성화되었습니다'}
             </span>
           </div>
           {syncStatus === 'error' && (
@@ -2309,15 +1328,15 @@ export function CalendarHomeScreen() {
         </div>
       )}
 
-      {/* Header - Profile, Search, Notification */}
-      <div className="bg-white px-4 py-3 flex items-center gap-3 border-b border-[#F3F4F6]">
+      {/* Header - Profile, Search, Notification - 반응형 */}
+      <div className="bg-white px-3 sm:px-4 py-2 sm:py-3 flex items-center gap-2 sm:gap-3 border-b border-[#F3F4F6]">
         <button
           onClick={() => setShowProfileMenu(!showProfileMenu)}
-          className="w-10 h-10 rounded-full bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82] flex items-center justify-center flex-shrink-0 hover:scale-110 transition-transform"
+          className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82] flex items-center justify-center flex-shrink-0 hover:scale-110 transition-transform"
         >
-          <span className="text-xl">{selectedEmoji}</span>
+          <span className="text-lg sm:text-xl">{selectedEmoji}</span>
         </button>
-        <div className="flex-1 relative">
+        <div className="flex-1 relative min-w-0">
           <input
             type="text"
             placeholder="일정을 검색해주세요."
@@ -2325,7 +1344,7 @@ export function CalendarHomeScreen() {
             onChange={handleSearchChange}
             onFocus={handleSearchFocus}
             onBlur={handleSearchBlur}
-            className="w-full px-4 py-2 bg-[#F9FAFB] rounded-full text-sm text-[#1F2937] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:bg-white transition-all"
+            className="w-full px-3 sm:px-4 py-1.5 sm:py-2 bg-[#F9FAFB] rounded-full text-xs sm:text-sm text-[#1F2937] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:bg-white transition-all"
           />
 
           {/* 검색 결과 드롭다운 */}
@@ -2381,25 +1400,26 @@ export function CalendarHomeScreen() {
                               <span className="truncate">{todo.location}</span>
                             </div>
                           )}
-                          {todo.memo && (
-                            <p className="text-xs text-[#6B7280] line-clamp-2 mt-1">
-                              {todo.memo}
-                            </p>
-                          )}
-                          {todo.checklistItems && todo.checklistItems.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {todo.checklistItems.slice(0, 3).map((item, index) => (
-                                <span key={index} className="text-xs text-[#9CA3AF] bg-[#F3F4F6] px-2 py-0.5 rounded">
-                                  {item}
-                                </span>
-                              ))}
-                              {todo.checklistItems.length > 3 && (
-                                <span className="text-xs text-[#9CA3AF]">
-                                  +{todo.checklistItems.length - 3}
-                                </span>
-                              )}
-                            </div>
-                          )}
+                          <p className="text-xs text-[#6B7280] line-clamp-2 mt-1">
+                            {todo.description}
+                          </p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {todo.checklistItems && todo.checklistItems.length > 0 && (
+                              <span className="text-xs text-[#9CA3AF] bg-[#F3F4F6] px-2 py-0.5 rounded">
+                                체크리스트 {todo.checklistItems.length}개
+                              </span>
+                            )}
+                            {todo.repeatType && todo.repeatType !== 'none' && (
+                              <span className="text-xs text-[#9CA3AF] bg-[#F3F4F6] px-2 py-0.5 rounded">
+                                반복
+                              </span>
+                            )}
+                            {todo.hasNotification && (
+                              <span className="text-xs text-[#9CA3AF] bg-[#F3F4F6] px-2 py-0.5 rounded">
+                                알림
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2418,48 +1438,35 @@ export function CalendarHomeScreen() {
             </div>
           )}
         </div>
-        <button className="p-2 flex-shrink-0 relative" onClick={() => setShowNotificationPanel(true)}>
+        <button
+          className="p-2 flex-shrink-0 relative"
+          onClick={() => {
+            console.log("[알림 버튼] 클릭됨, showNotificationPanel 설정:", true);
+            setShowTodoDetailFromNotification(false); // 일정 상세 화면 닫기
+            setShowNotificationPanel(true);
+          }}
+        >
           <Bell size={20} className="text-[#6B7280]" />
-          {/* 알림 상태 점 */}
-          {(() => {
+          {/* 알림 상태 점 - todos와 읽음 상태 변경 시 즉시 업데이트 */}
+          {useMemo(() => {
             const now = new Date();
-            const currentDate = now.toISOString().split('T')[0];
-            const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+            const currentDateTime = now.getTime();
 
             // 알림이 설정된 일정만 필터링
             const notifications = todos.filter(todo => {
-              if (!todo.date) return false;
-              // hasNotification과 notificationReminders 모두 확인
-              const hasNotification = todo.hasNotification || false;
-              const notificationReminders = todo.notificationReminders || [];
-              const hasValidNotification = hasNotification && Array.isArray(notificationReminders) && notificationReminders.length > 0;
-
-              // 디버깅: 알림이 있는데 필터링되지 않는 경우 로그
-              if (hasNotification && notificationReminders.length > 0 && !hasValidNotification) {
-                console.log("[알림 점] 알림 필터링 실패:", {
-                  id: todo.id,
-                  title: todo.title,
-                  hasNotification,
-                  notificationReminders,
-                  isArray: Array.isArray(notificationReminders)
-                });
-              }
-
-              return hasValidNotification && !todo.completed;
+              if (todo.completed || !todo.date || !todo.hasNotification) return false;
+              const notificationReminders = todo.notificationReminders || todo.notification_reminders || [];
+              return Array.isArray(notificationReminders) && notificationReminders.length > 0;
             });
 
-            // 디버깅: 알림이 설정된 일정 개수 확인
-            if (notifications.length > 0) {
-              console.log("[알림 점] 알림이 설정된 일정:", notifications.length, "개");
-            }
-
-            // 알림 시간 기준으로 지나간/예정된 알림 분리
-            const allPastNotifications: typeof notifications = [];
-            const allUpcomingNotifications: typeof notifications = [];
+            // 알림 시간 기준으로 지나간 알림과 예정된 알림 분리 (NotificationPanel과 동일한 로직)
+            const past: string[] = [];
+            const upcoming: string[] = [];
 
             notifications.forEach(todo => {
               if (!todo.date) return;
-              const reminders = todo.notificationReminders || [];
+
+              const reminders = todo.notificationReminders || todo.notification_reminders || [];
               if (reminders.length === 0) return;
 
               const todoDate = todo.date;
@@ -2487,53 +1494,49 @@ export function CalendarHomeScreen() {
                   notificationDateTime.setDate(notificationDateTime.getDate() - (value * 7));
                 }
 
-                const notificationDate = notificationDateTime.toISOString().split('T')[0];
-                const notificationTime = `${notificationDateTime.getHours().toString().padStart(2, "0")}:${notificationDateTime.getMinutes().toString().padStart(2, "0")}`;
-
                 // 알림 시간 기준으로 분류
-                if (notificationDate < currentDate || (notificationDate === currentDate && notificationTime < currentTime)) {
-                  allPastNotifications.push(todo);
+                if (notificationDateTime.getTime() < currentDateTime) {
+                  if (!past.includes(todo.id)) past.push(todo.id);
                 } else {
-                  allUpcomingNotifications.push(todo);
+                  if (!upcoming.includes(todo.id)) upcoming.push(todo.id);
                 }
               });
             });
 
-            // 확인 안된 지나간 알림만 필터링 (지나간 알림 읽음 상태 사용)
-            const pastNotifications = allPastNotifications.filter(todo => !readPastNotificationIds.has(todo.id));
-            // 예정된 알림 중 읽지 않은 것만 필터링 (예정된 알림 읽음 상태 사용)
-            const unreadUpcomingNotifications = allUpcomingNotifications.filter(todo => !readUpcomingNotificationIds.has(todo.id));
+            const pastNotifications = notifications.filter(todo => past.includes(todo.id));
+            const upcomingNotifications = notifications.filter(todo => upcoming.includes(todo.id));
 
-            const hasUnreadPast = pastNotifications.length > 0;
+            // 읽지 않은 알림만 필터링 (todo.id를 문자열로 변환하여 비교)
+            const unreadUpcomingNotifications = upcomingNotifications.filter(todo => {
+              const todoId = String(todo.id);
+              const isRead = readUpcomingNotificationIds.has(todoId);
+              return !isRead;
+            });
+            const unreadPastNotifications = pastNotifications.filter(todo => {
+              const todoId = String(todo.id);
+              const isRead = readPastNotificationIds.has(todoId);
+              return !isRead;
+            });
+
             const hasNewUpcoming = unreadUpcomingNotifications.length > 0;
+            const hasUnreadPast = unreadPastNotifications.length > 0;
 
-            // 디버깅: 점 표시 상태 확인
-            if (notifications.length > 0 || hasUnreadPast || hasNewUpcoming) {
-              console.log("[알림 점] 상태:", {
-                전체알림: notifications.length,
-                지나간알림전체: allPastNotifications.length,
-                확인안된지나간알림: pastNotifications.length,
-                예정된알림전체: allUpcomingNotifications.length,
-                확인안된예정된알림: unreadUpcomingNotifications.length,
-                읽음상태크기_지나간: readPastNotificationIds.size,
-                읽음상태크기_예정: readUpcomingNotificationIds.size,
-                읽음상태_지나간: Array.from(readPastNotificationIds),
-                읽음상태_예정: Array.from(readUpcomingNotificationIds),
-                빨간점표시: hasUnreadPast,
-                초록점표시: hasNewUpcoming,
-                현재시간: `${currentDate} ${currentTime}`
-              });
-            }
-
-            // 디버깅: 실제 렌더링 여부 확인
+            // 디버깅: 실제 계산 결과 확인
             if (hasNewUpcoming || hasUnreadPast) {
-              console.log("[알림 점] 렌더링:", {
+              console.log("[알림 점 계산]", {
+                upcomingCount: upcomingNotifications.length,
+                pastCount: pastNotifications.length,
+                unreadUpcomingCount: unreadUpcomingNotifications.length,
+                unreadPastCount: unreadPastNotifications.length,
+                readUpcomingIds: Array.from(readUpcomingNotificationIds),
+                readPastIds: Array.from(readPastNotificationIds),
                 hasNewUpcoming,
-                hasUnreadPast,
-                newUpcomingCount: unreadUpcomingNotifications.length,
-                unreadPastCount: pastNotifications.length
+                hasUnreadPast
               });
             }
+
+            // 둘 다 없으면 null 반환
+            if (!hasNewUpcoming && !hasUnreadPast) return null;
 
             return (
               <>
@@ -2554,367 +1557,121 @@ export function CalendarHomeScreen() {
                       minWidth: '8px',
                       minHeight: '8px'
                     }}
-                    title={`${pastNotifications.length}개의 확인 안된 알림`}
+                    title={`${unreadPastNotifications.length}개의 확인 안된 알림`}
                   />
                 )}
               </>
             );
-          })()}
+          }, [todos, readUpcomingNotificationIds, readPastNotificationIds])}
         </button>
       </div>
 
-      {/* ToDo, Calendar, Routine Tabs */}
-      <div className="bg-white px-4 py-3 border-b border-[#F3F4F6]">
-        <div className="flex gap-2">
-          <button
-            onClick={() => setActiveTab("todo")}
-            className={`flex-1 py-2.5 rounded-lg font-medium transition-colors ${activeTab === "todo"
-              ? "bg-[#FF9B82] text-white"
-              : "bg-[#F9FAFB] text-[#6B7280] hover:bg-[#F3F4F6]"
-              }`}
-          >
-            ToDo
-          </button>
-          <button
-            onClick={() => setActiveTab("calendar")}
-            className={`flex-1 py-2.5 rounded-lg font-medium transition-colors ${activeTab === "calendar"
-              ? "bg-[#FF9B82] text-white"
-              : "bg-[#F9FAFB] text-[#6B7280] hover:bg-[#F3F4F6]"
-              }`}
-          >
-            캘린더
-          </button>
+      {/* Calendar View Selector - 우측 정렬 */}
+      <div className="bg-white px-3 sm:px-4 py-2 sm:py-3 border-b border-[#F3F4F6]">
+        <div className="flex justify-end">
+          <div className="flex gap-1">
+            <button
+              onClick={() => setCalendarView("month")}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${calendarView === "month"
+                ? "bg-[#FF9B82] text-white shadow-md"
+                : "bg-white text-[#6B7280] hover:bg-[#F9FAFB] hover:shadow-sm border border-[#E5E7EB]"
+                }`}
+            >
+              월간
+            </button>
+            <button
+              onClick={() => setCalendarView("week")}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${calendarView === "week"
+                ? "bg-[#FF9B82] text-white shadow-md"
+                : "bg-white text-[#6B7280] hover:bg-[#F9FAFB] hover:shadow-sm border border-[#E5E7EB]"
+                }`}
+            >
+              주간
+            </button>
+            <button
+              onClick={() => setCalendarView("day")}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${calendarView === "day"
+                ? "bg-[#FF9B82] text-white shadow-md"
+                : "bg-white text-[#6B7280] hover:bg-[#F9FAFB] hover:shadow-sm border border-[#E5E7EB]"
+                }`}
+            >
+              일간
+            </button>
+          </div>
         </div>
       </div>
 
+      {/* 데스크톱 레이아웃: 좌측 사이드바 + 중앙 캘린더 + 우측 일정 리스트 */}
+      {!isMobile ? (
+        <div className="flex-1 flex overflow-hidden">
+          {/* 좌측 사이드바 - 프로필 메뉴 */}
+          <aside className="w-64 flex-shrink-0">
+            {renderProfileMenu()}
+          </aside>
 
-      {/* Notification Panel */}
-      <NotificationPanel
-        isOpen={showNotificationPanel && !showTodoDetailFromNotification}
-        onClose={() => {
-          setShowNotificationPanel(false);
-          setShowTodoDetailFromNotification(false);
-        }}
-        todos={todos}
-        readNotificationIds={readNotificationIds}
-        readUpcomingNotificationIds={readUpcomingNotificationIds}
-        readPastNotificationIds={readPastNotificationIds}
-        onMarkAsRead={(todoId, notificationType) => {
-          if (notificationType === 'upcoming') {
-            setReadUpcomingNotificationIds(prev => new Set([...prev, todoId]));
-          } else {
-            setReadPastNotificationIds(prev => new Set([...prev, todoId]));
-          }
-        }}
-        onTodoClick={(todoId) => {
-          setShowTodoDetailFromNotification(true);
-          setSelectedTodoForDetail(todoId);
-        }}
-      />
-
-      {/* Timeline ToDo List */}
-      <div className="flex-1 overflow-auto bg-white relative">
-        {/* Profile Menu Dropdown */}
-        {showProfileMenu && (
-          <div className="absolute top-4 left-4 right-4 bg-white rounded-2xl shadow-2xl z-50 overflow-hidden">
-            {/* Header with Close Button */}
-            <div className="relative">
-              {/* User Info Section */}
-              <div className="px-5 py-4 bg-gradient-to-r from-[#FFF0EB] to-[#FFE8E0] border-b border-[#FFD4C8]">
-                <div className="space-y-3">
-                  {/* Profile Emoji */}
-                  <div className="flex items-center justify-center mb-2">
-                    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82] flex items-center justify-center">
-                      <span className="text-4xl">{selectedEmoji}</span>
-                    </div>
-                  </div>
-                  {/* User Name */}
-                  <div className="flex items-center justify-center">
-                    <span className="text-base font-medium text-[#1F2937]">{userName}</span>
-                  </div>
-                  {/* Email */}
-                  <div className="flex items-center justify-center">
-                    <span className="text-sm text-[#6B7280]">{userEmail}</span>
-                  </div>
-                </div>
-              </div>
-              {/* Close Button */}
-              <button
-                onClick={() => setShowProfileMenu(false)}
-                className="absolute top-3 right-3 p-1.5 bg-white/80 hover:bg-white rounded-full transition-colors shadow-sm"
-                aria-label="닫기"
-              >
-                <X size={18} className="text-[#6B7280]" />
-              </button>
-            </div>
-
-            {/* Menu Items */}
-            <div className="py-2">
-              <button
-                onClick={() => {
-                  setShowProfileMenu(false);
-                  setShowMyPageScreen(true);
-                }}
-                className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <User size={20} className="text-[#6B7280]" />
-                  <span className="text-[#1F2937]">마이페이지</span>
-                </div>
-                <ChevronRight size={18} className="text-[#9CA3AF]" />
-              </button>
-
-              <button
-                onClick={() => {
-                  setShowProfileMenu(false);
-                  setShowProfileManagementScreen(true);
-                }}
-                className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <Users size={20} className="text-[#6B7280]" />
-                  <span className="text-[#1F2937]">프로필 관리</span>
-                </div>
-                <ChevronRight size={18} className="text-[#9CA3AF]" />
-              </button>
-
-              <button
-                onClick={() => {
-                  setShowProfileMenu(false);
-                  setShowSettingsScreen(true);
-                }}
-                className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <Settings size={20} className="text-[#6B7280]" />
-                  <span className="text-[#1F2937]">설정</span>
-                </div>
-                <ChevronRight size={18} className="text-[#9CA3AF]" />
-              </button>
-
-              <button
-                onClick={() => {
-                  setShowProfileMenu(false);
-                  setShowCommunityScreen(true);
-                }}
-                className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <Users size={20} className="text-[#6B7280]" />
-                  <span className="text-[#1F2937]">커뮤니티</span>
-                </div>
-                <ChevronRight size={18} className="text-[#9CA3AF]" />
-              </button>
-
-              <button
-                onClick={() => {
-                  setShowProfileMenu(false);
-                  toast.info("고객센터로 이동합니다.");
-                }}
-                className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <HelpCircle size={20} className="text-[#6B7280]" />
-                  <span className="text-[#1F2937]">고객센터</span>
-                </div>
-                <ChevronRight size={18} className="text-[#9CA3AF]" />
-              </button>
-
-              <button
-                onClick={() => {
-                  setShowProfileMenu(false);
-                  toast.info("사용설명서를 열었습니다.");
-                }}
-                className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <FileText size={20} className="text-[#6B7280]" />
-                  <span className="text-[#1F2937]">사용설명서</span>
-                </div>
-                <ChevronRight size={18} className="text-[#9CA3AF]" />
-              </button>
-            </div>
-
-            {/* Divider */}
-            <div className="h-2 bg-[#F3F4F6]" />
-
-            {/* Logout */}
-            <button
-              onClick={async () => {
-                try {
-                  setShowProfileMenu(false);
-
-                  // 백엔드에 로그아웃 요청 (선택사항)
-                  try {
-                    await apiClient.logout();
-                  } catch (error) {
-                    console.error('Logout API error:', error);
-                    // API 호출 실패해도 로컬 로그아웃은 진행
-                  }
-
-                  // 로컬 스토리지에서 토큰 삭제
-                  localStorage.removeItem('access_token');
-                  localStorage.removeItem('refresh_token');
-                  localStorage.removeItem('remember_me');
-
-                  toast.success("로그아웃 되었습니다.");
-
-                  // 페이지 리로드하여 로그인 화면으로 전환
-                  setTimeout(() => {
-                    window.location.href = '/';
-                  }, 500);
-                } catch (error) {
-                  console.error('Logout error:', error);
-                  toast.error("로그아웃 중 오류가 발생했습니다.");
-                }
-              }}
-              className="w-full px-5 py-3.5 flex items-center gap-3 hover:bg-[#FEF2F2] transition-colors"
-            >
-              <LogOut size={20} className="text-[#EF4444]" />
-              <span className="text-[#EF4444]">로그아웃</span>
-            </button>
-          </div>
-        )}
-
-        <div className="px-4 py-4">
-          {/* Calendar View */}
-          {activeTab === "calendar" && (
-            <div className="space-y-4">
-              {/* Calendar View Selector */}
-              <div className="flex gap-2 mb-4">
-                <button
-                  onClick={() => setCalendarView("month")}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${calendarView === "month"
-                    ? "bg-[#FF9B82] text-white"
-                    : "bg-[#F9FAFB] text-[#6B7280] hover:bg-[#F3F4F6]"
-                    }`}
-                >
-                  월간
-                </button>
-                <button
-                  onClick={() => setCalendarView("week")}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${calendarView === "week"
-                    ? "bg-[#FF9B82] text-white"
-                    : "bg-[#F9FAFB] text-[#6B7280] hover:bg-[#F3F4F6]"
-                    }`}
-                >
-                  주간
-                </button>
-                <button
-                  onClick={() => setCalendarView("day")}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${calendarView === "day"
-                    ? "bg-[#FF9B82] text-white"
-                    : "bg-[#F9FAFB] text-[#6B7280] hover:bg-[#F3F4F6]"
-                    }`}
-                >
-                  일간
-                </button>
-              </div>
-
-              {/* Month Calendar */}
+          {/* 중앙 캘린더 영역 - 스크롤 없이 한눈에 보이도록 */}
+          <div className="flex-1 flex flex-col overflow-hidden bg-white">
+            <div className="flex-1 overflow-auto p-6">
+              {/* 캘린더 표시 */}
               {calendarView === "month" && (
                 <>
-                  <MonthCalendar
-                    todos={todos}
-                    selectedDate={selectedDate}
-                    onDateSelect={(date) => {
-                      setSelectedDate(date);
-                    }}
-                    onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
-                  />
-
-                  {/* Selected Date Todos */}
-                  <div className="pt-4 border-t border-[#F3F4F6]">
-                    <h3 className="font-semibold text-[#1F2937] mb-3 px-1">
-                      일정
-                    </h3>
-                    <div className="space-y-2">
-                      {(selectedDate ? (() => {
-                        // 선택된 날짜의 일정 필터링 (기간 일정 포함)
-                        const selectedDateObj = new Date(selectedDate);
-                        selectedDateObj.setHours(0, 0, 0, 0);
-
-                        return todos.filter(t => {
-                          if (t.isRoutine || !t.date) return false;
-
-                          // 시작일과 동일한 경우
-                          if (t.date === selectedDate) return true;
-
-                          // 기간 일정인 경우: 시작일과 종료일 사이에 포함되는지 확인
-                          if (t.endDate && t.endDate !== t.date) {
-                            const startDate = new Date(t.date);
-                            const endDate = new Date(t.endDate);
-
-                            startDate.setHours(0, 0, 0, 0);
-                            endDate.setHours(0, 0, 0, 0);
-
-                            return selectedDateObj >= startDate && selectedDateObj <= endDate;
-                          }
-
-                          return false;
-                        }).sort((a, b) => a.time.localeCompare(b.time));
-                      })() : displayTodos).map((todo) => (
-                        <div
-                          key={todo.id}
-                          className={`${getCategoryColor(todo.category)} border-l-4 rounded-lg p-3 cursor-pointer hover:shadow-sm transition-all`}
-                          onClick={() => setSelectedTodoForDetail(todo.id)}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2">
-                                <div
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleTodoComplete(todo.id);
-                                  }}
-                                  className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer hover:scale-110 transition-transform ${todo.completed
-                                    ? "bg-[#FF9B82] border-[#FF9B82]"
-                                    : "border-[#D1D5DB] bg-white hover:border-[#FF9B82]"
-                                    }`}
-                                >
-                                  {todo.completed && (
-                                    <Check size={12} className="text-white" strokeWidth={3} />
-                                  )}
-                                </div>
-                                <h4
-                                  className={`text-sm font-medium ${todo.completed
-                                    ? "line-through text-[#9CA3AF]"
-                                    : "text-[#1F2937]"
-                                    }`}
-                                >
-                                  {todo.title}
-                                </h4>
-                              </div>
-                              <div className="flex items-center gap-2 mt-1 ml-6">
-                                <span className="text-xs text-[#6B7280]">
-                                  {todo.isAllDay
-                                    ? '하루종일'
-                                    : todo.endDate && todo.endDate !== todo.date
-                                      ? `${todo.date} ~ ${todo.endDate}`
-                                      : todo.startTime && todo.endTime
-                                        ? `${todo.startTime} ~ ${todo.endTime}`
-                                        : todo.time
-                                          ? `${todo.time} • ${formatDuration(todo.duration || 0)}`
-                                          : ''}
-                                </span>
-                                <span className="text-xs text-[#9CA3AF] bg-white px-2 py-0.5 rounded-full">
-                                  {todo.category}
-                                </span>
-                              </div>
+                  {/* 프로필 선택 영역 */}
+                  <div className="bg-white px-4 pt-4 pb-3 border-b border-[#F3F4F6] mb-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-semibold text-[#1F2937]">프로필</h4>
+                    </div>
+                    {/* 가로 스크롤 가능한 프로필 목록 */}
+                    <div className="flex gap-3 overflow-x-auto pt-2 pb-2 -mx-4 px-4 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
+                      {familyMembers.map((member) => {
+                        const isSelected = selectedMembers.includes(member.id);
+                        return (
+                          <button
+                            key={member.id}
+                            onClick={() => toggleMemberSelection(member.id)}
+                            className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all min-w-[80px] flex-shrink-0 ${isSelected
+                              ? "bg-[#FF9B82] shadow-md scale-100"
+                              : "bg-[#F9FAFB] hover:bg-[#F3F4F6]"
+                              }`}
+                          >
+                            <div
+                              className={`w-10 h-10 rounded-full flex items-center justify-center text-xl transition-all relative ${isSelected
+                                ? "bg-white"
+                                : "bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82]"
+                                }`}
+                            >
+                              {member.emoji}
                             </div>
-                          </div>
-                        </div>
-                      ))}
+                            <span
+                              className={`text-xs font-medium ${isSelected ? "text-white" : "text-[#6B7280]"
+                                }`}
+                            >
+                              {member.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-center">
+                    <div className="w-full max-w-4xl">
+                      <MonthCalendar
+                        todos={todos}
+                        familyMembers={familyMembers}
+                        selectedMembers={selectedMembers}
+                        selectedDate={selectedDate}
+                        onDateSelect={(date) => {
+                          setSelectedDate(date);
+                        }}
+                        onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
+                      />
                     </div>
                   </div>
                 </>
               )}
-
-              {/* Week Calendar */}
               {calendarView === "week" && (
                 <>
                   {/* 프로필 선택 영역 */}
-                  <div className="bg-white px-4 pt-4 pb-3 border-b border-[#F3F4F6]">
+                  <div className="bg-white px-4 pt-4 pb-3 border-b border-[#F3F4F6] mb-4">
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="font-semibold text-[#1F2937]">프로필</h4>
                     </div>
@@ -2954,100 +1711,1234 @@ export function CalendarHomeScreen() {
                     todos={todos}
                     familyMembers={familyMembers}
                     selectedMembers={selectedMembers}
+                    selectedDate={selectedDate}
+                    onDateSelect={(date) => setSelectedDate(date)}
+                    onTodoUpdate={handleTodoUpdate}
+                    onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
+                  />
+                  {/* 선택된 날짜의 할일 리스트 */}
+                  {selectedDate && (
+                    <div className="px-4 py-4 bg-white border-t border-[#E5E7EB]">
+                      <h3 className="text-lg font-bold text-[#1F2937] mb-4">
+                        {new Date(selectedDate).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' })}
+                      </h3>
+                      <div className="space-y-3">
+                        {(() => {
+                          // 프로필 필터링 적용
+                          const selectedDateTodos = todos.filter(t => {
+                            if (!t.date || t.date !== selectedDate) return false;
+                            
+                            // 프로필 필터링 (assignedMemberIds 지원)
+                            if (selectedMembers.length > 0) {
+                              const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                              const hasMemberId = t.memberId;
+                              
+                              if (hasAssignedMembers) {
+                                const assignedIds = t.assignedMemberIds.map((id: any) => String(id));
+                                const selectedIds = selectedMembers.map((id: string) => String(id));
+                                const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+                                if (!hasSelectedMember) {
+                                  return false;
+                                }
+                              } else if (hasMemberId && !selectedMembers.includes(String(t.memberId))) {
+                                return false;
+                              }
+                            } else {
+                              // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+                              const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                              if (t.memberId || hasAssignedMembers) {
+                                return false;
+                              }
+                            }
+                            
+                            return true;
+                          });
+                          return selectedDateTodos.length > 0 ? (
+                            selectedDateTodos.map((todo) => (
+                              <div
+                                key={todo.id}
+                                className={`${getCategoryColor(todo.category)} border-l-4 rounded-lg p-3 cursor-pointer hover:shadow-md transition-all`}
+                                onClick={() => setSelectedTodoForDetail(todo.id)}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleTodoComplete(todo.id);
+                                    }}
+                                    className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer hover:scale-110 transition-transform ${todo.completed
+                                      ? "bg-[#FF9B82] border-[#FF9B82]"
+                                      : "border-[#D1D5DB] bg-white hover:border-[#FF9B82]"
+                                      }`}
+                                  >
+                                    {todo.completed && (
+                                      <Check size={12} className="text-white" strokeWidth={3} />
+                                    )}
+                                  </div>
+                                  <h4 className={`text-sm font-medium truncate ${todo.completed
+                                    ? "line-through text-[#9CA3AF]"
+                                    : "text-[#1F2937]"
+                                    }`}>
+                                    {todo.title}
+                                  </h4>
+                                </div>
+                                {todo.time && (
+                                  <div className="mt-1 ml-6">
+                                    <span className="text-xs text-[#6B7280]">{todo.time}</span>
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-center py-8 text-[#9CA3AF]">
+                              <Calendar size={32} className="mx-auto mb-2 opacity-50" />
+                              <p className="text-sm">선택한 날짜에 일정이 없습니다</p>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+              {calendarView === "day" && (
+                <>
+                  {/* 프로필 선택 영역 */}
+                  <div className="bg-white px-4 pt-4 pb-3 border-b border-[#F3F4F6] mb-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-semibold text-[#1F2937]">프로필</h4>
+                    </div>
+                    {/* 가로 스크롤 가능한 프로필 목록 */}
+                    <div className="flex gap-3 overflow-x-auto pt-2 pb-2 -mx-4 px-4 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
+                      {familyMembers.map((member) => {
+                        const isSelected = selectedMembers.includes(member.id);
+                        return (
+                          <button
+                            key={member.id}
+                            onClick={() => toggleMemberSelection(member.id)}
+                            className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all min-w-[80px] flex-shrink-0 ${isSelected
+                              ? "bg-[#FF9B82] shadow-md scale-100"
+                              : "bg-[#F9FAFB] hover:bg-[#F3F4F6]"
+                              }`}
+                          >
+                            <div
+                              className={`w-10 h-10 rounded-full flex items-center justify-center text-xl transition-all relative ${isSelected
+                                ? "bg-white"
+                                : "bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82]"
+                                }`}
+                            >
+                              {member.emoji}
+                            </div>
+                            <span
+                              className={`text-xs font-medium ${isSelected ? "text-white" : "text-[#6B7280]"
+                                }`}
+                            >
+                              {member.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <DayCalendar
+                    todos={todos}
+                    familyMembers={familyMembers}
+                    selectedMembers={selectedMembers}
+                    selectedDate={selectedDate}
+                    onDateChange={(date) => setSelectedDate(date)}
                     onTodoUpdate={handleTodoUpdate}
                     onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
                   />
                 </>
               )}
-
-              {/* Day Calendar */}
-              {calendarView === "day" && (
-                <DayCalendar
-                  todos={todos}
-                  onTodoUpdate={handleTodoUpdate}
-                  onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
-                />
-              )}
             </div>
-          )}
+          </div>
 
-          {/* ToDo List */}
-          {activeTab === "todo" && (
-            <>
-              <div className="mb-4 px-1">
-                <h2 className="text-lg font-bold text-[#1F2937]">
-                  {new Date().getMonth() + 1}월 {new Date().getDate()}일
-                  <span className="ml-2 text-base font-normal text-[#6B7280]">
-                    {['일', '월', '화', '수', '목', '금', '토'][new Date().getDay()]}요일
-                  </span>
-                </h2>
-              </div>
-              <div className="space-y-3">
-                {displayTodos.length === 0 ? (
-                  <div className="text-center py-8 text-[#9CA3AF]">
-                    <p className="text-sm">오늘 예정된 일정이 없습니다.</p>
+          {/* 우측 일정 리스트 */}
+          <aside className="w-80 flex-shrink-0 bg-white border-l border-[#E5E7EB] overflow-y-auto">
+            <div className="p-6">
+              <h3 className="text-lg font-bold text-[#1F2937] mb-4">
+                {'ToDo'}
+              </h3>
+              {selectedDate ? (
+                <div className="space-y-3">
+                  <div className="text-sm font-medium text-[#6B7280] mb-3">
+                    {new Date(selectedDate).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' })}의 일정
                   </div>
-                ) : (
-                  displayTodos.map((todo) => (
-                    <div
-                      key={todo.id}
-                      className={`${getCategoryColor(todo.category)} border-l-4 rounded-lg p-4 hover:shadow-sm transition-all cursor-pointer`}
-                      onClick={() => setSelectedTodoForDetail(todo.id)}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <div
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleTodoComplete(todo.id);
-                              }}
-                              className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer hover:scale-110 transition-transform ${todo.completed
-                                ? "bg-[#FF9B82] border-[#FF9B82]"
-                                : "border-[#D1D5DB] bg-white hover:border-[#FF9B82]"
-                                }`}
-                            >
-                              {todo.completed && (
-                                <Check size={14} className="text-white" strokeWidth={3} />
-                              )}
+                  {getSelectedDateTodos().length > 0 ? (
+                    getSelectedDateTodos().map((todo) => (
+                      <div
+                        key={todo.id}
+                        className={`${getCategoryColor(todo.category)} border-l-4 rounded-lg p-4 cursor-pointer hover:shadow-md transition-all`}
+                        onClick={() => setSelectedTodoForDetail(todo.id)}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleTodoComplete(todo.id);
+                                }}
+                                className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer hover:scale-110 transition-transform ${todo.completed
+                                  ? "bg-[#FF9B82] border-[#FF9B82]"
+                                  : "border-[#D1D5DB] bg-white hover:border-[#FF9B82]"
+                                  }`}
+                              >
+                                {todo.completed && (
+                                  <Check size={14} className="text-white" strokeWidth={3} />
+                                )}
+                              </div>
+                              <h4
+                                className={`text-base font-semibold ${todo.completed
+                                  ? "line-through text-[#9CA3AF]"
+                                  : "text-[#1F2937]"
+                                  }`}
+                              >
+                                {todo.title}
+                              </h4>
                             </div>
-                            <h4
-                              className={`font-medium ${todo.completed
-                                ? "line-through text-[#9CA3AF]"
-                                : "text-[#1F2937]"
-                                }`}
-                            >
-                              {todo.title}
-                            </h4>
-                          </div>
-                          <div className="flex items-center gap-2 mt-2 ml-7">
-                            <span className="text-xs text-[#6B7280]">
-                              {todo.isAllDay
-                                ? '하루종일'
-                                : todo.endDate && todo.endDate !== todo.date
-                                  ? `${todo.date} ~ ${todo.endDate}`
-                                  : todo.startTime && todo.endTime
-                                    ? `${todo.startTime} ~ ${todo.endTime}`
-                                    : todo.time
-                                      ? `${todo.time} • ${formatDuration(todo.duration || 0)}`
-                                      : ''}
-                            </span>
-                            <span className="text-xs text-[#9CA3AF] bg-white px-2 py-0.5 rounded-full">
-                              {todo.category}
-                            </span>
+                            <div className="flex items-center gap-2 mt-2 ml-7">
+                              <span className="text-sm text-[#6B7280]">
+                                {todo.isAllDay
+                                  ? '하루종일'
+                                  : todo.endDate && todo.endDate !== todo.date
+                                    ? `${todo.date} ~ ${todo.endDate}`
+                                    : todo.startTime && todo.endTime
+                                      ? `${todo.startTime} ~ ${todo.endTime}`
+                                      : todo.time
+                                        ? `${todo.time} • ${formatDuration(todo.duration || 0)}`
+                                        : ''}
+                              </span>
+                            </div>
+                            {todo.category && (
+                              <div className="mt-2 ml-7">
+                                <span className="text-xs text-[#9CA3AF] bg-white px-2 py-1 rounded-full">
+                                  {todo.category}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-12 text-[#9CA3AF]">
+                      <Calendar size={48} className="mx-auto mb-3 opacity-50" />
+                      <p>선택한 날짜에 일정이 없습니다</p>
                     </div>
-                  ))
-                )}
+                  )}
+                </div>
+              ) : (
+                /* 오늘의 할 일 리스트 */
+                <div className="space-y-3">
+                  <div className="text-sm font-medium text-[#6B7280] mb-3">오늘의 할 일</div>
+                  {(() => {
+                    const todayTodos = todos.filter(t => !t.completed && !t.isRoutine && t.date === currentDate).slice(0, 10);
+                    return (
+                      <>
+                        {todayTodos.map((todo) => (
+                          <div
+                            key={todo.id}
+                            className={`${getCategoryColor(todo.category)} border-l-4 rounded-lg p-4 cursor-pointer hover:shadow-md transition-all`}
+                            onClick={() => setSelectedTodoForDetail(todo.id)}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <div
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleTodoComplete(todo.id);
+                                    }}
+                                    className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer hover:scale-110 transition-transform ${todo.completed
+                                      ? "bg-[#FF9B82] border-[#FF9B82]"
+                                      : "border-[#D1D5DB] bg-white hover:border-[#FF9B82]"
+                                      }`}
+                                  >
+                                    {todo.completed && (
+                                      <Check size={14} className="text-white" strokeWidth={3} />
+                                    )}
+                                  </div>
+                                  <h4
+                                    className={`text-base font-semibold ${todo.completed
+                                      ? "line-through text-[#9CA3AF]"
+                                      : "text-[#1F2937]"
+                                      }`}
+                                  >
+                                    {todo.title}
+                                  </h4>
+                                </div>
+                                <div className="flex items-center gap-2 mt-2 ml-7">
+                                  <span className="text-sm text-[#6B7280]">
+                                    {todo.isAllDay
+                                      ? '하루종일'
+                                      : todo.endDate && todo.endDate !== todo.date
+                                        ? `${todo.date} ~ ${todo.endDate}`
+                                        : todo.startTime && todo.endTime
+                                          ? `${todo.startTime} ~ ${todo.endTime}`
+                                          : todo.time
+                                            ? `${todo.time} • ${formatDuration(todo.duration || 0)}`
+                                            : ''}
+                                  </span>
+                                </div>
+                                {todo.category && (
+                                  <div className="mt-2 ml-7">
+                                    <span className="text-xs text-[#9CA3AF] bg-white px-2 py-1 rounded-full">
+                                      {todo.category}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {todayTodos.length === 0 && (
+                          <div className="text-center py-12 text-[#9CA3AF]">
+                            <Check size={48} className="mx-auto mb-3 opacity-50" />
+                            <p className="text-sm">모든 할 일을 완료했습니다!</p>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          </aside>
+        </div>
+      ) : (
+        /* 모바일/기타 뷰: 기존 레이아웃 */
+        <div className="flex-1 overflow-auto bg-white relative">
+          {/* Profile Menu Dropdown - 모바일에서만 */}
+          {showProfileMenu && isMobile && (
+            <div className="absolute top-4 left-4 right-4 bg-white rounded-2xl shadow-2xl z-50 overflow-hidden">
+              {/* Header with Close Button */}
+              <div className="relative">
+                {/* User Info Section */}
+                <div className="px-5 py-4 bg-gradient-to-r from-[#FFF0EB] to-[#FFE8E0] border-b border-[#FFD4C8]">
+                  <div className="space-y-3">
+                    {/* Profile Emoji */}
+                    <div className="flex items-center justify-center mb-2">
+                      <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82] flex items-center justify-center">
+                        <span className="text-4xl">{selectedEmoji}</span>
+                      </div>
+                    </div>
+                    {/* User Name */}
+                    <div className="flex items-center justify-center">
+                      <span className="text-base font-medium text-[#1F2937]">{userName}</span>
+                    </div>
+                    {/* Email */}
+                    <div className="flex items-center justify-center">
+                      <span className="text-sm text-[#6B7280]">{userEmail}</span>
+                    </div>
+                  </div>
+                </div>
+                {/* Close Button */}
+                <button
+                  onClick={() => setShowProfileMenu(false)}
+                  className="absolute top-3 right-3 p-1.5 bg-white/80 hover:bg-white rounded-full transition-colors shadow-sm"
+                  aria-label="닫기"
+                >
+                  <X size={18} className="text-[#6B7280]" />
+                </button>
               </div>
 
-            </>
+              {/* Menu Items */}
+              <div className="py-2">
+                <button
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    setShowMyPageScreen(true);
+                  }}
+                  className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <User size={20} className="text-[#6B7280]" />
+                    <span className="text-[#1F2937]">마이페이지</span>
+                  </div>
+                  <ChevronRight size={18} className="text-[#9CA3AF]" />
+                </button>
+
+                <button
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    setShowProfileManagementScreen(true);
+                  }}
+                  className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <Users size={20} className="text-[#6B7280]" />
+                    <span className="text-[#1F2937]">프로필 관리</span>
+                  </div>
+                  <ChevronRight size={18} className="text-[#9CA3AF]" />
+                </button>
+
+                <button
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    setShowSettingsScreen(true);
+                  }}
+                  className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <Settings size={20} className="text-[#6B7280]" />
+                    <span className="text-[#1F2937]">설정</span>
+                  </div>
+                  <ChevronRight size={18} className="text-[#9CA3AF]" />
+                </button>
+
+                <button
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    setShowCommunityScreen(true);
+                  }}
+                  className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <Users size={20} className="text-[#6B7280]" />
+                    <span className="text-[#1F2937]">커뮤니티</span>
+                  </div>
+                  <ChevronRight size={18} className="text-[#9CA3AF]" />
+                </button>
+
+                <button
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    setShowCustomerService(true);
+                  }}
+                  className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <HelpCircle size={20} className="text-[#6B7280]" />
+                    <span className="text-[#1F2937]">고객센터</span>
+                  </div>
+                  <ChevronRight size={18} className="text-[#9CA3AF]" />
+                </button>
+
+                <button
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    setShowUserGuide(true);
+                  }}
+                  className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <FileText size={20} className="text-[#6B7280]" />
+                    <span className="text-[#1F2937]">사용설명서</span>
+                  </div>
+                  <ChevronRight size={18} className="text-[#9CA3AF]" />
+                </button>
+              </div>
+
+              {/* Divider */}
+              <div className="h-2 bg-[#F3F4F6]" />
+
+              {/* Logout */}
+              <button
+                onClick={async () => {
+                  try {
+                    setShowProfileMenu(false);
+
+                    // 백엔드에 로그아웃 요청 (선택사항)
+                    try {
+                      await apiClient.logout();
+                    } catch (error) {
+                      console.error('Logout API error:', error);
+                      // API 호출 실패해도 로컬 로그아웃은 진행
+                    }
+
+                    // 로컬 스토리지에서 토큰 삭제
+                    localStorage.removeItem('access_token');
+                    localStorage.removeItem('refresh_token');
+                    localStorage.removeItem('remember_me');
+
+                    toast.success("로그아웃 되었습니다.");
+
+                    // 페이지 리로드하여 로그인 화면으로 전환
+                    setTimeout(() => {
+                      window.location.href = '/';
+                    }, 500);
+                  } catch (error) {
+                    console.error('Logout error:', error);
+                    toast.error("로그아웃 중 오류가 발생했습니다.");
+                  }
+                }}
+                className="w-full px-5 py-3.5 flex items-center gap-3 hover:bg-[#FEF2F2] transition-colors"
+              >
+                <LogOut size={20} className="text-[#EF4444]" />
+                <span className="text-[#EF4444]">로그아웃</span>
+              </button>
+            </div>
           )}
 
+          <div className="px-4 py-4">
+            {/* Calendar View */}
+
+            {/* Month Calendar - 모바일 뷰에서만 표시 */}
+            {calendarView === "month" && isMobile && (
+              <>
+                {/* 프로필 선택 영역 */}
+                <div className="bg-white px-4 pt-4 pb-3 border-b border-[#F3F4F6] mb-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-semibold text-[#1F2937]">프로필</h4>
+                  </div>
+                  {/* 가로 스크롤 가능한 프로필 목록 */}
+                  <div className="flex gap-3 overflow-x-auto pt-2 pb-2 -mx-4 px-4 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
+                    {familyMembers.map((member) => {
+                      const isSelected = selectedMembers.includes(member.id);
+                      return (
+                        <button
+                          key={member.id}
+                          onClick={() => toggleMemberSelection(member.id)}
+                          className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all min-w-[80px] flex-shrink-0 ${isSelected
+                            ? "bg-[#FF9B82] shadow-md scale-100"
+                            : "bg-[#F9FAFB] hover:bg-[#F3F4F6]"
+                            }`}
+                        >
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center text-xl transition-all relative ${isSelected
+                              ? "bg-white"
+                              : "bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82]"
+                              }`}
+                          >
+                            {member.emoji}
+                          </div>
+                          <span
+                            className={`text-xs font-medium ${isSelected ? "text-white" : "text-[#6B7280]"
+                              }`}
+                          >
+                            {member.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <MonthCalendar
+                  todos={todos}
+                  familyMembers={familyMembers}
+                  selectedMembers={selectedMembers}
+                  selectedDate={selectedDate}
+                  onDateSelect={(date) => {
+                    setSelectedDate(date);
+                  }}
+                  onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
+                />
+
+                {/* Selected Date Todos */}
+                <div className="pt-4 border-t border-[#F3F4F6]">
+                  <h3 className="font-semibold text-[#1F2937] mb-3 px-1">
+                    일정
+                  </h3>
+                  <div className="space-y-2">
+                    {(selectedDate ? (() => {
+                      // 선택된 날짜의 일정 필터링 (기간 일정 포함)
+                      const selectedDateObj = new Date(selectedDate);
+                      selectedDateObj.setHours(0, 0, 0, 0);
+
+                      return todos.filter(t => {
+                        if (t.isRoutine || !t.date) return false;
+
+                        // 프로필 필터링 (assignedMemberIds 지원)
+                        if (selectedMembers.length > 0) {
+                          // 프로필이 선택되어 있는 경우:
+                          // - 담당 프로필이 있는 일정: 선택된 프로필에 포함되어야 함
+                          // - 담당 프로필이 없는 일정: 표시 (프로필이 선택되어 있어도 담당 프로필 없는 일정은 표시)
+                          const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                          const hasMemberId = t.memberId;
+                          
+                          if (hasAssignedMembers) {
+                            // assignedMemberIds 중 하나라도 선택된 프로필에 포함되어야 함
+                            const assignedIds = t.assignedMemberIds.map((id: any) => String(id));
+                            const selectedIds = selectedMembers.map((id: string) => String(id));
+                            const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+                            if (!hasSelectedMember) {
+                              return false;
+                            }
+                          } else if (hasMemberId && !selectedMembers.includes(String(t.memberId))) {
+                            return false;
+                          }
+                          // 담당 프로필이 없으면 표시
+                        } else {
+                          // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+                          const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                          if (t.memberId || hasAssignedMembers) {
+                            return false;
+                          }
+                        }
+
+                        // 시작일과 동일한 경우
+                        if (t.date === selectedDate) return true;
+
+                        // 기간 일정인 경우: 시작일과 종료일 사이에 포함되는지 확인
+                        if (t.endDate && t.endDate !== t.date) {
+                          const startDate = new Date(t.date);
+                          const endDate = new Date(t.endDate);
+
+                          startDate.setHours(0, 0, 0, 0);
+                          endDate.setHours(0, 0, 0, 0);
+
+                          return selectedDateObj >= startDate && selectedDateObj <= endDate;
+                        }
+
+                        return false;
+                      }).sort((a, b) => a.time.localeCompare(b.time));
+                    })() : displayTodos).map((todo) => (
+                      <div
+                        key={todo.id}
+                        className={`${getCategoryColor(todo.category)} border-l-4 rounded-lg p-3 cursor-pointer hover:shadow-sm transition-all`}
+                        onClick={() => setSelectedTodoForDetail(todo.id)}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleTodoComplete(todo.id);
+                                }}
+                                className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer hover:scale-110 transition-transform ${todo.completed
+                                  ? "bg-[#FF9B82] border-[#FF9B82]"
+                                  : "border-[#D1D5DB] bg-white hover:border-[#FF9B82]"
+                                  }`}
+                              >
+                                {todo.completed && (
+                                  <Check size={12} className="text-white" strokeWidth={3} />
+                                )}
+                              </div>
+                              <h4
+                                className={`text-sm font-medium ${todo.completed
+                                  ? "line-through text-[#9CA3AF]"
+                                  : "text-[#1F2937]"
+                                  }`}
+                              >
+                                {todo.title}
+                              </h4>
+                            </div>
+                            <div className="flex items-center gap-2 mt-1 ml-6">
+                              <span className="text-xs text-[#6B7280]">
+                                {todo.isAllDay
+                                  ? '하루종일'
+                                  : todo.endDate && todo.endDate !== todo.date
+                                    ? `${todo.date} ~ ${todo.endDate}`
+                                    : todo.startTime && todo.endTime
+                                      ? `${todo.startTime} ~ ${todo.endTime}`
+                                      : todo.time
+                                        ? `${todo.time} • ${formatDuration(todo.duration || 0)}`
+                                        : ''}
+                              </span>
+                              <span className="text-xs text-[#9CA3AF] bg-white px-2 py-0.5 rounded-full">
+                                {todo.category}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Week Calendar - 모바일 뷰에서만 표시 */}
+            {calendarView === "week" && isMobile && (
+              <>
+                {/* 프로필 선택 영역 */}
+                <div className="bg-white px-4 pt-4 pb-3 border-b border-[#F3F4F6] mb-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-semibold text-[#1F2937]">프로필</h4>
+                  </div>
+                  {/* 가로 스크롤 가능한 프로필 목록 */}
+                  <div className="flex gap-3 overflow-x-auto pt-2 pb-2 -mx-4 px-4 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
+                    {familyMembers.map((member) => {
+                      const isSelected = selectedMembers.includes(member.id);
+                      return (
+                        <button
+                          key={member.id}
+                          onClick={() => toggleMemberSelection(member.id)}
+                          className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all min-w-[80px] flex-shrink-0 ${isSelected
+                            ? "bg-[#FF9B82] shadow-md scale-100"
+                            : "bg-[#F9FAFB] hover:bg-[#F3F4F6]"
+                            }`}
+                        >
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center text-xl transition-all relative ${isSelected
+                              ? "bg-white"
+                              : "bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82]"
+                              }`}
+                          >
+                            {member.emoji}
+                          </div>
+                          <span
+                            className={`text-xs font-medium ${isSelected ? "text-white" : "text-[#6B7280]"
+                              }`}
+                          >
+                            {member.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <WeekCalendar
+                  todos={todos}
+                  familyMembers={familyMembers}
+                  selectedMembers={selectedMembers}
+                  selectedDate={selectedDate}
+                  onDateSelect={(date) => setSelectedDate(date)}
+                  onTodoUpdate={handleTodoUpdate}
+                  onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
+                />
+                {/* 선택된 날짜의 일정 리스트 - 모바일/태블릿 주간 캘린더 아래에 표시 */}
+                {selectedDate && (
+                  <div className="space-y-3 px-4 mt-4">
+                    <h3 className="text-lg font-bold text-[#1F2937] mb-4">
+                      {new Date(selectedDate).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' })} 일정
+                    </h3>
+                    {(() => {
+                      const selectedDateTodos = todos.filter(t => {
+                        if (t.isRoutine || !t.date) return false;
+                        
+                        // 프로필 필터링 (assignedMemberIds 지원)
+                        if (selectedMembers.length > 0) {
+                          // 프로필이 선택되어 있는 경우:
+                          // - 담당 프로필이 있는 일정: 선택된 프로필에 포함되어야 함
+                          // - 담당 프로필이 없는 일정: 표시 (프로필이 선택되어 있어도 담당 프로필 없는 일정은 표시)
+                          const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                          const hasMemberId = t.memberId;
+                          
+                          if (hasAssignedMembers) {
+                            // assignedMemberIds 중 하나라도 선택된 프로필에 포함되어야 함
+                            const assignedIds = t.assignedMemberIds.map((id: any) => String(id));
+                            const selectedIds = selectedMembers.map((id: string) => String(id));
+                            const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+                            if (!hasSelectedMember) {
+                              return false;
+                            }
+                          } else if (hasMemberId && !selectedMembers.includes(String(t.memberId))) {
+                            return false;
+                          }
+                          // 담당 프로필이 없으면 표시
+                        } else {
+                          // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+                          const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                          if (t.memberId || hasAssignedMembers) {
+                            return false;
+                          }
+                        }
+                        
+                        if (t.date === selectedDate) return true;
+                        if (t.endDate && t.date <= selectedDate && t.endDate >= selectedDate) return true;
+                        return false;
+                      });
+                      return selectedDateTodos.length > 0 ? (
+                        selectedDateTodos.map((todo) => (
+                          <div
+                            key={todo.id}
+                            className={`${getCategoryColor(todo.category)} border-l-4 rounded-lg p-3 cursor-pointer hover:shadow-md transition-all`}
+                            onClick={() => setSelectedTodoForDetail(todo.id)}
+                          >
+                            <div className="flex items-center gap-2">
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleTodoComplete(todo.id);
+                                }}
+                                className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer hover:scale-110 transition-transform ${todo.completed
+                                  ? "bg-[#FF9B82] border-[#FF9B82]"
+                                  : "border-[#D1D5DB] bg-white hover:border-[#FF9B82]"
+                                  }`}
+                              >
+                                {todo.completed && (
+                                  <Check size={12} className="text-white" strokeWidth={3} />
+                                )}
+                              </div>
+                              <h4 className={`text-sm font-medium truncate ${todo.completed
+                                ? "line-through text-[#9CA3AF]"
+                                : "text-[#1F2937]"
+                                }`}>
+                                {todo.title}
+                              </h4>
+                            </div>
+                            {todo.time && (
+                              <div className="mt-1 ml-6">
+                                <span className="text-xs text-[#6B7280]">{todo.time}</span>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-center py-8 text-[#9CA3AF]">
+                          <Calendar size={32} className="mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">선택한 날짜에 일정이 없습니다</p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Day Calendar - 모바일 뷰에서만 표시 */}
+            {calendarView === "day" && isMobile && (
+              <div className="flex flex-col gap-4">
+                {/* 프로필 선택 영역 */}
+                <div className="bg-white px-4 pt-4 pb-3 border-b border-[#F3F4F6] mb-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-semibold text-[#1F2937]">프로필</h4>
+                  </div>
+                  {/* 가로 스크롤 가능한 프로필 목록 */}
+                  <div className="flex gap-3 overflow-x-auto pt-2 pb-2 -mx-4 px-4 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
+                    {familyMembers.map((member) => {
+                      const isSelected = selectedMembers.includes(member.id);
+                      return (
+                        <button
+                          key={member.id}
+                          onClick={() => toggleMemberSelection(member.id)}
+                          className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all min-w-[80px] flex-shrink-0 ${isSelected
+                            ? "bg-[#FF9B82] shadow-md scale-100"
+                            : "bg-[#F9FAFB] hover:bg-[#F3F4F6]"
+                            }`}
+                        >
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center text-xl transition-all relative ${isSelected
+                              ? "bg-white"
+                              : "bg-gradient-to-br from-[#FFD4C8] to-[#FF9B82]"
+                              }`}
+                          >
+                            {member.emoji}
+                          </div>
+                          <span
+                            className={`text-xs font-medium ${isSelected ? "text-white" : "text-[#6B7280]"
+                              }`}
+                          >
+                            {member.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* 선택된 날짜의 할 일 리스트 - 캘린더 위에 표시 */}
+                <div className="space-y-3 px-4">
+                  <h3 className="text-lg font-bold text-[#1F2937] mb-4">
+                    {selectedDate
+                      ? new Date(selectedDate).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' }) + ' 일정'
+                      : '오늘의 할 일'}
+                  </h3>
+                  {(() => {
+                    // 선택된 날짜의 일정만 표시 (새로고침 시 오늘 날짜)
+                    const displayDate = selectedDate || currentDate;
+                    const todayTodos = todos.filter(t => {
+                      if (t.isRoutine || !t.date) return false;
+                      
+                      // 프로필 필터링 (assignedMemberIds 지원)
+                      if (selectedMembers.length > 0) {
+                        const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                        const hasMemberId = t.memberId;
+                        
+                        if (hasAssignedMembers) {
+                          const assignedIds = t.assignedMemberIds.map((id: any) => String(id));
+                          const selectedIds = selectedMembers.map((id: string) => String(id));
+                          const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+                          if (!hasSelectedMember) {
+                            return false;
+                          }
+                        } else if (hasMemberId && !selectedMembers.includes(String(t.memberId))) {
+                          return false;
+                        }
+                      } else {
+                        // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+                        const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+                        if (t.memberId || hasAssignedMembers) {
+                          return false;
+                        }
+                      }
+                      
+                      if (t.date === displayDate) return true;
+                      if (t.endDate && t.date <= displayDate && t.endDate >= displayDate) return true;
+                      return false;
+                    }).slice(0, 10);
+                    return (
+                      <>
+                        {todayTodos.map((todo) => (
+                          <div
+                            key={todo.id}
+                            className={`${getCategoryColor(todo.category)} border-l-4 rounded-lg p-3 cursor-pointer hover:shadow-md transition-all`}
+                            onClick={() => setSelectedTodoForDetail(todo.id)}
+                          >
+                            <div className="flex items-center gap-2">
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleTodoComplete(todo.id);
+                                }}
+                                className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer hover:scale-110 transition-transform ${todo.completed
+                                  ? "bg-[#FF9B82] border-[#FF9B82]"
+                                  : "border-[#D1D5DB] bg-white hover:border-[#FF9B82]"
+                                  }`}
+                              >
+                                {todo.completed && (
+                                  <Check size={12} className="text-white" strokeWidth={3} />
+                                )}
+                              </div>
+                              <h4 className={`text-sm font-medium truncate ${todo.completed
+                                ? "line-through text-[#9CA3AF]"
+                                : "text-[#1F2937]"
+                                }`}>
+                                {todo.title}
+                              </h4>
+                            </div>
+                            {todo.time && (
+                              <div className="mt-1 ml-6">
+                                <span className="text-xs text-[#6B7280]">{todo.time}</span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {todayTodos.length === 0 && (
+                          <div className="text-center py-8 text-[#9CA3AF]">
+                            <Check size={32} className="mx-auto mb-2 opacity-50" />
+                            <p className="text-sm">모든 할 일을 완료했습니다!</p>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+                <DayCalendar
+                  todos={todos}
+                  familyMembers={familyMembers}
+                  selectedMembers={selectedMembers}
+                  selectedDate={selectedDate || currentDate}
+                  onDateChange={(date) => setSelectedDate(date)}
+                  onTodoUpdate={handleTodoUpdate}
+                  onTodoClick={(todoId) => setSelectedTodoForDetail(todoId)}
+                />
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Notification Panel */}
+      <NotificationPanel
+        isOpen={showNotificationPanel && !showTodoDetailFromNotification}
+        onClose={() => {
+          setShowNotificationPanel(false);
+          setShowTodoDetailFromNotification(false);
+        }}
+        todos={todos}
+        readNotificationIds={readNotificationIds}
+        readUpcomingNotificationIds={readUpcomingNotificationIds}
+        readPastNotificationIds={readPastNotificationIds}
+        onMarkAsRead={(todoId, notificationType) => {
+          const todoIdStr = String(todoId);
+          if (notificationType === 'upcoming') {
+            setReadUpcomingNotificationIds(prev => new Set([...prev, todoIdStr]));
+          } else {
+            setReadPastNotificationIds(prev => new Set([...prev, todoIdStr]));
+          }
+        }}
+        onTodoClick={(todoId) => {
+          setShowTodoDetailFromNotification(true);
+          setSelectedTodoForDetail(todoId);
+        }}
+      />
+
+      {/* Floating Action Button (Add Todo) */}
+      <button
+        className="fixed w-16 h-16 bg-[#FF9B82] rounded-full shadow-lg flex items-center justify-center text-white hover:bg-[#FF8A6D] transition-all hover:scale-110 z-40 cursor-move select-none"
+        style={{
+          right: `24px`,
+          bottom: `80px`,
+          transform: `translate(${fabPosition.x}px, ${fabPosition.y}px)`,
+        }}
+        aria-label="일정 추가"
+        onMouseDown={handleFabMouseDown}
+        onMouseUp={handleFabMouseUp}
+        onTouchStart={handleFabTouchStart}
+        onTouchEnd={handleFabMouseUp}
+      >
+        <Pencil size={28} strokeWidth={2.5} />
+      </button>
+
+      {/* Input Method Modal */}
+      {showInputMethodModal && (
+        <InputMethodModal
+          isOpen={showInputMethodModal}
+          onClose={() => {
+            setShowInputMethodModal(false);
+            // InputMethodModal을 닫을 때도 입력값 초기화
+            setExtractedTodoInfo(null);
+            setInputMethodInitialMode('voice'); // 기본값으로 리셋
+          }}
+          onSelect={handleInputMethodSelect}
+          initialMethod={inputMethodInitialMode}
+          familyMembers={familyMembers}
+          onSave={async (formData: any) => {
+            await handleTodoSubmit(formData);
+            setShowInputMethodModal(false);
+            setExtractedTodoInfo(null);
+            setInputMethodInitialMode('voice');
+          }}
+        />
+      )}
+
+      {/* Add Todo Modal */}
+      {showAddTodoModal && (
+        <AddTodoModal
+          isOpen={showAddTodoModal}
+          onClose={() => {
+            setShowAddTodoModal(false);
+            setEditingTodoId(null);
+            setExtractedTodoInfo(null);
+          }}
+          onSave={handleTodoSubmit}
+          initialData={editingTodoId
+            ? (() => {
+              const todo = todos.find(t => t.id === editingTodoId);
+              if (!todo) return undefined;
+
+              // 담당 프로필 디버깅
+              console.log('[일정 수정] 초기 데이터:', {
+                todoId: todo.id,
+                assignedMemberIds: todo.assignedMemberIds,
+                type: typeof todo.assignedMemberIds,
+                isArray: Array.isArray(todo.assignedMemberIds)
+              });
+
+              return {
+                id: todo.id,
+                title: todo.title,
+                date: todo.date || '',
+                endDate: todo.endDate,
+                startTime: todo.startTime || todo.time || '09:00',
+                endTime: todo.endTime || (() => {
+                  const [hours, mins] = (todo.startTime || todo.time || '09:00').split(':').map(Number);
+                  const duration = todo.duration || 60;
+                  const totalMins = hours * 60 + mins + duration;
+                  const endHours = Math.floor(totalMins / 60) % 24;
+                  const endMins = totalMins % 60;
+                  return `${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}`;
+                })(),
+                isAllDay: todo.isAllDay || false,
+                category: todo.category || '기타',
+                checklistItems: todo.checklistItems || [],
+                memo: todo.memo || todo.description || '',
+                location: todo.location || '',
+                hasNotification: todo.hasNotification || false,
+                alarmTimes: todo.alarmTimes || [],
+                notificationReminders: todo.notificationReminders || [],
+                repeatType: todo.repeatType || 'none',
+                repeatEndDate: todo.repeatEndDate,
+                repeatPattern: todo.repeatPattern,
+                assignedMemberIds: Array.isArray(todo.assignedMemberIds) ? todo.assignedMemberIds : (todo.assignedMemberIds ? [todo.assignedMemberIds] : []),
+              };
+            })()
+            : extractedTodoInfo && extractedTodoInfo.title
+              ? {
+                ...extractedTodoInfo,
+                date: selectedDate || extractedTodoInfo?.date
+              }
+              : undefined
+          }
+          familyMembers={familyMembers}
+        />
+      )}
+
+      {/* My Page Screen */}
+      {showMyPageScreen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <MyPageScreen
+              isOpen={true}
+              onClose={() => setShowMyPageScreen(false)}
+              userName={userName}
+              userEmail={userEmail}
+              selectedEmoji={selectedEmoji}
+              onUserNameChange={(name) => setUserName(name)}
+              onEmojiChange={async (emoji) => {
+                setSelectedEmoji(emoji);
+                try {
+                  await apiClient.updateUser({ avatar_emoji: emoji });
+                  toast.success("프로필 이모지가 변경되었습니다!");
+                } catch (error) {
+                  console.error('Failed to update emoji:', error);
+                  toast.error("프로필 이모지 변경에 실패했습니다.");
+                }
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Settings Screen */}
+      {showSettingsScreen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <SettingsScreen
+              isOpen={true}
+              onClose={async () => {
+                // 설정 화면이 닫힐 때 동기화 상태를 다시 확인
+                try {
+                  const response = await apiClient.getCalendarStatus();
+                  if (response.data) {
+                    const importEnabled = response.data.import_enabled || false;
+                    const exportEnabled = response.data.export_enabled || false;
+
+                    // 두 토글 중 하나도 활성화되어 있지 않으면 동기화 비활성화
+                    if (!importEnabled && !exportEnabled) {
+                      setSyncStatus('disabled');
+                      setLastSyncTime(null);
+                    } else {
+                      // 동기화가 활성화되어 있으면 상태만 업데이트 (자동 동기화는 하지 않음)
+                      if (syncStatus === 'disabled') {
+                        setSyncStatus('idle');
+                      }
+                    }
+                  }
+                } catch (error) {
+                  console.error('Failed to check calendar status:', error);
+                }
+                setShowSettingsScreen(false);
+              }}
+              onRefreshCalendar={async (force?: boolean) => {
+                // 사용자가 '동기화 새로고침' 버튼을 눌렀을 때
+                await loadGoogleCalendarEvents(force || true);
+              }}
+              onRefreshTodos={async () => {
+                // 일정 목록 새로고침
+                await loadTodos();
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Profile Management Screen */}
+      {showProfileManagementScreen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <ProfileManagementScreen
+              isOpen={true}
+              onClose={() => setShowProfileManagementScreen(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Community Screen */}
+      {showCommunityScreen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <CommunityScreen
+              isOpen={true}
+              onClose={() => setShowCommunityScreen(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      {showCustomerService && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-bold text-[#1F2937]">고객센터</h2>
+                <button
+                  onClick={() => setShowCustomerService(false)}
+                  className="p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
+                >
+                  <X size={20} className="text-[#6B7280]" />
+                </button>
+              </div>
+              <div className="space-y-4">
+                <div className="text-center py-8">
+                  <HelpCircle size={48} className="mx-auto text-[#FF9B82] mb-4" />
+                  <h3 className="text-lg font-semibold text-[#1F2937] mb-2">문의사항이 있으신가요?</h3>
+                  <p className="text-[#6B7280] mb-6">
+                    고객센터로 연락주시면 친절하게 도와드리겠습니다.
+                  </p>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3 p-4 bg-[#F9FAFB] rounded-lg">
+                      <div className="w-10 h-10 bg-[#FF9B82] rounded-full flex items-center justify-center">
+                        📧
+                      </div>
+                      <div>
+                        <div className="font-medium text-[#1F2937]">이메일</div>
+                        <div className="text-sm text-[#6B7280]">support@always-plan.com</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 p-4 bg-[#F9FAFB] rounded-lg">
+                      <div className="w-10 h-10 bg-[#FF9B82] rounded-full flex items-center justify-center">
+                        💬
+                      </div>
+                      <div>
+                        <div className="font-medium text-[#1F2937]">실시간 채팅</div>
+                        <div className="text-sm text-[#6B7280]">평일 09:00 - 18:00</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showUserGuide && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-bold text-[#1F2937]">사용설명서</h2>
+                <button
+                  onClick={() => setShowUserGuide(false)}
+                  className="p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
+                >
+                  <X size={20} className="text-[#6B7280]" />
+                </button>
+              </div>
+              <div className="space-y-4">
+                <div className="text-center py-8">
+                  <FileText size={48} className="mx-auto text-[#FF9B82] mb-4" />
+                  <h3 className="text-lg font-semibold text-[#1F2937] mb-2">사용설명서</h3>
+                  <p className="text-[#6B7280] mb-6">
+                    Always Plan 앱의 사용법을 확인하세요.
+                  </p>
+                  <div className="space-y-3">
+                    <div className="p-4 bg-[#F9FAFB] rounded-lg text-left">
+                      <h4 className="font-medium text-[#1F2937] mb-2">📅 캘린더 사용법</h4>
+                      <ul className="text-sm text-[#6B7280] space-y-1">
+                        <li>• 월간/주간/일간 뷰 전환</li>
+                        <li>• 날짜를 클릭하여 일정 추가</li>
+                        <li>• 일정을 드래그하여 이동</li>
+                      </ul>
+                    </div>
+                    <div className="p-4 bg-[#F9FAFB] rounded-lg text-left">
+                      <h4 className="font-medium text-[#1F2937] mb-2">✅ 할 일 관리</h4>
+                      <ul className="text-sm text-[#6B7280] space-y-1">
+                        <li>• + 버튼으로 새 할 일 추가</li>
+                        <li>• 체크박스로 완료 표시</li>
+                        <li>• 카테고리별 색상 구분</li>
+                      </ul>
+                    </div>
+                    <div className="p-4 bg-[#F9FAFB] rounded-lg text-left">
+                      <h4 className="font-medium text-[#1F2937] mb-2">🔄 동기화</h4>
+                      <ul className="text-sm text-[#6B7280] space-y-1">
+                        <li>• 설정에서 Google Calendar 연동</li>
+                        <li>• 자동 동기화로 일정 공유</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Todo Detail Modal - 공통 사용 (모든 탭에서 표시) */}
       {selectedTodoForDetail && (() => {
@@ -3064,597 +2955,390 @@ export function CalendarHomeScreen() {
           setChecklistItemStates(prev => ({
             ...prev,
             [todo.id]: {
-              ...prev[todo.id],
-              [itemKey]: !prev[todo.id]?.[itemKey],
-            },
+              ...todoChecklistStates,
+              [itemKey]: !todoChecklistStates[itemKey]
+            }
           }));
         };
 
         return (
-          <>
-            {/* Backdrop */}
-            <div
-              className="fixed inset-0 bg-black/20 z-40"
-              onClick={() => {
-                setSelectedTodoForDetail(null);
-                if (showTodoDetailFromNotification) {
-                  setShowTodoDetailFromNotification(false);
-                  setShowNotificationPanel(true);
-                }
-              }}
-            />
-
-            {/* Detail Box */}
-            <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 max-w-[90vw] max-h-[80vh] bg-white rounded-2xl shadow-2xl z-50 overflow-hidden flex flex-col">
-              {/* 상단 색상 헤더 - 다른 팝업들과 동일한 스타일 */}
-              <div className="bg-gradient-to-r from-[#FF9B82] to-[#FFB499] px-6 py-4 text-white rounded-t-2xl relative">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-semibold text-white flex-1">일정 상세</h3>
-                </div>
-                {/* 우측 상단 닫기 버튼 */}
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-[#FF9B82] to-[#FFB499] px-6 py-4 text-white rounded-t-2xl flex items-center justify-between flex-shrink-0 relative">
+                <h2 className="text-lg font-semibold text-white">일정 상세</h2>
                 <button
                   onClick={() => {
-                    setSelectedTodoForDetail(null);
+                    // 알림에서 열었을 경우 알림 팝업으로 돌아가기
                     if (showTodoDetailFromNotification) {
                       setShowTodoDetailFromNotification(false);
-                      setShowNotificationPanel(true);
+                      setSelectedTodoForDetail(null);
+                    } else {
+                      setSelectedTodoForDetail(null);
                     }
                   }}
-                  className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
-                  aria-label="닫기"
+                  className="p-2 hover:bg-white/20 rounded-full transition-colors"
                 >
-                  <X size={16} className="text-white" />
+                  <X size={20} className="text-white" />
                 </button>
               </div>
-              <div className="p-5 overflow-y-auto flex-1">
-                <div className="space-y-4">
-                  <div className="bg-[#FAFAFA] rounded-lg p-4">
-                    <h4 className="font-medium text-[#1F2937] mb-4 text-lg">{todo.title}</h4>
 
-                    <div className="space-y-3">
-                      {/* 날짜 - 기간 표시 */}
-                      {todo.date && (
-                        <div className="flex items-center gap-3 text-sm text-[#6B7280]">
-                          <Calendar size={18} className="text-[#9CA3AF]" />
-                          <span>
-                            {todo.endDate && todo.endDate !== todo.date
-                              ? `${new Date(todo.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })} ~ ${new Date(todo.endDate).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })}`
-                              : new Date(todo.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}
-                          </span>
-                        </div>
-                      )}
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto bg-[#FAFAFA] p-6 space-y-4">
+                {/* Title */}
+                <div className="flex items-center gap-3">
+                  <div
+                    onClick={() => toggleTodoComplete(todo.id)}
+                    className={`w-6 h-6 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer hover:scale-110 transition-transform ${todo.completed
+                      ? "bg-[#FF9B82] border-[#FF9B82]"
+                      : "border-[#D1D5DB] bg-white hover:border-[#FF9B82]"
+                      }`}
+                  >
+                    {todo.completed && (
+                      <Check size={16} className="text-white" strokeWidth={3} />
+                    )}
+                  </div>
+                  <h3 className={`text-xl font-bold ${todo.completed ? "line-through text-[#9CA3AF]" : "text-[#1F2937]"}`}>
+                    {todo.title}
+                  </h3>
+                </div>
 
-                      {/* 시간 */}
-                      <div className="flex items-center gap-3 text-sm text-[#6B7280]">
-                        <Clock size={18} className="text-[#9CA3AF]" />
-                        <div className="flex flex-col gap-1">
-                          {todo.isAllDay ? (
-                            <span className="font-medium">하루종일</span>
-                          ) : (
-                            <>
-                              <span>
-                                {todo.startTime || todo.time} ~ {todo.endTime || (todo.duration ? `${Math.floor(todo.duration / 60)}:${String(todo.duration % 60).padStart(2, '0')}` : '')}
-                              </span>
-                              {todo.duration && <span className="text-xs text-[#9CA3AF]">({formatDuration(todo.duration)})</span>}
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* 카테고리 */}
-                      <div className="flex items-center gap-3 text-sm text-[#6B7280]">
-                        <Tag size={18} className="text-[#9CA3AF]" />
-                        <span
-                          className={`px-3 py-1 rounded text-sm ${getCategoryColor(todo.category)}`}
-                        >
-                          {todo.category}
+                {/* Date & Time */}
+                <div className="flex items-center gap-3 text-sm text-[#6B7280]">
+                  <Calendar size={18} className="text-[#9CA3AF]" />
+                  <div className="flex flex-col gap-1">
+                    {todo.isAllDay ? (
+                      <span className="font-medium">하루종일</span>
+                    ) : (
+                      <>
+                        <span>
+                          {todo.endDate && todo.endDate !== todo.date
+                            ? `${new Date(todo.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })} ~ ${new Date(todo.endDate).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })}`
+                            : new Date(todo.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}
                         </span>
-                      </div>
-
-                      {/* 장소 */}
-                      {todo.location && (
-                        <div className="flex items-center gap-3 text-sm text-[#6B7280]">
-                          <MapPin size={18} className="text-[#9CA3AF]" />
-                          <span>{todo.location}</span>
-                        </div>
-                      )}
-
-                      {/* 체크리스트 항목 표시 */}
-                      {checklistItems.length > 0 && (
-                        <div className="pt-3 border-t border-[#E5E7EB]">
-                          <h5 className="text-xs font-medium text-[#9CA3AF] uppercase mb-2">체크리스트</h5>
-                          <div className="space-y-2">
-                            {checklistItems.map((itemText, index) => {
-                              const itemKey = `item-${index}`;
-                              const isCompleted = todoChecklistStates[itemKey] || false;
-                              return (
-                                <div key={index} className="flex items-center gap-3">
-                                  <button
-                                    onClick={() => toggleChecklistItem(index)}
-                                    className={`
-                                      w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors
-                                      ${isCompleted ? 'bg-[#FF9B82] border-[#FF9B82]' : 'border-[#D1D5DB] hover:border-[#FF9B82]'}
-                                    `}
-                                  >
-                                    {isCompleted && <Check size={14} className="text-white" />}
-                                  </button>
-                                  <span className={`text-sm text-[#1F2937] ${isCompleted ? 'line-through text-[#9CA3AF]' : ''}`}>
-                                    {itemText}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* 미루기 설정 */}
-                      <div className="flex items-center gap-3 text-sm text-[#6B7280] pt-3 border-t border-[#E5E7EB]">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={todo.postponeToNextDay || false}
-                            onChange={async (e) => {
-                              const isChecked = e.target.checked;
-
-                              // 프론트엔드 상태 업데이트
-                              setTodos(prev =>
-                                prev.map(t =>
-                                  t.id === todo.id
-                                    ? { ...t, postponeToNextDay: isChecked }
-                                    : t
-                                )
-                              );
-
-                              // 체크박스가 해제되면 다음날 일정 삭제
-                              if (!isChecked) {
-                                try {
-                                  // 다음날 날짜 계산
-                                  if (!todo.date) {
-                                    return;
-                                  }
-                                  const currentDate = new Date(todo.date);
-                                  const nextDate = new Date(currentDate);
-                                  nextDate.setDate(nextDate.getDate() + 1);
-
-                                  // 다음날 날짜 문자열로 변환
-                                  const nextDateString = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`;
-
-                                  // 다음날에 같은 일정 찾기 (제목, 날짜, 시작 시간이 일치)
-                                  const nextDayTodo = todos.find(t =>
-                                    t.title === todo.title &&
-                                    t.date === nextDateString &&
-                                    t.startTime === todo.startTime
-                                  );
-
-                                  if (nextDayTodo) {
-                                    console.log("미루기 해제: 다음날 일정 삭제 시작:", nextDayTodo.id);
-                                    await deleteTodo(nextDayTodo.id);
-                                    toast.success("다음날 일정이 삭제되었습니다.");
-                                  }
-                                } catch (error: any) {
-                                  console.error("다음날 일정 삭제 실패:", error);
-                                  toast.error("다음날 일정 삭제에 실패했습니다.");
-                                }
-                                return;
-                              }
-
-                              // 체크박스가 체크되면 다음날 일정 생성
-                              if (isChecked) {
-                                try {
-                                  // 다음날 날짜 계산
-                                  if (!todo.date) {
-                                    toast.error("일정 날짜가 없습니다.");
-                                    return;
-                                  }
-                                  const currentDate = new Date(todo.date);
-                                  const nextDate = new Date(currentDate);
-                                  nextDate.setDate(nextDate.getDate() + 1);
-
-                                  // 다음날 날짜 문자열로 변환
-                                  const nextDateString = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`;
-
-                                  // 다음날에 이미 같은 일정이 있는지 확인
-                                  const existingNextDayTodo = todos.find(t =>
-                                    t.title === todo.title &&
-                                    t.date === nextDateString &&
-                                    t.startTime === todo.startTime
-                                  );
-
-                                  if (existingNextDayTodo) {
-                                    toast.info("다음날에 이미 같은 일정이 있습니다.");
-                                    return;
-                                  }
-
-                                  // 다음날 일정 데이터 준비
-                                  const duration = todo.duration || 60;
-                                  const [startHours, startMinutes] = (todo.startTime || "09:00").split(':').map(Number);
-                                  const startTotalMinutes = startHours * 60 + startMinutes;
-                                  const endTotalMinutes = startTotalMinutes + duration;
-                                  const endHours = Math.floor(endTotalMinutes / 60) % 24;
-                                  const endMins = endTotalMinutes % 60;
-                                  const endTime = `${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}`;
-
-                                  const nextDayTodoData = {
-                                    title: todo.title,
-                                    description: todo.memo || "",
-                                    memo: todo.memo || "",
-                                    location: todo.location || "",
-                                    date: nextDateString,
-                                    start_time: todo.startTime || "09:00",
-                                    end_time: endTime,
-                                    all_day: todo.isAllDay || false,
-                                    category: todo.category || "기타",
-                                    status: 'pending',
-                                    has_notification: todo.hasNotification || false,
-                                    notification_times: todo.alarmTimes || [],
-                                    repeat_type: "none",
-                                    checklist_items: todo.checklistItems || [],
-                                  };
-
-                                  console.log("다음날 일정 생성 시작:", nextDayTodoData);
-                                  const response = await apiClient.createTodo(nextDayTodoData);
-
-                                  if (response && response.data) {
-                                    // 응답 데이터에서 날짜 형식 변환
-                                    let todoDate = response.data.date;
-                                    if (todoDate instanceof Date) {
-                                      const year = todoDate.getFullYear();
-                                      const month = todoDate.getMonth() + 1;
-                                      const day = todoDate.getDate();
-                                      todoDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                                    } else if (typeof todoDate === 'string') {
-                                      todoDate = todoDate;
-                                    }
-
-                                    const newNextDayTodo: TodoItem = {
-                                      id: response.data.id,
-                                      title: response.data.title,
-                                      time: response.data.start_time || "09:00",
-                                      duration: duration,
-                                      completed: false,
-                                      category: response.data.category || "기타",
-                                      date: todoDate,
-                                      startTime: response.data.start_time,
-                                      endTime: response.data.end_time,
-                                      isAllDay: response.data.all_day || false,
-                                      memo: response.data.memo || response.data.description || "",
-                                      location: response.data.location || "",
-                                      hasNotification: response.data.has_notification || false,
-                                      alarmTimes: response.data.notification_times || [],
-                                      repeatType: response.data.repeat_type || "none",
-                                      checklistItems: response.data.checklist_items?.map((item: any) => item.text || item) || [],
-                                      memberId: todo.memberId,
-                                      isRoutine: false,
-                                    };
-
-                                    setTodos(prev => [...prev, newNextDayTodo]);
-                                    toast.success("다음날 일정이 추가되었습니다.");
-                                    console.log("다음날 일정 생성 완료:", newNextDayTodo);
-                                  } else {
-                                    console.error("응답 데이터 없음:", response);
-                                    toast.error("다음날 일정 추가에 실패했습니다.");
-                                  }
-                                } catch (error: any) {
-                                  console.error("다음날 일정 생성 실패:", error);
-                                  console.error("에러 상세:", error.response?.data || error.message);
-                                  toast.error(`다음날 일정 추가에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
-                                }
-                              }
-                            }}
-                            className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-2 focus:ring-[#FF9B82]"
-                          />
-                          <span className="text-sm text-[#1F2937]">미루기</span>
-                        </label>
-                      </div>
-
-                      {/* 메모 */}
-                      {todo.memo && (
-                        <div className="pt-3 border-t border-[#E5E7EB]">
-                          <h5 className="text-xs font-medium text-[#9CA3AF] uppercase mb-2">메모</h5>
-                          <p className="text-sm text-[#1F2937] whitespace-pre-wrap">{todo.memo}</p>
-                        </div>
-                      )}
-
-                      {/* 반복 설정 */}
-                      {todo.repeatType && todo.repeatType !== 'none' && (
-                        <div className="flex items-center gap-3 text-sm text-[#6B7280] pt-3 border-t border-[#E5E7EB]">
-                          <Repeat size={18} className="text-[#9CA3AF]" />
-                          <span>
-                            {todo.repeatType === 'daily' && '매일 반복'}
-                            {todo.repeatType === 'weekly' && '매주 반복'}
-                            {todo.repeatType === 'monthly' && '매월 반복'}
-                            {todo.repeatType === 'yearly' && '매년 반복'}
+                        {todo.startTime && (
+                          <span className="text-xs">
+                            {todo.startTime} {todo.endTime ? `~ ${todo.endTime}` : ''} {todo.duration ? `(${formatDuration(todo.duration)})` : ''}
                           </span>
-                        </div>
-                      )}
-
-                      {/* 알림 설정 */}
-                      {todo.hasNotification && (
-                        <div className="pt-3 border-t border-[#E5E7EB]">
-                          <div className="flex items-center gap-3 text-sm text-[#6B7280] mb-2">
-                            <Bell size={18} className="text-[#9CA3AF]" />
-                            <span className="font-medium">알림</span>
-                          </div>
-                          {(() => {
-                            const reminders = todo.notificationReminders || [];
-                            if (reminders.length > 0) {
-                              return (
-                                <div className="ml-7 space-y-1">
-                                  {reminders.map((reminder: { value: number; unit: string }, index: number) => {
-                                    const unitText = reminder.unit === 'minutes' ? '분' :
-                                      reminder.unit === 'hours' ? '시간' :
-                                        reminder.unit === 'days' ? '일' : '주';
-                                    return (
-                                      <div key={index} className="text-xs text-[#6B7280]">
-                                        • {reminder.value}{unitText} 전
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              );
-                            } else if (todo.alarmTimes && todo.alarmTimes.length > 0) {
-                              return (
-                                <div className="ml-7 space-y-1">
-                                  {todo.alarmTimes.map((alarmTime, index) => (
-                                    <div key={index} className="text-xs text-[#6B7280]">
-                                      • {alarmTime}
-                                    </div>
-                                  ))}
-                                </div>
-                              );
-                            }
-                            return null;
-                          })()}
-                        </div>
-                      )}
-
-                      {/* 완료 상태 */}
-                      <div className="pt-3 border-t border-[#E5E7EB]">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-[#6B7280]">상태:</span>
-                          <span className={`text-sm font-medium ${todo.completed ? "text-[#10B981]" : "text-[#F59E0B]"
-                            }`}>
-                            {todo.completed ? "완료" : "미완료"}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
 
-                {/* 수정 및 삭제 버튼 */}
-                <div className="mt-6 pt-4 border-t border-[#E5E7EB] flex gap-3">
-                  <button
-                    onClick={async () => {
-                      if (window.confirm('이 일정을 삭제하시겠습니까?')) {
-                        console.log("일정 상세 모달에서 삭제 버튼 클릭:", todo.id);
-                        await deleteTodo(todo.id);
-                        setSelectedTodoForDetail(null);
-                        if (showTodoDetailFromNotification) {
-                          setShowTodoDetailFromNotification(false);
-                          setShowNotificationPanel(true);
+                {/* Category */}
+                {todo.category && (
+                  <div className="flex items-center gap-3 text-sm text-[#6B7280]">
+                    <Tag size={18} className="text-[#9CA3AF]" />
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${getCategoryColor(todo.category)}`}>
+                      {todo.category}
+                    </span>
+                  </div>
+                )}
+
+                {/* Location */}
+                {todo.location && (
+                  <div className="flex items-center gap-3 text-sm text-[#6B7280]">
+                    <MapPin size={18} className="text-[#9CA3AF]" />
+                    <span>{todo.location}</span>
+                  </div>
+                )}
+
+                {/* 담당 프로필 */}
+                {todo.assignedMemberIds && todo.assignedMemberIds.length > 0 && (
+                  <div className="flex items-center gap-3 text-sm text-[#6B7280]">
+                    <User size={18} className="text-[#9CA3AF]" />
+                    <div className="flex gap-2 flex-wrap">
+                      {todo.assignedMemberIds.map((memberId: string) => {
+                        const member = familyMembers.find(m => m.id === memberId);
+                        return member ? (
+                          <span key={memberId} className="flex items-center gap-1 px-2 py-1 bg-[#F3F4F6] rounded-full text-xs">
+                            <span>{member.emoji}</span>
+                            <span>{member.name}</span>
+                          </span>
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* 반복 설정 */}
+                {todo.repeatType && todo.repeatType !== 'none' && (
+                  <div className="flex items-start gap-3 text-sm text-[#6B7280] pt-4 border-t border-[#F3F4F6]">
+                    <Repeat size={18} className="text-[#9CA3AF] mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <h4 className="text-sm font-medium text-[#1F2937] mb-1">반복 설정</h4>
+                      <p className="text-sm text-[#6B7280]">
+                        {todo.repeatType === 'daily' && '매일 반복'}
+                        {todo.repeatType === 'weekly' && '매주 반복'}
+                        {todo.repeatType === 'monthly' && '매월 반복'}
+                        {todo.repeatType === 'yearly' && '매년 반복'}
+                        {todo.repeatType === 'weekdays' && '평일 반복'}
+                        {todo.repeatType === 'weekends' && '주말 반복'}
+                        {todo.repeatType === 'custom' && '맞춤 반복'}
+                        {todo.repeatEndDate && ` (${new Date(todo.repeatEndDate).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })}까지)`}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* 알림 설정 */}
+                {todo.hasNotification && (
+                  <div className="flex items-start gap-3 text-sm text-[#6B7280] pt-4 border-t border-[#F3F4F6]">
+                    <Bell size={18} className="text-[#9CA3AF] mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <h4 className="text-sm font-medium text-[#1F2937] mb-1">알림 설정</h4>
+                      <div className="space-y-1">
+                        {todo.notificationReminders && todo.notificationReminders.length > 0 ? (
+                          todo.notificationReminders.map((reminder: any, index: number) => {
+                            const value = typeof reminder === 'object' ? reminder.value : reminder;
+                            const unit = typeof reminder === 'object' ? reminder.unit : 'minutes';
+                            const unitText = unit === 'minutes' ? '분' : unit === 'hours' ? '시간' : unit === 'days' ? '일' : '주';
+                            return (
+                              <p key={index} className="text-sm text-[#6B7280]">
+                                일정 {value}{unitText} 전 알림
+                              </p>
+                            );
+                          })
+                        ) : (
+                          <p className="text-sm text-[#6B7280]">알림이 설정되어 있습니다</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Description */}
+                {todo.description && (
+                  <div className="pt-4 border-t border-[#F3F4F6]">
+                    <h4 className="text-sm font-medium text-[#1F2937] mb-2">메모</h4>
+                    <p className="text-sm text-[#6B7280] whitespace-pre-wrap">{todo.description}</p>
+                  </div>
+                )}
+
+                {/* Checklist */}
+                {checklistItems.length > 0 && (
+                  <div className="pt-4 border-t border-[#F3F4F6]">
+                    <h4 className="text-sm font-medium text-[#1F2937] mb-3">체크리스트</h4>
+                    <div className="space-y-2">
+                      {checklistItems.map((item: string, index: number) => {
+                        const itemKey = `item-${index}`;
+                        const isChecked = todoChecklistStates[itemKey] || false;
+                        return (
+                          <div key={index} className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleChecklistItem(index)}
+                              className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-[#FF9B82] focus:ring-2"
+                            />
+                            <span className={`text-sm ${isChecked ? "line-through text-[#9CA3AF]" : "text-[#1F2937]"}`}>
+                              {item}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* 미루기 설정 */}
+                <div className="flex items-center gap-3 text-sm text-[#6B7280] pt-3 border-t border-[#E5E7EB]">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={todo.postponeToNextDay || false}
+                      onChange={async (e) => {
+                        const isChecked = e.target.checked;
+
+                        // 프론트엔드 상태 업데이트
+                        setTodos(prev =>
+                          prev.map(t =>
+                            t.id === todo.id
+                              ? { ...t, postponeToNextDay: isChecked }
+                              : t
+                          )
+                        );
+
+                        // 체크박스가 해제되면 다음날 일정 삭제
+                        if (!isChecked) {
+                          try {
+                            // 다음날 날짜 계산
+                            if (!todo.date) {
+                              return;
+                            }
+                            const currentDate = new Date(todo.date);
+                            const nextDate = new Date(currentDate);
+                            nextDate.setDate(nextDate.getDate() + 1);
+
+                            // 다음날 날짜 문자열로 변환
+                            const nextDateString = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`;
+
+                            // 다음날에 같은 일정 찾기 (제목, 날짜, 시작 시간이 일치)
+                            const nextDayTodo = todos.find(t =>
+                              t.title === todo.title &&
+                              t.date === nextDateString &&
+                              t.startTime === todo.startTime
+                            );
+
+                            if (nextDayTodo) {
+                              console.log("미루기 해제: 다음날 일정 삭제 시작:", nextDayTodo.id);
+                              await handleTodoDelete(nextDayTodo.id);
+                              toast.success("다음날 일정이 삭제되었습니다.");
+                            }
+                          } catch (error: any) {
+                            console.error("다음날 일정 삭제 실패:", error);
+                            toast.error("다음날 일정 삭제에 실패했습니다.");
+                          }
+                          return;
                         }
-                      }
-                    }}
-                    className="flex-1 px-4 py-3 bg-[#EF4444] text-white rounded-lg hover:bg-[#DC2626] transition-colors font-medium flex items-center justify-center gap-2"
-                  >
-                    <Trash2 size={18} />
-                    삭제
-                  </button>
-                  <button
-                    onClick={() => {
-                      setEditingTodoId(todo.id);
-                      // 수정 모드로 열 때는 입력값 초기화하지 않음 (기존 일정 데이터 사용)
-                      setShowAddTodoModal(true);
-                      setSelectedTodoForDetail(null);
-                      if (showTodoDetailFromNotification) {
-                        setShowTodoDetailFromNotification(false);
-                      }
-                    }}
-                    className="flex-1 px-4 py-3 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] transition-colors font-medium flex items-center justify-center gap-2"
-                  >
-                    <Edit2 size={18} />
-                    수정
-                  </button>
+
+                        // 체크박스가 체크되면 다음날 일정 생성
+                        if (isChecked) {
+                          try {
+                            // 다음날 날짜 계산
+                            if (!todo.date) {
+                              toast.error("일정 날짜가 없습니다.");
+                              return;
+                            }
+                            const currentDate = new Date(todo.date);
+                            const nextDate = new Date(currentDate);
+                            nextDate.setDate(nextDate.getDate() + 1);
+
+                            // 다음날 날짜 문자열로 변환
+                            const nextDateString = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`;
+
+                            // 다음날에 이미 같은 일정이 있는지 확인
+                            const existingNextDayTodo = todos.find(t =>
+                              t.title === todo.title &&
+                              t.date === nextDateString &&
+                              t.startTime === todo.startTime
+                            );
+
+                            if (existingNextDayTodo) {
+                              toast.info("다음날에 이미 같은 일정이 있습니다.");
+                              return;
+                            }
+
+                            // 다음날 일정 데이터 준비
+                            const duration = todo.duration || 60;
+                            const [startHours, startMinutes] = (todo.startTime || "09:00").split(':').map(Number);
+                            const startTotalMinutes = startHours * 60 + startMinutes;
+                            const endTotalMinutes = startTotalMinutes + duration;
+                            const endHours = Math.floor(endTotalMinutes / 60) % 24;
+                            const endMins = endTotalMinutes % 60;
+                            const endTime = `${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}`;
+
+                            // todo_group_id 생성 또는 기존 그룹 ID 사용
+                            const todoGroupId = todo.todoGroupId || `postpone_${todo.id}_${Date.now()}`;
+
+                            const nextDayTodoData = {
+                              title: todo.title,
+                              description: todo.memo || "",
+                              memo: todo.memo || "",
+                              location: todo.location || "",
+                              date: nextDateString,
+                              start_time: todo.startTime || "09:00",
+                              end_time: endTime,
+                              all_day: todo.isAllDay || false,
+                              category: todo.category || "기타",
+                              status: 'pending',
+                              has_notification: todo.hasNotification || false,
+                              notification_times: todo.alarmTimes || [],
+                              repeat_type: "none",
+                              checklist_items: todo.checklistItems || [],
+                              assigned_member_ids: todo.assignedMemberIds || [],
+                              todo_group_id: todoGroupId, // 그룹 ID 설정
+                            };
+
+                            // 원본 일정도 같은 그룹 ID로 업데이트 (아직 그룹 ID가 없는 경우)
+                            if (!todo.todoGroupId) {
+                              try {
+                                await apiClient.updateTodo(todo.id, { todo_group_id: todoGroupId });
+                              } catch (error) {
+                                console.error("원본 일정 그룹 ID 업데이트 실패:", error);
+                              }
+                            }
+
+                            console.log("다음날 일정 생성 시작:", nextDayTodoData);
+                            const response = await apiClient.createTodo(nextDayTodoData);
+
+                            if (response && response.data) {
+                              // 응답 데이터를 todos 형식으로 변환
+                              const formattedTodo = {
+                                id: response.data.id,
+                                title: response.data.title,
+                                time: response.data.start_time || "09:00",
+                                duration: duration,
+                                completed: false,
+                                category: response.data.category || "기타",
+                                date: nextDateString,
+                                startTime: response.data.start_time,
+                                endTime: response.data.end_time,
+                                isAllDay: response.data.all_day || false,
+                                memo: response.data.memo || response.data.description || "",
+                                location: response.data.location || "",
+                                hasNotification: response.data.has_notification || false,
+                                alarmTimes: response.data.notification_times || [],
+                                repeatType: response.data.repeat_type || "none",
+                                checklistItems: response.data.checklist_items?.map((item: any) => item.text || item) || [],
+                                assignedMemberIds: Array.isArray(response.data.family_member_ids)
+                                  ? response.data.family_member_ids
+                                  : (Array.isArray(response.data.assigned_member_ids)
+                                    ? response.data.assigned_member_ids
+                                    : (response.data.family_member_ids ? [response.data.family_member_ids] : (response.data.assigned_member_ids ? [response.data.assigned_member_ids] : []))),
+                                postponeToNextDay: false,
+                              };
+
+                              setTodos(prev => [...prev, formattedTodo]);
+                              toast.success("다음날 일정이 추가되었습니다.");
+                              console.log("다음날 일정 생성 완료:", formattedTodo);
+                            } else {
+                              console.error("응답 데이터 없음:", response);
+                              toast.error("다음날 일정 추가에 실패했습니다.");
+                            }
+                          } catch (error: any) {
+                            console.error("다음날 일정 생성 실패:", error);
+                            toast.error(`다음날 일정 추가에 실패했습니다: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`);
+                          }
+                        }
+                      }}
+                      className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-2 focus:ring-[#FF9B82]"
+                    />
+                    <span className="text-sm text-[#1F2937]">미루기</span>
+                  </label>
                 </div>
+
+              </div>
+
+              {/* Footer - Actions */}
+              <div className="px-6 py-4 border-t border-[#F3F4F6] bg-white flex-shrink-0 flex gap-3">
+                <button
+                  onClick={() => {
+                    setEditingTodoId(todo.id);
+                    setShowAddTodoModal(true);
+                    setSelectedTodoForDetail(null);
+                  }}
+                  className="flex-1 py-3 px-4 bg-[#FF9B82] text-white rounded-lg font-medium hover:bg-[#FF8A6D] transition-colors"
+                >
+                  수정
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm('정말로 이 일정을 삭제하시겠습니까?')) {
+                      handleTodoDelete(todo.id);
+                      setSelectedTodoForDetail(null);
+                    }
+                  }}
+                  className="flex-1 py-3 px-4 bg-[#FEF2F2] text-[#EF4444] rounded-lg font-medium hover:bg-[#FEE2E2] transition-colors"
+                >
+                  삭제
+                </button>
               </div>
             </div>
-          </>
+          </div>
         );
       })()}
-
-      {/* Floating Action Button (Add Todo) */}
-      <button
-        className="fixed w-16 h-16 bg-[#FF9B82] rounded-full shadow-lg flex items-center justify-center text-white hover:bg-[#FF8A6D] transition-all hover:scale-110 z-40 cursor-move select-none"
-        style={{
-          right: `24px`,
-          bottom: `80px`,
-          transform: `translate(${fabPosition.x}px, ${fabPosition.y}px)`,
-        }}
-        aria-label="일정 추가"
-        onMouseDown={handleFabMouseDown}
-        onTouchStart={handleFabTouchStart}
-      >
-        <Pencil size={28} strokeWidth={2.5} />
-      </button>
-
-      {/* Input Method Modal */}
-      {showInputMethodModal && (
-        <InputMethodModal
-          isOpen={showInputMethodModal}
-          onClose={() => {
-            setShowInputMethodModal(false);
-            // InputMethodModal을 닫을 때도 입력값 초기화
-            setExtractedText("");
-            setExtractedTodoInfo(null);
-            setInputMethodInitialMode('voice'); // 기본값으로 리셋
-          }}
-          onSelect={handleInputMethodSelect}
-          initialMethod={inputMethodInitialMode}
-        />
-      )}
-
-      {/* Add Todo Modal */}
-      {showAddTodoModal && (
-        <AddTodoModal
-          isOpen={showAddTodoModal}
-          onClose={() => {
-            setShowAddTodoModal(false);
-            setEditingTodoId(null);
-            setExtractedText(""); // 모달 닫을 때 추출된 텍스트 초기화
-            setExtractedTodoInfo(null); // 모달 닫을 때 추출된 일정 정보 초기화
-          }}
-          onSave={handleSaveDetailedTodo}
-          onOpenInputMethod={(method) => {
-            setInputMethodInitialMode(method);
-            setShowInputMethodModal(true);
-          }}
-          familyMembers={familyMembers}
-          initialData={
-            editingTodoId
-              ? todos.find(t => t.id === editingTodoId)
-              : extractedTodoInfo
-                ? {
-                  title: extractedTodoInfo.title || '',
-                  date: extractedTodoInfo.date || formatLocalDate(new Date()),
-                  endDate: extractedTodoInfo.endDate || extractedTodoInfo.date || formatLocalDate(new Date()), // 종료 날짜 (없으면 시작 날짜와 동일)
-                  startTime: extractedTodoInfo.startTime || (extractedTodoInfo.isAllDay ? '' : '09:00'),
-                  endTime: extractedTodoInfo.endTime || (extractedTodoInfo.isAllDay ? '' : '10:00'),
-                  isAllDay: extractedTodoInfo.isAllDay || false,
-                  category: extractedTodoInfo.category || '기타',
-                  checklistItems: extractedTodoInfo.checklistItems && extractedTodoInfo.checklistItems.length > 0
-                    ? extractedTodoInfo.checklistItems.filter((item: string) => item && item.trim() !== '')
-                    : [],
-                  location: extractedTodoInfo.location || '',
-                  memo: extractedTodoInfo.memo || extractedText || '',
-                  repeatType: extractedTodoInfo.repeatType || 'none',
-                  hasNotification: extractedTodoInfo.hasNotification || false,
-                  alarmTimes: extractedTodoInfo.alarmTimes || [],
-                }
-                : extractedText
-                  ? { memo: extractedText }
-                  : undefined
-          }
-        />
-      )}
-
-      {/* Member Add Sheet */}
-      <MemberAddSheet
-        isOpen={showMemberAddSheet}
-        onClose={() => {
-          setShowMemberAddSheet(false);
-          setEditingMemberId(null);
-        }}
-        onSave={handleSaveMember}
-        initialData={editingMemberId ? familyMembers.find(m => m.id === editingMemberId) : undefined}
-      />
-
-      {/* Work Contact Add Sheet */}
-      <WorkContactAddSheet
-        isOpen={showWorkContactAddSheet}
-        onClose={() => setShowWorkContactAddSheet(false)}
-        onSave={handleSaveWorkContact}
-      />
-
-      {/* Community Screen */}
-      <CommunityScreen
-        isOpen={showCommunityScreen}
-        onClose={() => setShowCommunityScreen(false)}
-      />
-
-      {/* MyPage Screen */}
-      <MyPageScreen
-        isOpen={showMyPageScreen}
-        onClose={() => setShowMyPageScreen(false)}
-        userName={userName}
-        userEmail={userEmail}
-        selectedEmoji={selectedEmoji}
-        onUserNameChange={async (name: string) => {
-          try {
-            await apiClient.updateUser({ name });
-            setUserName(name);
-            toast.success("이름이 변경되었습니다.");
-          } catch (error) {
-            console.error("이름 변경 실패:", error);
-            toast.error("이름 변경에 실패했습니다.");
-          }
-        }}
-        onEmojiChange={async (emoji: string) => {
-          try {
-            await apiClient.updateUser({ avatar_emoji: emoji });
-            setSelectedEmoji(emoji);
-            toast.success("프로필 이모지가 변경되었습니다.");
-          } catch (error) {
-            console.error("이모지 변경 실패:", error);
-            toast.error("이모지 변경에 실패했습니다.");
-          }
-        }}
-      />
-
-      {/* Profile Management Screen */}
-      <ProfileManagementScreen
-        isOpen={showProfileManagementScreen}
-        onClose={() => setShowProfileManagementScreen(false)}
-        onProfileUpdate={async () => {
-          // 프로필 업데이트 시 프로필 목록 다시 로드
-          try {
-            const familyResponse = await apiClient.getFamilyMembers();
-            if (familyResponse.data && Array.isArray(familyResponse.data)) {
-              const defaultColors = [
-                "#9B82FF",
-                "#9ae3a9",
-                "#FFD482",
-                "#82D4FF",
-                "#FF82D4",
-                "#FF9B82",
-              ];
-
-              const formattedMembers = familyResponse.data.map((member: any, index: number) => {
-                let memberColor = member.color_code || member.color;
-                if (!memberColor || memberColor.trim() === '') {
-                  memberColor = defaultColors[index % defaultColors.length];
-                }
-
-                return {
-                  id: member.id,
-                  name: member.name,
-                  emoji: member.emoji || "🐼",
-                  color: memberColor,
-                  phone: member.phone_number,
-                  memo: member.notes,
-                };
-              });
-
-              // 현재 사용자 정보 다시 로드
-              const userResponse = await apiClient.getCurrentUser();
-              const currentUserName = userResponse?.data?.name || "나";
-              const currentUserEmoji = userResponse?.data?.avatar_emoji || "🐼";
-
-              formattedMembers.unshift({
-                id: "me",
-                name: currentUserName,
-                emoji: currentUserEmoji,
-                color: "rgba(255, 155, 130, 0.6)",
-                phone: undefined,
-                memo: undefined,
-              });
-
-              setFamilyMembers(formattedMembers);
-            }
-          } catch (error) {
-            console.error("프로필 목록 다시 로드 실패:", error);
-          }
-        }}
-      />
-
-      {/* Settings Screen */}
-      <SettingsScreen
-        isOpen={showSettingsScreen}
-        onClose={() => setShowSettingsScreen(false)}
-        onRefreshCalendar={loadGoogleCalendarEvents}
-      />
-
     </div>
   );
 }

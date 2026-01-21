@@ -25,9 +25,9 @@ export default function App() {
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#6366F1] mx-auto mb-4"></div>
-          <p className="text-gray-600">로딩 중...</p>
+        <div className="text-center px-4">
+          <div className="animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-b-2 border-[#6366F1] mx-auto mb-4"></div>
+          <p className="text-sm sm:text-base text-gray-600">로딩 중...</p>
         </div>
       </div>
     )

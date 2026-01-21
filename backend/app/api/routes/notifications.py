@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 from app.database import get_db
-from app.models.models import Todo, Notification
+from app.models.models import Todo, Notification, FamilyMember
 from app.models.user import User
 from app.api.routes.auth import get_current_user
 from app.services.email_service import EmailService
@@ -119,16 +119,40 @@ def send_scheduled_emails(db: Session):
                             if hasattr(todo, 'checklist_items'):
                                 checklist_items = [item.text for item in todo.checklist_items if hasattr(item, 'text')]
                             
+                            # 담당 프로필 정보 가져오기
+                            assigned_members = []
+                            if todo.family_member_ids:
+                                try:
+                                    member_ids = json.loads(todo.family_member_ids) if isinstance(todo.family_member_ids, str) else todo.family_member_ids
+                                    if isinstance(member_ids, list) and len(member_ids) > 0:
+                                        # "me"가 포함되어 있으면 사용자 정보 추가
+                                        if "me" in member_ids:
+                                            assigned_members.append({"emoji": user.avatar_emoji or "👤", "name": user.name})
+                                        # FamilyMember 조회 (me 제외)
+                                        filtered_member_ids = [mid for mid in member_ids if mid != "me"]
+                                        if filtered_member_ids:
+                                            members = db.query(FamilyMember).filter(FamilyMember.id.in_(filtered_member_ids)).all()
+                                            for m in members:
+                                                assigned_members.append({"emoji": m.emoji or "👤", "name": m.name})
+                                except:
+                                    pass
+                            
+                            # 하루종일 여부
+                            is_all_day = todo.all_day if hasattr(todo, 'all_day') else False
+                            
                             success = EmailService.send_notification_email(
                                 to_email=user.email,
                                 todo_title=todo.title,
                                 todo_date=todo_date.strftime("%Y년 %m월 %d일"),
                                 todo_time=time_str,
+                                todo_end_time=todo.end_time.strftime("%H:%M") if todo.end_time else None,
+                                is_all_day=is_all_day,
                                 reminder_time=reminder_str,
                                 todo_location=todo.location if hasattr(todo, 'location') else None,
                                 todo_category=todo.category if hasattr(todo, 'category') else None,
                                 todo_checklist=checklist_items if checklist_items else None,
-                                todo_memo=todo.memo if hasattr(todo, 'memo') and todo.memo else None
+                                todo_memo=todo.memo if hasattr(todo, 'memo') and todo.memo else None,
+                                assigned_members=assigned_members if assigned_members else None
                             )
                             
                             if success:

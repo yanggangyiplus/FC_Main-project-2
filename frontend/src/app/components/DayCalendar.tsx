@@ -1,7 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { RoutineItem } from "./RoutineView";
 import { formatDuration } from "@/utils/formatDuration";
+
+interface FamilyMember {
+  id: string;
+  name: string;
+  emoji: string;
+  color: string;
+}
 
 interface DayCalendarProps {
   todos: Array<{
@@ -13,20 +20,34 @@ interface DayCalendarProps {
     category: string;
     date?: string;
     endDate?: string; // 종료 날짜 (기간 일정)
+    memberId?: string;
+    assignedMemberIds?: string[];
   }>;
   routines?: RoutineItem[];
+  familyMembers?: FamilyMember[]; // 프로필 목록
+  selectedMembers?: string[]; // 선택된 프로필 ID 목록
+  selectedDate?: string | null; // 선택된 날짜
+  onDateChange?: (date: string) => void; // 날짜 변경 콜백
   onTodoUpdate?: (id: string, updates: { time: string; duration: number }) => void;
   onTodoClick?: (todoId: string) => void;
 }
 
-export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }: DayCalendarProps) {
-  const [currentDate, setCurrentDate] = useState(new Date());
+export function DayCalendar({ todos, routines = [], familyMembers = [], selectedMembers = [], selectedDate, onDateChange, onTodoUpdate, onTodoClick }: DayCalendarProps) {
+  const [currentDate, setCurrentDate] = useState(() => selectedDate ? new Date(selectedDate) : new Date());
+
+  // selectedDate가 변경되면 currentDate도 업데이트
+  useEffect(() => {
+    if (selectedDate) {
+      setCurrentDate(new Date(selectedDate));
+    }
+  }, [selectedDate]);
   const [draggedTodo, setDraggedTodo] = useState<string | null>(null);
   const [resizeMode, setResizeMode] = useState<'top' | 'bottom' | null>(null);
   const [dragStartY, setDragStartY] = useState(0);
   const [dragStartTime, setDragStartTime] = useState("");
   const [dragStartDuration, setDragStartDuration] = useState(0);
   const [hasMoved, setHasMoved] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const timeSlots = [
     "00:00", "02:00", "04:00", "06:00", "08:00", "10:00",
@@ -37,12 +58,18 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
     const newDate = new Date(currentDate);
     newDate.setDate(newDate.getDate() - 1);
     setCurrentDate(newDate);
+    if (onDateChange) {
+      onDateChange(newDate.toISOString().split('T')[0]);
+    }
   };
 
   const nextDay = () => {
     const newDate = new Date(currentDate);
     newDate.setDate(newDate.getDate() + 1);
     setCurrentDate(newDate);
+    if (onDateChange) {
+      onDateChange(newDate.toISOString().split('T')[0]);
+    }
   };
 
   const getTodosForDate = () => {
@@ -53,6 +80,34 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
     // 1. Regular Todos - 기간 일정인 경우 시작일부터 종료일까지 모든 날짜에 표시
     let regularTodos = todos.filter((todo) => {
       if (!todo.date) return false;
+
+      // 프로필 필터링 (assignedMemberIds 지원)
+      if (selectedMembers.length > 0) {
+        // 프로필이 선택되어 있는 경우:
+        // - 담당 프로필이 있는 일정: 선택된 프로필에 포함되어야 함
+        // - 담당 프로필이 없는 일정: 표시 (프로필이 선택되어 있어도 담당 프로필 없는 일정은 표시)
+        const hasAssignedMembers = todo.assignedMemberIds && Array.isArray(todo.assignedMemberIds) && todo.assignedMemberIds.length > 0;
+        const hasMemberId = todo.memberId;
+        
+        if (hasAssignedMembers) {
+          // assignedMemberIds 중 하나라도 선택된 프로필에 포함되어야 함
+          const assignedIds = todo.assignedMemberIds.map((id: any) => String(id));
+          const selectedIds = selectedMembers.map((id: string) => String(id));
+          const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+          if (!hasSelectedMember) {
+            return false;
+          }
+        } else if (hasMemberId && !selectedMembers.includes(String(todo.memberId))) {
+          return false;
+        }
+        // 담당 프로필이 없으면 표시
+      } else {
+        // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+        const hasAssignedMembers = todo.assignedMemberIds && Array.isArray(todo.assignedMemberIds) && todo.assignedMemberIds.length > 0;
+        if (todo.memberId || hasAssignedMembers) {
+          return false;
+        }
+      }
 
       // 시작일과 동일한 경우
       if (todo.date === dateStr) return true;
@@ -75,7 +130,29 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
     });
 
     if (dateStr === todayStr) {
-      const todayMockTodos = todos.filter(t => !t.date || t.date === todayStr);
+      const todayMockTodos = todos.filter(t => {
+        // 프로필 필터링 적용 (assignedMemberIds 지원)
+        if (selectedMembers.length > 0) {
+          const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+          const hasMemberId = t.memberId;
+          
+          if (hasAssignedMembers) {
+            const hasSelectedMember = t.assignedMemberIds.some((id: string) => selectedMembers.includes(String(id)));
+            if (!hasSelectedMember) {
+              return false;
+            }
+          } else if (hasMemberId && !selectedMembers.includes(String(t.memberId))) {
+            return false;
+          }
+        } else {
+          // 모든 프로필이 꺼져 있으면 담당 프로필이 없는 일정만 표시
+          const hasAssignedMembers = t.assignedMemberIds && Array.isArray(t.assignedMemberIds) && t.assignedMemberIds.length > 0;
+          if (t.memberId || hasAssignedMembers) {
+            return false;
+          }
+        }
+        return !t.date || t.date === todayStr;
+      });
       regularTodos = [...regularTodos, ...todayMockTodos.filter(t => !regularTodos.find(rt => rt.id === t.id))];
     }
 
@@ -84,6 +161,9 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
   };
 
   const getTimePosition = (time: string) => {
+    if (!time || typeof time !== 'string' || !time.includes(':')) {
+      return 0; // 기본 위치
+    }
     const [hours, minutes] = time.split(":").map(Number);
     const totalMinutes = hours * 60 + minutes;
     return (totalMinutes / (24 * 60)) * 100;
@@ -130,7 +210,8 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
     // Touch resize implementation omitted for simplicity, keeping basic touch move
     setDraggedTodo(todoId);
     setDragStartY(e.touches[0].clientY);
-    setDragStartTime(time);
+    setDragStartTime(time || '09:00');
+    setDragStartDuration(duration || 60);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -175,16 +256,18 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (!draggedTodo) return;
+    if (!draggedTodo || !dragStartTime) return;
 
     // Basic touch move logic (same as before)
     const deltaY = e.touches[0].clientY - dragStartY;
     const minutesDelta = Math.round((deltaY / window.innerHeight) * (24 * 60));
 
-    const [hours, minutes] = dragStartTime.split(":").map(Number);
+    const [hours, minutes] = (dragStartTime || '09:00').split(":").map(Number);
+    if (isNaN(hours) || isNaN(minutes)) return;
+    
     let newMinutes = hours * 60 + minutes + minutesDelta;
-
-    newMinutes = Math.max(0, Math.min(24 * 60 - 30, newMinutes));
+    const currentDuration = dragStartDuration || 60;
+    newMinutes = Math.max(0, Math.min(24 * 60 - currentDuration, newMinutes));
 
     const newHours = Math.floor(newMinutes / 60);
     const newMins = newMinutes % 60;
@@ -192,7 +275,7 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
 
     const todo = todos.find((t) => t.id === draggedTodo);
     if (todo && onTodoUpdate) {
-      onTodoUpdate(draggedTodo, { time: newTime, duration: todo.duration });
+      onTodoUpdate(draggedTodo, { time: newTime, duration: currentDuration });
     }
   };
 
@@ -217,12 +300,51 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
 
   const dayTodos = getTodosForDate();
 
+  // 일정이 있는 첫 번째 시간대부터 스크롤
+  useEffect(() => {
+    if (scrollContainerRef.current && dayTodos.length > 0) {
+      // 일정이 있는 가장 이른 시간 찾기
+      const earliestTime = dayTodos.reduce((earliest, todo) => {
+        if (!todo.time || !earliest) return earliest || todo.time;
+        const [h1, m1] = (todo.time || '09:00').split(':').map(Number);
+        const [h2, m2] = (earliest || '09:00').split(':').map(Number);
+        const time1 = h1 * 60 + m1;
+        const time2 = h2 * 60 + m2;
+        return time1 < time2 ? todo.time : earliest;
+      }, '' as string | undefined);
+
+      if (earliestTime) {
+        // 시간 위치 계산 (0시부터의 비율)
+        const [hours, minutes] = earliestTime.split(':').map(Number);
+        const totalMinutes = hours * 60 + minutes;
+        const scrollPercentage = (totalMinutes / (24 * 60)) * 100;
+
+        // 스크롤 컨테이너의 총 높이 계산 (24시간 = 12개 time slot * 96px 각각 = 1152px)
+        const totalHeight = 12 * 96; // time slot 개수 * 각 높이
+        const scrollPosition = (scrollPercentage / 100) * totalHeight - 100; // 약간 위로 여유 공간
+
+        // 스크롤 적용
+        setTimeout(() => {
+          if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = Math.max(0, scrollPosition);
+          }
+        }, 100);
+      }
+    }
+  }, [dayTodos, selectedDate]);
+
   // Overlap Layout Algorithm
   const getOverlapLayout = (items: typeof dayTodos) => {
+    // 1. Filter out items without valid time and set default time if needed
+    const validItems = items.map(item => ({
+      ...item,
+      time: item.time || '09:00' // 기본 시간 설정
+    })).filter(item => typeof item.time === 'string' && item.time.includes(':'));
+
     // 1. Sort by start time, then duration
-    const sorted = [...items].sort((a, b) => {
-      const [Ah, Am] = a.time.split(':').map(Number);
-      const [Bh, Bm] = b.time.split(':').map(Number);
+    const sorted = [...validItems].sort((a, b) => {
+      const [Ah, Am] = (a.time || '09:00').split(':').map(Number);
+      const [Bh, Bm] = (b.time || '09:00').split(':').map(Number);
       const startA = Ah * 60 + Am;
       const startB = Bh * 60 + Bm;
       if (startA !== startB) return startA - startB;
@@ -235,9 +357,9 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
     let clusterMaxEnd = -1;
 
     sorted.forEach(item => {
-      const [h, m] = item.time.split(':').map(Number);
+      const [h, m] = (item.time || '09:00').split(':').map(Number);
       const start = h * 60 + m;
-      const end = start + item.duration;
+      const end = start + (item.duration || 60); // 기본 1시간
 
       if (currentCluster.length === 0) {
         currentCluster.push(item);
@@ -262,9 +384,9 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
       const columns: number[] = [];
 
       cluster.forEach(item => {
-        const [h, m] = item.time.split(':').map(Number);
+        const [h, m] = (item.time || '09:00').split(':').map(Number);
         const start = h * 60 + m;
-        const end = start + item.duration;
+        const end = start + (item.duration || 60);
 
         let colIndex = columns.findIndex(colEnd => colEnd <= start);
 
@@ -320,6 +442,7 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
 
       {/* Time Grid */}
       <div
+        ref={scrollContainerRef}
         className="overflow-auto max-h-[600px]"
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -384,9 +507,9 @@ export function DayCalendar({ todos, routines = [], onTodoUpdate, onTodoClick }:
                       onMouseDown={(e) => handleResizeStart(e, todo.id, todo.time, todo.duration, 'top')}
                     />
 
-                    <div className="font-semibold text-sm pointer-events-none">{todo.title}</div>
+                    <div className={`font-semibold text-sm pointer-events-none ${todo.completed ? 'line-through opacity-70' : ''}`}>{todo.title}</div>
                     <div className="text-xs mt-1 opacity-90 pointer-events-none">
-                      {todo.time} - {formatDuration(todo.duration)}
+                      {todo.time} - {formatDuration(todo.duration || 60)}
                     </div>
                     <div className="text-xs mt-1 bg-white/20 inline-block px-2 py-0.5 rounded-full pointer-events-none">
                       {todo.category}

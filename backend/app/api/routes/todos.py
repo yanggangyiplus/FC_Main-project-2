@@ -76,7 +76,8 @@ async def get_todos(
             "updated_at": todo.updated_at,
             "google_calendar_event_id": todo.google_calendar_event_id,  # Google Calendar 이벤트 ID 추가
             "bulk_synced": todo.bulk_synced if hasattr(todo, 'bulk_synced') else False,  # 일괄 동기화 플래그
-            "todo_group_id": todo.todo_group_id if hasattr(todo, 'todo_group_id') else None  # 일정 그룹 ID
+            "todo_group_id": todo.todo_group_id if hasattr(todo, 'todo_group_id') else None,  # 일정 그룹 ID
+            "source": todo.source if hasattr(todo, 'source') else 'always_plan'  # 일정 소스 (google_calendar 또는 always_plan)
         }
         result.append(todo_dict)
     
@@ -247,11 +248,14 @@ async def create_todo(
     
     # 반복 일정인 경우 그룹 ID 생성 (없으면 생성)
     import uuid
-    if todo.repeat_type and todo.repeat_type != "none" and not todo.todo_group_id:
-        todo.todo_group_id = f"repeat_{uuid.uuid4().hex[:12]}"
-        logger.info(f"[CREATE_TODO] 반복 그룹 ID 생성: {todo.todo_group_id}")
+    repeat_group_id = todo.todo_group_id
+    if todo.repeat_type and todo.repeat_type != "none":
+        if not repeat_group_id:
+            repeat_group_id = f"repeat_{uuid.uuid4().hex[:12]}"
+            logger.info(f"[CREATE_TODO] 반복 그룹 ID 생성: {repeat_group_id}")
+        todo.todo_group_id = repeat_group_id
     
-    db_todo.todo_group_id = todo.todo_group_id  # 그룹 ID 설정
+    db_todo.todo_group_id = repeat_group_id  # 그룹 ID 설정 (반복 일정인 경우 반복 그룹 ID 사용)
     db.add(db_todo)
     db.commit()
     db.refresh(db_todo)
@@ -298,15 +302,14 @@ async def create_todo(
         
         from datetime import timedelta
         
-        # 반복 그룹 ID (첫 번째 일정과 동일한 그룹 ID 사용)
+        # 반복 그룹 ID는 이미 설정된 값 사용 (원본 일정과 동일)
         repeat_group_id = db_todo.todo_group_id
         if not repeat_group_id:
-            import uuid
             repeat_group_id = f"repeat_{uuid.uuid4().hex[:12]}"
             db_todo.todo_group_id = repeat_group_id
             db.commit()
             db.refresh(db_todo)
-        logger.info(f"[CREATE_TODO] 반복 그룹 ID: {repeat_group_id}")
+        logger.info(f"[CREATE_TODO] 반복 그룹 ID: {repeat_group_id} (원본 일정과 동일)")
         
         # 시작 날짜와 종료 날짜
         start_date = db_todo.date

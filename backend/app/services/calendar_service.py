@@ -622,7 +622,7 @@ class GoogleCalendarService:
             logger.info(f"[LIST_EVENTS] Google Calendar API 호출 - timeMin: {time_min_str}, timeMax: {time_max_str}, maxResults: {max_results}")
             logger.info(f"[LIST_EVENTS] 원본 시간 - time_min: {time_min}, time_max: {time_max}")
             
-            # 이벤트 목록 가져오기
+            # 이벤트 목록 가져오기 (페이지네이션 지원)
             try:
                 # 캘린더 목록 먼저 확인
                 calendar_list = service.calendarList().list().execute()
@@ -637,21 +637,40 @@ class GoogleCalendarService:
                     primary_calendar_id = 'primary'
                     logger.warning(f"[LIST_EVENTS] Primary 캘린더를 찾을 수 없어 'primary' 사용")
                 
-                events_result = service.events().list(
-                    calendarId=primary_calendar_id,
-                    timeMin=time_min_str,
-                    timeMax=time_max_str,
-                    maxResults=max_results,
-                    singleEvents=True,
-                    orderBy='startTime',
-                    timeZone='UTC'  # 시간대 명시
-                ).execute()
+                # 모든 이벤트를 가져오기 위해 페이지네이션 처리
+                all_events = []
+                page_token = None
+                page_count = 0
                 
-                logger.info(f"[LIST_EVENTS] Google Calendar API 응답 받음")
-                logger.info(f"[LIST_EVENTS] 응답 키: {list(events_result.keys())}")
+                while True:
+                    page_count += 1
+                    request_params = {
+                        'calendarId': primary_calendar_id,
+                        'timeMin': time_min_str,
+                        'timeMax': time_max_str,
+                        'maxResults': max_results,
+                        'singleEvents': True,
+                        'orderBy': 'startTime',
+                        'timeZone': 'UTC'  # 시간대 명시
+                    }
+                    
+                    if page_token:
+                        request_params['pageToken'] = page_token
+                    
+                    events_result = service.events().list(**request_params).execute()
+                    
+                    page_events = events_result.get('items', [])
+                    all_events.extend(page_events)
+                    
+                    logger.info(f"[LIST_EVENTS] 페이지 {page_count}: {len(page_events)}개 이벤트 가져옴 (전체: {len(all_events)}개)")
                 
-                events = events_result.get('items', [])
-                logger.info(f"[LIST_EVENTS] Google Calendar 이벤트 {len(events)}개 가져오기 성공")
+                    # 다음 페이지가 없으면 종료
+                    page_token = events_result.get('nextPageToken')
+                    if not page_token:
+                        break
+                
+                logger.info(f"[LIST_EVENTS] Google Calendar API 응답 받음 (총 {len(all_events)}개 이벤트)")
+                events = all_events
                 
                 # 응답 전체 구조 로깅 (디버깅용)
                 if len(events) == 0:

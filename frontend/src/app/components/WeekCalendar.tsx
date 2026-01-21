@@ -25,11 +25,13 @@ interface WeekCalendarProps {
   }>;
   familyMembers?: FamilyMember[]; // 프로필 목록
   selectedMembers?: string[]; // 선택된 프로필 ID 목록
+  selectedDate?: string | null; // 선택된 날짜
+  onDateSelect?: (date: string) => void; // 날짜 선택 콜백
   onTodoUpdate?: (id: string, updates: { time: string; duration: number }) => void;
   onTodoClick?: (todoId: string) => void;
 }
 
-export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], onTodoUpdate, onTodoClick }: WeekCalendarProps) {
+export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], selectedDate, onDateSelect, onTodoUpdate, onTodoClick }: WeekCalendarProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [draggedTodo, setDraggedTodo] = useState<string | null>(null);
   const [resizeMode, setResizeMode] = useState<'top' | 'bottom' | null>(null);
@@ -81,18 +83,31 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
     let regularTodos = todos.filter((todo) => {
       if (!todo.date) return false;
 
-      // 프로필 필터링
+      // 프로필 필터링 (assignedMemberIds 지원)
       if (selectedMembers.length > 0) {
         // 프로필이 선택되어 있는 경우:
         // - 담당 프로필이 있는 일정: 선택된 프로필에 포함되어야 함
         // - 담당 프로필이 없는 일정: 표시 (프로필이 선택되어 있어도 담당 프로필 없는 일정은 표시)
-        if (todo.memberId && !selectedMembers.includes(todo.memberId)) {
+        const hasAssignedMembers = todo.assignedMemberIds && Array.isArray(todo.assignedMemberIds) && todo.assignedMemberIds.length > 0;
+        const hasMemberId = todo.memberId;
+        
+        if (hasAssignedMembers) {
+          // assignedMemberIds 중 하나라도 선택된 프로필에 포함되어야 함
+          // ID 타입을 문자열로 통일하여 비교
+          const assignedIds = todo.assignedMemberIds.map((id: any) => String(id));
+          const selectedIds = selectedMembers.map((id: string) => String(id));
+          const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+          if (!hasSelectedMember) {
+            return false;
+          }
+        } else if (hasMemberId && !selectedMembers.includes(String(todo.memberId))) {
           return false;
         }
-        // todo.memberId가 없으면 (담당 프로필이 없으면) 표시
+        // 담당 프로필이 없으면 표시
       } else {
         // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
-        if (todo.memberId) {
+        const hasAssignedMembers = todo.assignedMemberIds && Array.isArray(todo.assignedMemberIds) && todo.assignedMemberIds.length > 0;
+        if (todo.memberId || hasAssignedMembers) {
           return false;
         }
       }
@@ -120,15 +135,23 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
     // Fallback for "Today's" mock todos that might not have a date
     if (dateStr === todayStr) {
       const todayMockTodos = todos.filter(t => {
-        // 프로필 필터링 적용
+        // 프로필 필터링 적용 (assignedMemberIds 지원)
         if (selectedMembers.length > 0) {
-          if (t.memberId && !selectedMembers.includes(t.memberId)) {
+          const hasAssignedMembers = t.assignedMemberIds && t.assignedMemberIds.length > 0;
+          const hasMemberId = t.memberId;
+          
+          if (hasAssignedMembers) {
+            const hasSelectedMember = t.assignedMemberIds.some((id: string) => selectedMembers.includes(id));
+            if (!hasSelectedMember) {
+              return false;
+            }
+          } else if (hasMemberId && !selectedMembers.includes(t.memberId)) {
             return false;
           }
-          // t.memberId가 없으면 표시
         } else {
           // 모든 프로필이 꺼져 있으면 담당 프로필이 없는 일정만 표시
-          if (t.memberId) {
+          const hasAssignedMembers = t.assignedMemberIds && t.assignedMemberIds.length > 0;
+          if (t.memberId || hasAssignedMembers) {
             return false;
           }
         }
@@ -329,12 +352,24 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
           <div className="px-2 py-2 text-xs text-[#9CA3AF]"></div>
           {weekDates.map((date, index) => {
             const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
+            const dateStr = date.toISOString().split('T')[0];
+            const isSelected = selectedDate === dateStr;
+
             return (
               <div key={index} className="text-center py-2">
                 <div className={`text-xs font-medium ${index === 0 ? "text-[#EF4444]" : index === 6 ? "text-[#3B82F6]" : "text-[#1F2937]"}`}>
                   {dayNames[index]}
                 </div>
-                <div className={`text-sm mt-1 ${isToday(date) ? "bg-[#FF9B82] text-white rounded-full w-6 h-6 flex items-center justify-center mx-auto font-bold" : ""}`}>
+                <div
+                  className={`text-sm mt-1 cursor-pointer transition-all duration-200 ${
+                    isSelected
+                      ? "bg-[#FF9B82] text-white rounded-full w-7 h-7 flex items-center justify-center mx-auto font-bold shadow-md"
+                      : isToday(date)
+                        ? "bg-[#FFE8E0] text-[#FF9B82] rounded-full w-6 h-6 flex items-center justify-center mx-auto font-bold"
+                        : "hover:bg-[#F9FAFB] rounded-full w-6 h-6 flex items-center justify-center mx-auto"
+                  }`}
+                  onClick={() => onDateSelect && onDateSelect(dateStr)}
+                >
                   {date.getDate()}
                 </div>
               </div>
@@ -445,7 +480,7 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
                           onMouseLeave={() => setHoveredTodo(null)}
                           onClick={() => handleItemClick(todo.id)}
                         >
-                          <div className="text-xs font-medium truncate pointer-events-none flex-1">
+                          <div className={`text-xs font-medium truncate pointer-events-none flex-1 ${todo.completed ? 'line-through opacity-70' : ''}`}>
                             {todo.title}
                           </div>
                         </div>
@@ -520,7 +555,7 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
                         )}
 
                         {/* Content */}
-                        <div className="text-xs font-medium truncate pointer-events-none">
+                        <div className={`text-xs font-medium truncate pointer-events-none ${todo.completed ? 'line-through opacity-70' : ''}`}>
                           {todo.title}
                         </div>
                         <div className={`text-xs opacity-90 pointer-events-none ${backgroundColor ? 'text-white' : ''}`}>

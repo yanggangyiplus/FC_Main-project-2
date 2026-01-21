@@ -152,7 +152,7 @@ class GeminiSTTService:
                 'confidence': 0.0,
             }
     
-    async def extract_todo_info(self, text: str) -> Dict:
+    async def extract_todo_info(self, text: str, member_names: list = None, family_members: list = None) -> Dict:
         """
         텍스트에서 일정 정보를 추출 (LLM 사용)
         추출 항목: 제목, 날짜, 시간, 카테고리, 체크리스트, 장소, 메모, 반복설정, 알림설정
@@ -180,7 +180,18 @@ class GeminiSTTService:
             current_month = today.month
             current_day = today.day
             
+            # 담당 프로필 정보 준비
+            member_info_text = ""
+            member_id_map = {}  # 이름 -> ID 매핑
+            if member_names and family_members:
+                member_info_text = f"\n가족 구성원 이름 목록: {', '.join(member_names)}"
+                # 이름 -> ID 매핑 생성 (사용자 이름은 "me"로 처리)
+                for member in family_members:
+                    if member.get('name'):
+                        member_id_map[member['name']] = member.get('id')
+            
             prompt = f"""다음 텍스트를 분석하여 일정 정보를 추출해주세요. JSON 형식으로 응답해주세요.
+{member_info_text}
 
 현재 날짜: {today_str} ({current_year}-{current_month:02d}-{current_day:02d})
 
@@ -195,7 +206,7 @@ class GeminiSTTService:
 4. start_time: 시작 시간 (HH:MM 형식, 언급이 없으면 null)
 5. end_time: 종료 시간 (HH:MM 형식, 언급이 없으면 null)
 6. all_day: 하루종일 여부 (시간이 명시되지 않으면 true, 시간이 있으면 false)
-7. category: 카테고리 (언급이 없으면 내용을 바탕으로 자동 분류: 운동, 건강, 업무, 생활, 공부, 기타 중 하나)
+7. category: 카테고리 (언급이 없으면 내용을 바탕으로 자동 분류: 공부, 업무, 약속, 생활, 건강, 구글, 기타 중 가장 잘 맞는 카테고리 선택)
 8. checklist: 체크리스트 항목 (일정을 토대로 2-5개의 항목을 추천, 배열로 반환)
 9. location: 장소 (언급이 있으면 추출, 없으면 빈 문자열)
 10. memo: 원본 텍스트 전체
@@ -208,6 +219,10 @@ class GeminiSTTService:
    - 예시: "30분 전 알림" → [{{"value": 30, "unit": "minutes"}}]
    - 예시: "1시간 전과 1일 전 알림" → [{{"value": 1, "unit": "hours"}}, {{"value": 1, "unit": "days"}}]
 16. notification_times: 알림 시간 배열 (구버전 호환용, 기본값 빈 배열)
+17. assigned_member_names: 담당 프로필 이름 배열 (텍스트에서 언급된 가족 구성원 이름 목록, 예: ["나", "선영"], 없으면 빈 배열)
+   - "나", "내일" 등은 "나"로 인식
+   - 가족 구성원 이름이 텍스트에 언급되면 해당 이름을 배열에 추가
+   - 예시: "나 내일 선영님이랑 점심 약속있어" → ["나", "선영"]
 
 텍스트: {text}
 
@@ -295,6 +310,27 @@ JSON 형식으로만 응답해주세요. 다른 설명 없이 JSON만 반환해�
             if 'notification_reminders' not in result:
                 result['notification_reminders'] = []
             
+            # 담당 프로필 ID 매핑
+            assigned_member_ids = []
+            if 'assigned_member_names' in result and isinstance(result['assigned_member_names'], list):
+                for member_name in result['assigned_member_names']:
+                    # "나"는 현재 사용자로 처리 (family_members에 없을 수 있음)
+                    if member_name == "나":
+                        # "나"는 특별 처리하지 않고, 실제 가족 구성원 이름만 매핑
+                        continue
+                    # 이름으로 ID 찾기
+                    if member_name in member_id_map:
+                        assigned_member_ids.append(member_id_map[member_name])
+                    # 부분 일치 검색 (예: "선영님" -> "선영")
+                    else:
+                        for member in (family_members or []):
+                            member_name_clean = member.get('name', '').strip()
+                            if member_name_clean and (member_name in member_name_clean or member_name_clean in member_name):
+                                assigned_member_ids.append(member.get('id'))
+                                break
+            
+            result['assigned_member_ids'] = assigned_member_ids
+            
             result['success'] = True
             return result
             
@@ -319,6 +355,7 @@ JSON 형식으로만 응답해주세요. 다른 설명 없이 JSON만 반환해�
                 'has_notification': False,
                 'notification_times': [],
                 'notification_reminders': [],
+                'assigned_member_ids': [],
                 'memo': text,
                 'repeat_type': 'none',
                 'has_notification': False,

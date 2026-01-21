@@ -2,6 +2,13 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { RoutineItem } from "./RoutineView";
 
+interface FamilyMember {
+  id: string;
+  name: string;
+  emoji: string;
+  color: string;
+}
+
 interface MonthCalendarProps {
   todos: Array<{
     id: string;
@@ -12,14 +19,18 @@ interface MonthCalendarProps {
     category: string;
     date?: string;
     endDate?: string; // 종료 날짜 (기간 일정)
+    memberId?: string;
+    assignedMemberIds?: string[];
   }>;
   routines?: RoutineItem[]; // Added routines prop
+  familyMembers?: FamilyMember[]; // 프로필 목록
+  selectedMembers?: string[]; // 선택된 프로필 ID 목록
   selectedDate?: string | null; // 선택된 날짜
   onDateSelect?: (date: string) => void;
   onTodoClick?: (todoId: string) => void;
 }
 
-export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect, onTodoClick }: MonthCalendarProps) {
+export function MonthCalendar({ todos, routines = [], familyMembers = [], selectedMembers = [], selectedDate, onDateSelect, onTodoClick }: MonthCalendarProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [hoveredDate, setHoveredDate] = useState<number | null>(null);
 
@@ -58,6 +69,34 @@ export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect
     const dayTodos = todos
       .filter((todo) => {
         if (!todo.date) return false;
+        
+        // 프로필 필터링 (assignedMemberIds 지원)
+        if (selectedMembers.length > 0) {
+          // 프로필이 선택되어 있는 경우:
+          // - 담당 프로필이 있는 일정: 선택된 프로필에 포함되어야 함
+          // - 담당 프로필이 없는 일정: 표시 (프로필이 선택되어 있어도 담당 프로필 없는 일정은 표시)
+          const hasAssignedMembers = todo.assignedMemberIds && Array.isArray(todo.assignedMemberIds) && todo.assignedMemberIds.length > 0;
+          const hasMemberId = todo.memberId;
+          
+          if (hasAssignedMembers) {
+            // assignedMemberIds 중 하나라도 선택된 프로필에 포함되어야 함
+            const assignedIds = todo.assignedMemberIds.map((id: any) => String(id));
+            const selectedIds = selectedMembers.map((id: string) => String(id));
+            const hasSelectedMember = assignedIds.some((id: string) => selectedIds.includes(id));
+            if (!hasSelectedMember) {
+              return false;
+            }
+          } else if (hasMemberId && !selectedMembers.includes(String(todo.memberId))) {
+            return false;
+          }
+          // 담당 프로필이 없으면 표시
+        } else {
+          // 모든 프로필이 꺼져 있는 경우: 담당 프로필이 없는 일정만 표시
+          const hasAssignedMembers = todo.assignedMemberIds && Array.isArray(todo.assignedMemberIds) && todo.assignedMemberIds.length > 0;
+          if (todo.memberId || hasAssignedMembers) {
+            return false;
+          }
+        }
         
         // 시작일과 동일한 경우
         if (todo.date === dateStr) return true;
@@ -103,7 +142,7 @@ export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect
         }}
         onMouseEnter={() => setHoveredDate(day)}
         onMouseLeave={() => setHoveredDate(null)}
-        className={`aspect-square flex flex-col items-center justify-center rounded-lg relative transition-all hover:bg-[#FFF0EB] ${
+        className={`aspect-square flex flex-col items-center justify-center rounded-md sm:rounded-lg relative transition-all hover:bg-[#FFF0EB] ${
           isTodayDate
             ? "bg-[#FF9B82] text-white font-bold"
             : isSelectedDate
@@ -111,7 +150,7 @@ export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect
             : "text-[#1F2937]"
         }`}
       >
-        <span className="text-sm">{day}</span>
+        <span className="text-xs sm:text-sm">{day}</span>
         {hasEvent && !isTodayDate && (
           <div className="absolute bottom-1 right-1 w-1.5 h-1.5 bg-[#EF4444] rounded-full" />
         )}
@@ -159,33 +198,33 @@ export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect
 
   return (
     <div className="bg-white">
-      {/* Calendar Header */}
-      <div className="px-4 py-3 flex items-center justify-between border-b border-[#F3F4F6]">
+      {/* Calendar Header - 반응형 */}
+      <div className="px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-between border-b border-[#F3F4F6]">
         <button
           onClick={prevMonth}
-          className="p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
+          className="p-1.5 sm:p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
         >
-          <ChevronLeft size={20} className="text-[#6B7280]" />
+          <ChevronLeft size={18} className="text-[#6B7280] sm:size-5" />
         </button>
-        <h2 className="font-semibold text-[#1F2937]">
+        <h2 className="font-semibold text-sm sm:text-base text-[#1F2937]">
           {year}년 {month + 1}월
         </h2>
         <button
           onClick={nextMonth}
-          className="p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
+          className="p-1.5 sm:p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
         >
-          <ChevronRight size={20} className="text-[#6B7280]" />
+          <ChevronRight size={18} className="text-[#6B7280] sm:size-5" />
         </button>
       </div>
 
-      {/* Calendar Grid */}
-      <div className="px-4 py-3">
+      {/* Calendar Grid - 반응형 */}
+      <div className="px-2 sm:px-4 py-2 sm:py-3">
         {/* Week days */}
-        <div className="grid grid-cols-7 gap-1 mb-2">
+        <div className="grid grid-cols-7 gap-0.5 sm:gap-1 mb-1 sm:mb-2">
           {weekDays.map((day, index) => (
             <div
               key={day}
-              className={`text-center text-xs font-medium py-2 ${index === 0
+              className={`text-center text-[10px] sm:text-xs font-medium py-1 sm:py-2 ${index === 0
                 ? "text-[#EF4444]"
                 : index === 6
                   ? "text-[#3B82F6]"
@@ -198,7 +237,7 @@ export function MonthCalendar({ todos, routines = [], selectedDate, onDateSelect
         </div>
 
         {/* Days grid */}
-        <div className="grid grid-cols-7 gap-1">{days}</div>
+        <div className="grid grid-cols-7 gap-0.5 sm:gap-1">{days}</div>
       </div>
     </div>
   );

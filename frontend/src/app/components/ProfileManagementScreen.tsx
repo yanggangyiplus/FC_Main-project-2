@@ -1,4 +1,4 @@
-import { ArrowLeft, Users, Edit2, Trash2, Plus } from "lucide-react";
+import { ArrowLeft, Users, Edit2, Trash2, Plus, X } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { apiClient } from "@/services/apiClient";
@@ -39,9 +39,14 @@ export function ProfileManagementScreen({ isOpen, onClose, onProfileUpdate }: Pr
     try {
       // 현재 사용자 정보 로드
       const userResponse = await apiClient.getCurrentUser();
+      let userName = "나";
+      let userEmoji = "🐼";
+      
       if (userResponse && userResponse.data) {
-        setCurrentUserName(userResponse.data.name || "나");
-        setCurrentUserEmoji(userResponse.data.avatar_emoji || "🐼");
+        userName = userResponse.data.name || "나";
+        userEmoji = userResponse.data.avatar_emoji || "🐼";
+        setCurrentUserName(userName);
+        setCurrentUserEmoji(userEmoji);
       }
 
       // 가족 구성원 로드
@@ -72,11 +77,11 @@ export function ProfileManagementScreen({ isOpen, onClose, onProfileUpdate }: Pr
           };
         });
 
-        // "나" 항목을 맨 앞에 추가
+        // "나" 항목을 맨 앞에 추가 (사용자 정보를 직접 사용)
         formattedMembers.unshift({
           id: "me",
-          name: currentUserName || "나",
-          emoji: currentUserEmoji || "🐼",
+          name: userName,
+          emoji: userEmoji,
           color: "rgba(255, 155, 130, 0.6)",
         });
 
@@ -225,13 +230,16 @@ export function ProfileManagementScreen({ isOpen, onClose, onProfileUpdate }: Pr
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-white z-50 flex flex-col max-w-[375px] mx-auto">
+    <div className="w-full h-full flex flex-col">
       {/* Header */}
-      <div className="bg-white px-4 py-4 flex items-center gap-3 border-b border-[#F3F4F6]">
-        <button onClick={onClose} className="p-1">
-          <ArrowLeft size={24} className="text-[#1F2937]" />
+      <div className="flex items-center justify-between p-6 border-b border-[#F3F4F6]">
+        <h2 className="text-lg font-bold text-[#1F2937]">프로필 관리</h2>
+        <button
+          onClick={onClose}
+          className="p-2 hover:bg-[#F9FAFB] rounded-lg transition-colors"
+        >
+          <X size={20} className="text-[#6B7280]" />
         </button>
-        <h1 className="flex-1 font-semibold text-[#1F2937]">프로필 관리</h1>
       </div>
 
       {/* Content */}
