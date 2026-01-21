@@ -7,7 +7,12 @@ import os
 
 def get_cors_origins() -> list:
     """CORS origins 파싱"""
-    cors_str = os.getenv("CORS_ORIGINS", "http://localhost:5173")
+    default_origins = (
+        "http://localhost:5173"
+        if os.getenv("ENVIRONMENT", "development") == "development"
+        else "https://always-plan-fc.web.app,http://localhost:5173"
+    )
+    cors_str = os.getenv("CORS_ORIGINS", default_origins)
     return [origin.strip() for origin in cors_str.split(",")]
 
 
