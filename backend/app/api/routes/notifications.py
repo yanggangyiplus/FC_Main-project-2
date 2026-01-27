@@ -30,8 +30,10 @@ def send_scheduled_emails(db: Session):
     예정된 알림 이메일 발송 (백그라운드 작업)
     """
     try:
-        # 현재 시간
-        now = datetime.now()
+        # 현재 시간 (한국 시간대 사용)
+        from zoneinfo import ZoneInfo
+        kst = ZoneInfo("Asia/Seoul")
+        now = datetime.now(kst).replace(tzinfo=None)  # naive datetime으로 변환하여 비교
         
         # 알림이 필요한 일정 조회 (알림 설정이 있고, 삭제되지 않은 일정)
         todos = db.query(Todo).filter(
