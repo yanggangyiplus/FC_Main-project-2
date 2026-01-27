@@ -18,7 +18,7 @@ const firebaseConfig = {
 };
 
 // VAPID 키 (Firebase Console > Cloud Messaging > Web Push certificates에서 생성)
-const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY || '';
+const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY || 'BJoIomALyR7T2O2DRwG37yAeOHsZDwINb70u8rH7Hf2NxQooTNQJd4Z3rXd5V_wMdtX4Bva39VeLn82UvevvvgU';
 
 let app: FirebaseApp | null = null;
 let messaging: Messaging | null = null;

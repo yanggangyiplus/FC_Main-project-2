@@ -1,7 +1,13 @@
-import { ArrowLeft, X } from "lucide-react";
+import { ArrowLeft, X, Mail, Bell, BellOff } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { apiClient } from "@/services/apiClient";
+import {
+  requestNotificationPermission,
+  getNotificationPermissionStatus,
+  initializeFirebase,
+  setupForegroundMessageListener
+} from "@/services/firebaseMessaging";
 
 interface SettingsScreenProps {
   isOpen: boolean;
@@ -11,19 +17,86 @@ interface SettingsScreenProps {
 }
 
 export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTodos }: SettingsScreenProps) {
-  const [notificationEnabled, setNotificationEnabled] = useState(true);
+  const [notificationPreference, setNotificationPreference] = useState<'email' | 'push' | 'both' | 'none'>('email');
+  const [pushPermissionStatus, setPushPermissionStatus] = useState<'granted' | 'denied' | 'default' | 'unsupported'>('default');
+  const [hasFcmToken, setHasFcmToken] = useState(false);
+  const [isNotificationLoading, setIsNotificationLoading] = useState(false);
   const [googleCalendarEnabled, setGoogleCalendarEnabled] = useState(false);
   const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false);
   const [googleCalendarImportEnabled, setGoogleCalendarImportEnabled] = useState(false);
   const [googleCalendarExportEnabled, setGoogleCalendarExportEnabled] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isSyncLoading, setIsSyncLoading] = useState(false); // 동기화 후 저장 버튼 전용 로딩 상태
-  // Google Calendar 연동 상태 확인
+  const [isSyncLoading, setIsSyncLoading] = useState(false);
+
+  // 알림 설정 및 Google Calendar 연동 상태 확인
   useEffect(() => {
     if (isOpen) {
       checkCalendarStatus();
+      checkNotificationPreference();
+      checkPushPermission();
     }
   }, [isOpen]);
+
+  // Firebase 초기화
+  useEffect(() => {
+    initializeFirebase();
+  }, []);
+
+  // 알림 설정 확인
+  const checkNotificationPreference = async () => {
+    try {
+      const response = await apiClient.getNotificationPreference();
+      if (response.data) {
+        setNotificationPreference(response.data.preference || 'email');
+        setHasFcmToken(response.data.has_fcm_token || false);
+      }
+    } catch (error) {
+      console.error("알림 설정 확인 실패:", error);
+    }
+  };
+
+  // 푸시 권한 상태 확인
+  const checkPushPermission = () => {
+    const status = getNotificationPermissionStatus();
+    setPushPermissionStatus(status);
+  };
+
+  // 알림 설정 변경
+  const handleNotificationPreferenceChange = async (preference: 'email' | 'push' | 'both' | 'none') => {
+    if (isNotificationLoading) return;
+    setIsNotificationLoading(true);
+
+    try {
+      // push 또는 both를 선택하면 FCM 권한 요청
+      if ((preference === 'push' || preference === 'both') && pushPermissionStatus !== 'granted') {
+        const token = await requestNotificationPermission();
+        if (!token) {
+          toast.error("푸시 알림 권한이 거부되었습니다. 브라우저 설정에서 허용해주세요.");
+          setIsNotificationLoading(false);
+          return;
+        }
+        setPushPermissionStatus('granted');
+        setHasFcmToken(true);
+      }
+
+      // 백엔드에 설정 저장
+      await apiClient.updateNotificationPreference(preference);
+      setNotificationPreference(preference);
+
+      const messages: Record<string, string> = {
+        'email': '이메일 알림으로 설정되었습니다.',
+        'push': '푸시 알림으로 설정되었습니다.',
+        'both': '이메일 + 푸시 알림으로 설정되었습니다.',
+        'none': '알림이 비활성화되었습니다.'
+      };
+      toast.success(messages[preference]);
+    } catch (error: any) {
+      console.error("알림 설정 변경 실패:", error);
+      toast.error("알림 설정 변경에 실패했습니다.");
+    } finally {
+      setIsNotificationLoading(false);
+    }
+  };
 
   const checkCalendarStatus = async () => {
     try {
@@ -49,12 +122,6 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
   };
 
   if (!isOpen) return null;
-
-  const handleNotificationToggle = () => {
-    const newState = !notificationEnabled;
-    setNotificationEnabled(newState);
-    toast.success(newState ? "알림이 활성화되었습니다." : "알림이 비활성화되었습니다.");
-  };
 
   const handleGoogleCalendarToggle = async () => {
     if (isLoading) return;
@@ -126,24 +193,123 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
         {/* Notification Settings */}
         <div className="bg-white p-6 mb-4">
           <h3 className="font-medium text-[#1F2937] mb-4">알림 설정</h3>
-          <div className="flex items-center justify-between py-3">
-            <div>
-              <div className="font-medium text-[#1F2937]">푸시 알림</div>
-              <div className="text-sm text-[#6B7280] mt-1">
-                일정 알림을 받아보세요
-              </div>
-            </div>
+          <p className="text-sm text-[#6B7280] mb-4">
+            일정 알림을 받을 방법을 선택하세요
+          </p>
+
+          <div className="space-y-2">
+            {/* 이메일 알림 */}
             <button
-              onClick={handleNotificationToggle}
-              className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${notificationEnabled ? "bg-[#FF9B82]" : "bg-[#D1D5DB]"
-                }`}
+              onClick={() => handleNotificationPreferenceChange('email')}
+              disabled={isNotificationLoading}
+              className={`w-full flex items-center p-3 rounded-lg border-2 transition-all ${
+                notificationPreference === 'email'
+                  ? 'border-[#FF9B82] bg-[#FFF5F3]'
+                  : 'border-[#E5E7EB] hover:border-[#FF9B82]/50'
+              } ${isNotificationLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              <div
-                className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-200 ${notificationEnabled ? "translate-x-6" : "translate-x-0"
-                  }`}
-              />
+              <Mail size={20} className={notificationPreference === 'email' ? 'text-[#FF9B82]' : 'text-[#6B7280]'} />
+              <div className="ml-3 text-left flex-1">
+                <div className="font-medium text-[#1F2937]">이메일만</div>
+                <div className="text-xs text-[#6B7280]">등록된 이메일로 알림</div>
+              </div>
+              {notificationPreference === 'email' && (
+                <div className="w-5 h-5 rounded-full bg-[#FF9B82] flex items-center justify-center">
+                  <div className="w-2 h-2 rounded-full bg-white" />
+                </div>
+              )}
+            </button>
+
+            {/* 푸시 알림 */}
+            <button
+              onClick={() => handleNotificationPreferenceChange('push')}
+              disabled={isNotificationLoading || pushPermissionStatus === 'denied'}
+              className={`w-full flex items-center p-3 rounded-lg border-2 transition-all ${
+                notificationPreference === 'push'
+                  ? 'border-[#FF9B82] bg-[#FFF5F3]'
+                  : 'border-[#E5E7EB] hover:border-[#FF9B82]/50'
+              } ${isNotificationLoading || pushPermissionStatus === 'denied' ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <Bell size={20} className={notificationPreference === 'push' ? 'text-[#FF9B82]' : 'text-[#6B7280]'} />
+              <div className="ml-3 text-left flex-1">
+                <div className="font-medium text-[#1F2937]">푸시만</div>
+                <div className="text-xs text-[#6B7280]">
+                  {pushPermissionStatus === 'denied'
+                    ? '브라우저에서 알림이 차단됨'
+                    : '브라우저 푸시 알림'}
+                </div>
+              </div>
+              {notificationPreference === 'push' && (
+                <div className="w-5 h-5 rounded-full bg-[#FF9B82] flex items-center justify-center">
+                  <div className="w-2 h-2 rounded-full bg-white" />
+                </div>
+              )}
+            </button>
+
+            {/* 이메일 + 푸시 */}
+            <button
+              onClick={() => handleNotificationPreferenceChange('both')}
+              disabled={isNotificationLoading || pushPermissionStatus === 'denied'}
+              className={`w-full flex items-center p-3 rounded-lg border-2 transition-all ${
+                notificationPreference === 'both'
+                  ? 'border-[#FF9B82] bg-[#FFF5F3]'
+                  : 'border-[#E5E7EB] hover:border-[#FF9B82]/50'
+              } ${isNotificationLoading || pushPermissionStatus === 'denied' ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <div className="relative">
+                <Mail size={16} className={notificationPreference === 'both' ? 'text-[#FF9B82]' : 'text-[#6B7280]'} />
+                <Bell size={14} className={`absolute -bottom-1 -right-1 ${notificationPreference === 'both' ? 'text-[#FF9B82]' : 'text-[#6B7280]'}`} />
+              </div>
+              <div className="ml-3 text-left flex-1">
+                <div className="font-medium text-[#1F2937]">이메일 + 푸시</div>
+                <div className="text-xs text-[#6B7280]">모든 알림 방법 사용</div>
+              </div>
+              {notificationPreference === 'both' && (
+                <div className="w-5 h-5 rounded-full bg-[#FF9B82] flex items-center justify-center">
+                  <div className="w-2 h-2 rounded-full bg-white" />
+                </div>
+              )}
+            </button>
+
+            {/* 알림 끄기 */}
+            <button
+              onClick={() => handleNotificationPreferenceChange('none')}
+              disabled={isNotificationLoading}
+              className={`w-full flex items-center p-3 rounded-lg border-2 transition-all ${
+                notificationPreference === 'none'
+                  ? 'border-[#FF9B82] bg-[#FFF5F3]'
+                  : 'border-[#E5E7EB] hover:border-[#FF9B82]/50'
+              } ${isNotificationLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <BellOff size={20} className={notificationPreference === 'none' ? 'text-[#FF9B82]' : 'text-[#6B7280]'} />
+              <div className="ml-3 text-left flex-1">
+                <div className="font-medium text-[#1F2937]">알림 끄기</div>
+                <div className="text-xs text-[#6B7280]">알림을 받지 않음</div>
+              </div>
+              {notificationPreference === 'none' && (
+                <div className="w-5 h-5 rounded-full bg-[#FF9B82] flex items-center justify-center">
+                  <div className="w-2 h-2 rounded-full bg-white" />
+                </div>
+              )}
             </button>
           </div>
+
+          {/* 푸시 권한 안내 */}
+          {pushPermissionStatus === 'denied' && (
+            <div className="mt-3 p-3 bg-[#FEF2F2] rounded-lg">
+              <p className="text-xs text-[#DC2626]">
+                브라우저에서 알림이 차단되어 있습니다. 푸시 알림을 사용하려면 브라우저 설정에서 알림을 허용해주세요.
+              </p>
+            </div>
+          )}
+
+          {pushPermissionStatus === 'unsupported' && (
+            <div className="mt-3 p-3 bg-[#FEF3C7] rounded-lg">
+              <p className="text-xs text-[#92400E]">
+                이 브라우저는 푸시 알림을 지원하지 않습니다.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Google Calendar Integration */}
