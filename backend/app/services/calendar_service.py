@@ -705,3 +705,159 @@ class GoogleCalendarService:
         except Exception as e:
             logger.error(f"[LIST_EVENTS] 이벤트 목록 가져오기 실패: {e}", exc_info=True)
             return []
+
+    @staticmethod
+    async def register_watch(
+        token_json: str,
+        webhook_url: str,
+        channel_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Google Calendar Watch 등록 (Push Notifications)
+
+        Args:
+            token_json: 사용자의 Google Calendar 토큰 (JSON 문자열)
+            webhook_url: 알림을 받을 웹훅 URL
+            channel_id: 고유한 채널 ID (UUID 권장)
+
+        Returns:
+            성공 시: {'channel_id': str, 'resource_id': str, 'expiration': datetime}
+            실패 시: None
+        """
+        try:
+            logger.info(f"[REGISTER_WATCH] Watch 등록 시작 - channel_id: {channel_id}")
+
+            credentials = GoogleCalendarService.get_credentials_from_token(token_json)
+            if not credentials:
+                logger.error("[REGISTER_WATCH] 유효하지 않은 토큰")
+                return None
+
+            # 토큰 만료 시 갱신
+            if GoogleCalendarService.is_token_expired(credentials):
+                logger.info("[REGISTER_WATCH] 토큰 만료됨, 갱신 시도")
+                credentials.refresh(Request())
+
+            service = build('calendar', 'v3', credentials=credentials)
+
+            # Watch 요청 body
+            watch_body = {
+                'id': channel_id,
+                'type': 'web_hook',
+                'address': webhook_url,
+                # 만료 시간: 최대 7일 (Google Calendar API 제한)
+                'expiration': int((datetime.utcnow() + timedelta(days=7)).timestamp() * 1000)
+            }
+
+            logger.info(f"[REGISTER_WATCH] Watch 요청: {watch_body}")
+
+            # primary 캘린더에 watch 등록
+            response = service.events().watch(
+                calendarId='primary',
+                body=watch_body
+            ).execute()
+
+            logger.info(f"[REGISTER_WATCH] Watch 등록 성공: {response}")
+
+            # 만료 시간을 datetime으로 변환
+            expiration_ms = int(response.get('expiration', 0))
+            expiration = datetime.utcfromtimestamp(expiration_ms / 1000)
+
+            return {
+                'channel_id': response.get('id'),
+                'resource_id': response.get('resourceId'),
+                'expiration': expiration
+            }
+
+        except HttpError as e:
+            logger.error(f"[REGISTER_WATCH] Google Calendar API HttpError: {e}", exc_info=True)
+            if hasattr(e, 'content'):
+                logger.error(f"[REGISTER_WATCH] 에러 상세: {e.content}")
+            return None
+        except Exception as e:
+            logger.error(f"[REGISTER_WATCH] Watch 등록 실패: {e}", exc_info=True)
+            return None
+
+    @staticmethod
+    async def stop_watch(
+        token_json: str,
+        channel_id: str,
+        resource_id: str
+    ) -> bool:
+        """
+        Google Calendar Watch 중지
+
+        Args:
+            token_json: 사용자의 Google Calendar 토큰 (JSON 문자열)
+            channel_id: 등록 시 사용한 채널 ID
+            resource_id: 등록 시 반환된 리소스 ID
+
+        Returns:
+            성공 시: True
+            실패 시: False
+        """
+        try:
+            logger.info(f"[STOP_WATCH] Watch 중지 시작 - channel_id: {channel_id}")
+
+            credentials = GoogleCalendarService.get_credentials_from_token(token_json)
+            if not credentials:
+                logger.error("[STOP_WATCH] 유효하지 않은 토큰")
+                return False
+
+            # 토큰 만료 시 갱신
+            if GoogleCalendarService.is_token_expired(credentials):
+                logger.info("[STOP_WATCH] 토큰 만료됨, 갱신 시도")
+                credentials.refresh(Request())
+
+            service = build('calendar', 'v3', credentials=credentials)
+
+            # Watch 중지 요청
+            service.channels().stop(body={
+                'id': channel_id,
+                'resourceId': resource_id
+            }).execute()
+
+            logger.info(f"[STOP_WATCH] Watch 중지 성공 - channel_id: {channel_id}")
+            return True
+
+        except HttpError as e:
+            # 404는 이미 만료되었거나 존재하지 않는 채널 (무시 가능)
+            if hasattr(e, 'resp') and e.resp.status == 404:
+                logger.warning(f"[STOP_WATCH] 채널이 이미 만료됨 또는 존재하지 않음: {channel_id}")
+                return True
+            logger.error(f"[STOP_WATCH] Google Calendar API HttpError: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"[STOP_WATCH] Watch 중지 실패: {e}", exc_info=True)
+            return False
+
+    @staticmethod
+    def get_updated_token_json(credentials: Credentials, original_token_json: str) -> str:
+        """
+        갱신된 credentials로 토큰 JSON 업데이트
+
+        Args:
+            credentials: 갱신된 Credentials 객체
+            original_token_json: 원본 토큰 JSON
+
+        Returns:
+            업데이트된 토큰 JSON 문자열
+        """
+        try:
+            original_data = json.loads(original_token_json)
+
+            # 새 토큰 정보로 업데이트
+            original_data['access_token'] = credentials.token
+            if credentials.refresh_token:
+                original_data['refresh_token'] = credentials.refresh_token
+            if credentials.expiry:
+                # expiry를 naive datetime에서 ISO 문자열로 변환 (UTC 가정)
+                expiry = credentials.expiry
+                if expiry.tzinfo is None:
+                    original_data['expiry'] = expiry.isoformat() + 'Z'
+                else:
+                    original_data['expiry'] = expiry.isoformat()
+
+            return json.dumps(original_data)
+        except Exception as e:
+            logger.error(f"[GET_UPDATED_TOKEN] 토큰 업데이트 실패: {e}")
+            return original_token_json

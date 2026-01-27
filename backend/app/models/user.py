@@ -25,6 +25,11 @@ class User(BaseModel):
     google_calendar_enabled = Column(String(10), default="false")  # "true" 또는 "false"
     google_calendar_import_enabled = Column(String(10), default="false")  # Google Calendar에서 가져오기 활성화
     google_calendar_export_enabled = Column(String(10), default="false")  # Google Calendar로 내보내기 활성화
+
+    # Google Calendar Webhook (Push Notifications)
+    google_calendar_watch_channel_id = Column(String(255))  # Watch 채널 ID
+    google_calendar_watch_resource_id = Column(String(255))  # Google에서 반환한 리소스 ID
+    google_calendar_watch_expiration = Column(DateTime)  # Watch 만료 시간
     
     # 로그인 관련
     last_login = Column(DateTime)
