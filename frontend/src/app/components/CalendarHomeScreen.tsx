@@ -347,8 +347,8 @@ export function CalendarHomeScreen() {
     };
 
     checkGoogleCalendarStatus();
-    // 주기적으로 상태 확인 (5분마다 - Webhook이 실시간 동기화 처리)
-    const interval = setInterval(checkGoogleCalendarStatus, 300000);
+    // 주기적으로 상태 확인 (2시간마다 - Webhook이 실시간 동기화 처리, 폴링은 백업용)
+    const interval = setInterval(checkGoogleCalendarStatus, 7200000);
     return () => clearInterval(interval);
   }, [syncStatus]);
 
