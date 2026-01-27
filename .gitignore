@@ -8,25 +8,58 @@ backend/.venv/
 
 # Environment Variables
 .env
+.env.*
+*.env
 backend/.env
+backend/.env.*
 frontend/.env
 frontend/.env.local
+frontend/.env.production
+frontend/.env.development
+
+# Cloud Run / Cloud SQL 환경변수 파일 (비밀번호 포함)
+backend/env-vars*.yaml
+backend/env-vars-*.yaml
+*.yaml
+!firebase.json
+!**/tsconfig*.json
+!**/package.json
+!**/package-lock.json
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
+backend/momflow.db
+
+# Uploaded Files (사용자 업로드 파일)
+backend/uploads/
+uploads/
 
 # Build Outputs
 dist/
 build/
 *.pyc
 __pycache__/
+*.py[cod]
+*$py.class
+
+# Logs
+*.log
+*.log.*
+logs/
 
 # IDEs
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
 # System
 .DS_Store
 Thumbs.db
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes

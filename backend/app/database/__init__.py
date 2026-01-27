@@ -63,7 +63,7 @@ def init_db():
 
     # SQLite 마이그레이션: 누락된 컬럼 추가
     try:
-        inspector = inspect(engine)
+        # 연결 테스트
         with engine.connect() as conn:
             # todos 테이블 마이그레이션
             if 'todos' in inspector.get_table_names():
@@ -90,13 +90,9 @@ def init_db():
                 for column_name, column_type in required_columns.items():
                     if column_name not in existing_columns:
                         try:
-                            if column_type == 'INTEGER':
-                                sql = f"ALTER TABLE todos ADD COLUMN {column_name} {column_type} DEFAULT 0"
-                            else:
-                                sql = f"ALTER TABLE todos ADD COLUMN {column_name} {column_type}"
-                            conn.execute(text(sql))
+                            conn.execute(text("ALTER TABLE users ADD COLUMN google_calendar_token VARCHAR(2000)"))
                             conn.commit()
-                            logger.info(f"✓ todos 테이블에 {column_name} 컬럼 추가 완료")
+                            logger.info("✓ users 테이블에 google_calendar_token 컬럼 추가 완료")
                         except Exception as e:
                             logger.warning(f"✗ {column_name} 컬럼 추가 실패: {e}")
 
@@ -115,9 +111,15 @@ def init_db():
 
                 if 'google_calendar_enabled' not in existing_columns:
                     try:
-                        conn.execute(text("ALTER TABLE users ADD COLUMN google_calendar_enabled VARCHAR(10) DEFAULT 'false'"))
-                        conn.commit()
-                        logger.info("✓ users 테이블에 google_calendar_enabled 컬럼 추가 완료")
+                        if table in inspector.get_table_names():
+                            result = conn.execute(text(f"PRAGMA table_info({table})"))
+                            columns = [row[1] for row in result.fetchall()]
+                            
+                            if 'deleted_at' not in columns:
+                                logger.info(f"Adding deleted_at column to {table}...")
+                                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN deleted_at DATETIME"))
+                                conn.commit()
+                                logger.info(f"Successfully added deleted_at to {table}")
                     except Exception as e:
                         logger.warning(f"✗ google_calendar_enabled 컬럼 추가 실패: {e}")
 

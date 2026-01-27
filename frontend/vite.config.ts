@@ -24,4 +24,8 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    // 빌드 설정 (Vite는 내용 변경 시 자동으로 해시 생성)
+    emptyOutDir: true, // 빌드 전 dist 폴더 비우기
+  },
 })

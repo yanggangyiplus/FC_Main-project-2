@@ -21,6 +21,7 @@ interface WeekCalendarProps {
     endDate?: string; // 종료 날짜 (기간 일정)
     memo?: string;
     memberId?: string; // 담당 프로필 ID
+    assignedMemberIds?: string[]; // 담당 프로필 ID 배열
     isAllDay?: boolean; // 하루종일 일정 여부
   }>;
   familyMembers?: FamilyMember[]; // 프로필 목록
