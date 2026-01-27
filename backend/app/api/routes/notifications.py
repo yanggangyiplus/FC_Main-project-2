@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
+from pydantic import BaseModel
 
 from app.database import get_db
 from app.models.models import Todo, Notification, FamilyMember
@@ -140,22 +141,54 @@ def send_scheduled_emails(db: Session):
                             # 하루종일 여부
                             is_all_day = todo.all_day if hasattr(todo, 'all_day') else False
                             
-                            success = EmailService.send_notification_email(
-                                to_email=user.email,
-                                todo_title=todo.title,
-                                todo_date=todo_date.strftime("%Y년 %m월 %d일"),
-                                todo_time=time_str,
-                                todo_end_time=todo.end_time.strftime("%H:%M") if todo.end_time else None,
-                                is_all_day=is_all_day,
-                                reminder_time=reminder_str,
-                                todo_location=todo.location if hasattr(todo, 'location') else None,
-                                todo_category=todo.category if hasattr(todo, 'category') else None,
-                                todo_checklist=checklist_items if checklist_items else None,
-                                todo_memo=todo.memo if hasattr(todo, 'memo') and todo.memo else None,
-                                assigned_members=assigned_members if assigned_members else None
-                            )
-                            
-                            if success:
+                            # 사용자 알림 설정 확인
+                            notification_pref = getattr(user, 'notification_preference', 'email')
+                            channels_sent = []
+
+                            # 이메일 알림 발송 (email 또는 both)
+                            if notification_pref in ['email', 'both']:
+                                success = EmailService.send_notification_email(
+                                    to_email=user.email,
+                                    todo_title=todo.title,
+                                    todo_date=todo_date.strftime("%Y년 %m월 %d일"),
+                                    todo_time=time_str,
+                                    todo_end_time=todo.end_time.strftime("%H:%M") if todo.end_time else None,
+                                    is_all_day=is_all_day,
+                                    reminder_time=reminder_str,
+                                    todo_location=todo.location if hasattr(todo, 'location') else None,
+                                    todo_category=todo.category if hasattr(todo, 'category') else None,
+                                    todo_checklist=checklist_items if checklist_items else None,
+                                    todo_memo=todo.memo if hasattr(todo, 'memo') and todo.memo else None,
+                                    assigned_members=assigned_members if assigned_members else None
+                                )
+                                if success:
+                                    channels_sent.append("email")
+                                    logger.info(f"[EMAIL_NOTIFICATION] 이메일 발송 성공: {user.email}, 일정: {todo.title}")
+
+                            # FCM 푸시 알림 발송 (push 또는 both)
+                            if notification_pref in ['push', 'both']:
+                                try:
+                                    from app.services.fcm_service import FCMService
+                                    import asyncio
+
+                                    # FCM 토큰이 있는 경우에만 발송
+                                    if user.fcm_token:
+                                        loop = asyncio.get_event_loop()
+                                        push_success = loop.run_until_complete(
+                                            FCMService.send_todo_reminder(
+                                                user=user,
+                                                todo_title=todo.title,
+                                                reminder_time=reminder_str,
+                                                todo_id=str(todo.id)
+                                            )
+                                        )
+                                        if push_success:
+                                            channels_sent.append("push")
+                                            logger.info(f"[FCM_NOTIFICATION] 푸시 알림 발송 성공: {user.email}, 일정: {todo.title}")
+                                except Exception as fcm_error:
+                                    logger.error(f"[FCM_NOTIFICATION] 푸시 알림 발송 실패: {fcm_error}")
+
+                            if channels_sent:
                                 # 알림 기록 저장
                                 notification = Notification(
                                     user_id=todo.user_id,
@@ -165,11 +198,10 @@ def send_scheduled_emails(db: Session):
                                     message=f"{reminder_str} 알림",
                                     scheduled_time=reminder_datetime,
                                     sent_at=now,
-                                    channels=json.dumps(["email"])
+                                    channels=json.dumps(channels_sent)
                                 )
                                 db.add(notification)
                                 sent_count += 1
-                                logger.info(f"[EMAIL_NOTIFICATION] 이메일 발송 성공: {user.email}, 일정: {todo.title}")
                             
             except Exception as e:
                 logger.error(f"[EMAIL_NOTIFICATION] 일정 알림 발송 실패: {todo.id}, 오류: {e}", exc_info=True)
@@ -243,6 +275,127 @@ async def get_notifications(
             "read_at": notification.read_at.isoformat() if notification.read_at else None,
             "channels": channels
         })
-    
+
     return result
+
+
+# ============================================================
+# FCM (Firebase Cloud Messaging) 웹 푸시 알림
+# ============================================================
+
+class FcmTokenRequest(BaseModel):
+    token: str
+
+class NotificationPreferenceRequest(BaseModel):
+    preference: str  # email, push, both, none
+
+
+@router.post("/fcm-token")
+async def save_fcm_token(
+    request: FcmTokenRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    FCM 토큰 저장
+
+    프론트엔드에서 Firebase Cloud Messaging 토큰을 받아 저장합니다.
+    웹 푸시 알림 발송 시 이 토큰을 사용합니다.
+    """
+    try:
+        logger.info(f"[FCM_TOKEN] FCM 토큰 저장 - user: {current_user.email}")
+
+        current_user.fcm_token = request.token
+        db.commit()
+
+        logger.info(f"[FCM_TOKEN] FCM 토큰 저장 완료")
+
+        return {
+            "success": True,
+            "message": "FCM 토큰이 저장되었습니다."
+        }
+
+    except Exception as e:
+        logger.error(f"[FCM_TOKEN] FCM 토큰 저장 실패: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"FCM 토큰 저장 실패: {str(e)}"
+        )
+
+
+@router.delete("/fcm-token")
+async def delete_fcm_token(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """FCM 토큰 삭제 (로그아웃 시 호출)"""
+    try:
+        current_user.fcm_token = None
+        db.commit()
+
+        return {
+            "success": True,
+            "message": "FCM 토큰이 삭제되었습니다."
+        }
+
+    except Exception as e:
+        logger.error(f"[FCM_TOKEN] FCM 토큰 삭제 실패: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"FCM 토큰 삭제 실패: {str(e)}"
+        )
+
+
+@router.post("/preference")
+async def update_notification_preference(
+    request: NotificationPreferenceRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    알림 설정 변경
+
+    - email: 이메일 알림만
+    - push: 웹 푸시 알림만
+    - both: 이메일 + 웹 푸시 모두
+    - none: 알림 끄기
+    """
+    try:
+        if request.preference not in ['email', 'push', 'both', 'none']:
+            raise HTTPException(
+                status_code=400,
+                detail="유효하지 않은 알림 설정입니다. (email, push, both, none 중 선택)"
+            )
+
+        logger.info(f"[NOTIFICATION_PREF] 알림 설정 변경 - user: {current_user.email}, preference: {request.preference}")
+
+        current_user.notification_preference = request.preference
+        db.commit()
+
+        return {
+            "success": True,
+            "preference": request.preference,
+            "message": f"알림 설정이 '{request.preference}'(으)로 변경되었습니다."
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[NOTIFICATION_PREF] 알림 설정 변경 실패: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"알림 설정 변경 실패: {str(e)}"
+        )
+
+
+@router.get("/preference")
+async def get_notification_preference(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """현재 알림 설정 조회"""
+    return {
+        "preference": current_user.notification_preference or "email",
+        "has_fcm_token": bool(current_user.fcm_token)
+    }
 

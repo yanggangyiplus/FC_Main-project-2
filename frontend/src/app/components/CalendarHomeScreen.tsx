@@ -317,8 +317,10 @@ export function CalendarHomeScreen() {
     loadUser();
   }, []);
 
-  // Google Calendar 상태 확인
+  // Google Calendar 상태 확인 (Watch 활성화 시 폴링 안 함)
   useEffect(() => {
+    let pollingInterval: NodeJS.Timeout | null = null;
+
     const checkGoogleCalendarStatus = async () => {
       try {
         const response = await apiClient.getCalendarStatus();
@@ -346,10 +348,45 @@ export function CalendarHomeScreen() {
       }
     };
 
-    checkGoogleCalendarStatus();
-    // 주기적으로 상태 확인 (2시간마다 - Webhook이 실시간 동기화 처리, 폴링은 백업용)
-    const interval = setInterval(checkGoogleCalendarStatus, 7200000);
-    return () => clearInterval(interval);
+    const setupPolling = async () => {
+      // 초기 상태 확인
+      checkGoogleCalendarStatus();
+
+      // Watch 상태 확인하여 폴링 여부 결정
+      try {
+        const watchResponse = await apiClient.getWatchStatus();
+        const hasActiveWatch = watchResponse.data?.has_watch && !watchResponse.data?.is_expired;
+
+        if (hasActiveWatch) {
+          // Watch 활성화 → 폴링 불필요 (Webhook이 실시간 처리)
+          console.log('[Calendar] Watch 활성화됨 - 폴링 비활성화');
+          if (pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+          }
+        } else {
+          // Watch 비활성화/만료 → 백업 폴링 (2시간마다)
+          console.log('[Calendar] Watch 비활성화 - 백업 폴링 시작 (2시간 간격)');
+          if (!pollingInterval) {
+            pollingInterval = setInterval(checkGoogleCalendarStatus, 7200000);
+          }
+        }
+      } catch (error) {
+        // Watch 상태 확인 실패 → 백업 폴링 활성화
+        console.log('[Calendar] Watch 상태 확인 실패 - 백업 폴링 시작');
+        if (!pollingInterval) {
+          pollingInterval = setInterval(checkGoogleCalendarStatus, 7200000);
+        }
+      }
+    };
+
+    setupPolling();
+
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
   }, [syncStatus]);
 
   // 가족 구성원 로드

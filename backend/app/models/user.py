@@ -30,7 +30,11 @@ class User(BaseModel):
     google_calendar_watch_channel_id = Column(String(255))  # Watch 채널 ID
     google_calendar_watch_resource_id = Column(String(255))  # Google에서 반환한 리소스 ID
     google_calendar_watch_expiration = Column(DateTime)  # Watch 만료 시간
-    
+
+    # FCM (Firebase Cloud Messaging) 웹 푸시 알림
+    fcm_token = Column(String(500))  # FCM 토큰
+    notification_preference = Column(String(20), default="email")  # 알림 방식: email, push, both, none
+
     # 로그인 관련
     last_login = Column(DateTime)
     deleted_at = Column(DateTime, index=True)  # 소프트 삭제

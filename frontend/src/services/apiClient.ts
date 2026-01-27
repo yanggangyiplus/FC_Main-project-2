@@ -348,6 +348,19 @@ class APIClient {
     return this.client.post('/calendar/toggle-export')
   }
 
+  // Calendar Watch (Webhook) endpoints
+  async getWatchStatus() {
+    return this.client.get('/calendar/watch/status')
+  }
+
+  async registerWatch() {
+    return this.client.post('/calendar/watch/register')
+  }
+
+  async stopWatch() {
+    return this.client.post('/calendar/watch/stop')
+  }
+
   // Notification endpoints
   async getNotifications(skip: number = 0, limit: number = 100) {
     return this.client.get('/notifications', {
@@ -357,6 +370,19 @@ class APIClient {
 
   async sendScheduledNotifications() {
     return this.client.post('/notifications/send-scheduled')
+  }
+
+  // FCM (Firebase Cloud Messaging) endpoints
+  async saveFcmToken(token: string) {
+    return this.client.post('/notifications/fcm-token', { token })
+  }
+
+  async updateNotificationPreference(preference: 'email' | 'push' | 'both' | 'none') {
+    return this.client.post('/notifications/preference', { preference })
+  }
+
+  async getNotificationPreference() {
+    return this.client.get('/notifications/preference')
   }
 }
 
