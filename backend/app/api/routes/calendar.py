@@ -17,7 +17,7 @@ from app.services.calendar_service import GoogleCalendarService
 from app.api.routes.auth import get_current_user, oauth_states
 from app.config import settings
 from googleapiclient.errors import HttpError
-from google.auth.transport.requests import Request
+from google.auth.transport.requests import Request as GoogleAuthRequest
 
 
 logger = logging.getLogger(__name__)
