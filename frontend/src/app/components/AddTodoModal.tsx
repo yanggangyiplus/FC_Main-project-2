@@ -552,13 +552,13 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
 
   const handleSave = async () => {
     console.log('[handleSave] 호출됨', { isExtracting, title: formData.title });
-    
+
     // 제목 검증
     if (!formData.title.trim()) {
       toast.error('일정 제목을 입력해주세요.');
       return;
     }
-    
+
     try {
       console.log('[handleSave] onSave 호출 전');
       // onSave가 완료될 때까지 기다림
@@ -567,6 +567,11 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
         await result;
       }
       console.log('[handleSave] onSave 완료');
+      // 저장 완료 메시지 표시
+      toast.success('일정이 저장되었습니다.', {
+        description: formData.title,
+        duration: 2000,
+      });
       // 성공적으로 저장된 후 모달 닫기
       onClose();
     } catch (error) {
