@@ -116,7 +116,7 @@ class GeminiSTTService:
             genai.configure(api_key=self.api_key)
             
             # Gemini 2.0 Flash 모델 사용
-            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
             # 오디오 데이터를 base64로 인코딩
             import base64
@@ -171,7 +171,7 @@ class GeminiSTTService:
             import re
             
             genai.configure(api_key=self.api_key)
-            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
             # 현재 날짜 정보
             today = datetime.now()
@@ -419,7 +419,7 @@ class GeminiOCRService:
             import io
             
             genai.configure(api_key=self.api_key)
-            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
             # 이미지 데이터를 PIL Image로 변환하여 검증
             try:
