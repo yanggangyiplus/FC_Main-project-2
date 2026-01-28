@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">always-plan-fc.web.app</domain>
+        <domain includeSubdomains="true">alwaysplan-backend-509998441771.asia-northeast3.run.app</domain>
+    </domain-config>
+</network-security-config>

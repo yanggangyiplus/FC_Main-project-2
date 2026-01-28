@@ -6,9 +6,8 @@ const config: CapacitorConfig = {
   webDir: 'dist',
   server: {
     androidScheme: 'https',
-    // 프로덕션에서는 로컬 assets 사용
-    // 개발 중에는 아래 url 활성화
-    // url: 'https://always-plan-fc.web.app'
+    // Android 앱에서 프로덕션 API 사용
+    url: 'https://always-plan-fc.web.app'
   },
   plugins: {
     SplashScreen: {
