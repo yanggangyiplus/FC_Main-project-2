@@ -45,6 +45,12 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
   const [isDragging, setIsDragging] = useState(false);
   const [hasMoved, setHasMoved] = useState(false);
 
+  // 더블클릭 리사이즈 모드 상태
+  const [lastClickTime, setLastClickTime] = useState(0);
+  const [lastClickedTodo, setLastClickedTodo] = useState<string | null>(null);
+  const [isResizeModeActive, setIsResizeModeActive] = useState(false);
+  const [resizeModeTarget, setResizeModeTarget] = useState<string | null>(null);
+
   // Helper to remove duplicated logic and ensure consistent dates
   const getWeekDates = (date: Date) => {
     const current = new Date(date);
@@ -217,24 +223,39 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
     return member.color.startsWith('#') ? member.color : `#${member.color}`;
   };
 
-  const handleMouseDown = (e: React.MouseEvent, todoId: string, time: string, duration: number) => {
+  const handleMouseDown = (e: React.MouseEvent, todoId: string, time: string, duration: number, elementRect: DOMRect) => {
     e.stopPropagation();
-    setDraggedTodo(todoId);
-    setDragStartY(e.clientY);
-    setDragStartTime(time);
-    setDragStartDuration(duration);
-    setResizeMode(null); // Default meaning: Move mode
-    setHasMoved(false);
-  };
+    const now = Date.now();
+    const DOUBLE_CLICK_THRESHOLD = 300; // 300ms 이내 두 번 클릭 = 더블클릭
 
-  const handleResizeStart = (e: React.MouseEvent, todoId: string, time: string, duration: number, mode: 'top' | 'bottom') => {
-    e.stopPropagation(); // Prevent triggering drag-move
-    setDraggedTodo(todoId);
-    setDragStartY(e.clientY);
-    setDragStartTime(time);
-    setDragStartDuration(duration);
-    setResizeMode(mode);
-    setHasMoved(false);
+    // 더블클릭 감지: 같은 일정에 300ms 이내 두 번 클릭
+    if (lastClickedTodo === todoId && now - lastClickTime < DOUBLE_CLICK_THRESHOLD) {
+      // 더블클릭 → 리사이즈 모드 활성화 (방향은 드래그 시 결정)
+      setIsResizeModeActive(true);
+      setResizeModeTarget(todoId);
+
+      setDraggedTodo(todoId);
+      setDragStartY(e.clientY);
+      setDragStartTime(time);
+      setDragStartDuration(duration);
+      setResizeMode(null); // 아직 방향 미결정 - 드래그 방향으로 결정됨
+      setHasMoved(false);
+
+      // 클릭 기록 초기화
+      setLastClickTime(0);
+      setLastClickedTodo(null);
+    } else {
+      // 첫 번째 클릭 또는 다른 일정 클릭 → 이동 모드
+      setLastClickTime(now);
+      setLastClickedTodo(todoId);
+
+      setDraggedTodo(todoId);
+      setDragStartY(e.clientY);
+      setDragStartTime(time);
+      setDragStartDuration(duration);
+      setResizeMode(null); // 이동 모드
+      setHasMoved(false);
+    }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -246,6 +267,15 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
     if (Math.abs(deltaY) > 5) {
       setHasMoved(true);
 
+      // 리사이즈 모드에서 드래그 방향에 따라 모드 결정
+      let currentResizeMode = resizeMode;
+      if (isResizeModeActive && resizeMode === null) {
+        // 위로 드래그 (deltaY < 0) → 시작 시간 변경 (top)
+        // 아래로 드래그 (deltaY > 0) → 종료 시간 변경 (bottom)
+        currentResizeMode = deltaY < 0 ? 'top' : 'bottom';
+        setResizeMode(currentResizeMode);
+      }
+
       const minutesDelta = Math.round((deltaY / window.innerHeight) * (24 * 60));
       const [startHours, startMinutes] = dragStartTime.split(":").map(Number);
       const startTotalMinutes = startHours * 60 + startMinutes;
@@ -253,10 +283,10 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
       let newStartTotalMinutes = startTotalMinutes;
       let newDuration = dragStartDuration;
 
-      if (resizeMode === 'bottom') {
+      if (currentResizeMode === 'bottom') {
         // RESIZING BOTTOM: Start time fixed, duration changes
         newDuration = Math.max(30, dragStartDuration + minutesDelta);
-      } else if (resizeMode === 'top') {
+      } else if (currentResizeMode === 'top') {
         // RESIZING TOP: Start time changes, duration changes to keep end time fixed
         // newStart = oldStart + delta
         newStartTotalMinutes = Math.max(0, startTotalMinutes + minutesDelta);
@@ -272,8 +302,8 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
           newDuration = 30;
           newStartTotalMinutes = endTimeInMinutes - 30; // Push start back if needed
         }
-      } else {
-        // MOVING (Default)
+      } else if (!isResizeModeActive) {
+        // MOVING (only when not in resize mode)
         newStartTotalMinutes = Math.max(0, Math.min(24 * 60 - dragStartDuration, startTotalMinutes + minutesDelta));
       }
 
@@ -293,8 +323,21 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
       setDraggedTodo(null);
       setResizeMode(null);
       setHasMoved(false);
+      setIsResizeModeActive(false);
+      setResizeModeTarget(null);
     }
   };
+
+  // 리사이즈 모드 자동 해제 (3초 후)
+  useEffect(() => {
+    if (isResizeModeActive && resizeModeTarget) {
+      const timer = setTimeout(() => {
+        setIsResizeModeActive(false);
+        setResizeModeTarget(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [isResizeModeActive, resizeModeTarget]);
 
   const handleTouchStart = (e: React.TouchEvent) => {
     // Touch logic omitted for brevity in resize, keeping basic move or just stopping propagation
@@ -531,28 +574,37 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
                       return color;
                     };
 
+                    // 리사이즈 모드 활성화 여부
+                    const isResizeTarget = isResizeModeActive && resizeModeTarget === todo.id;
+
                     return (
                       <div
                         key={todo.id}
-                        className={`absolute left-1 right-1 rounded px-1 py-1 cursor-pointer shadow-sm hover:shadow-md transition-shadow group ${draggedTodo === todo.id ? "opacity-70 ring-2 ring-white z-20" : "z-10"
-                          } ${activeTodoId === todo.id ? "ring-2 ring-yellow-400" : ""}`}
+                        className={`absolute left-1 right-1 rounded px-1 py-1 shadow-sm hover:shadow-md transition-all group ${
+                          draggedTodo === todo.id ? "opacity-70 ring-2 ring-white z-20" : "z-10"
+                        } ${activeTodoId === todo.id ? "ring-2 ring-yellow-400" : ""} ${
+                          isResizeTarget ? "ring-2 ring-blue-500 cursor-ns-resize" : "cursor-grab"
+                        }`}
                         style={{
                           top: `${top}%`,
                           height: `${Math.max(height, 3)}%`,
                           backgroundColor: getBackgroundColorWithOpacity(backgroundColor, isAllDay),
                           color: backgroundColor ? 'white' : undefined,
                         }}
-                        onMouseDown={!isAllDay ? (e) => handleMouseDown(e, todo.id, todo.time, todo.duration) : undefined}
+                        onMouseDown={!isAllDay ? (e) => {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          handleMouseDown(e, todo.id, todo.time, todo.duration, rect);
+                        } : undefined}
                         onMouseEnter={(e) => handleMouseEnter(e, todo.id)}
                         onMouseLeave={() => setHoveredTodo(null)}
                         onMouseUp={() => handleItemClick(todo.id)}
                       >
-                        {/* RESIZE HANDLE - TOP (하루종일 일정은 리사이즈 불가) */}
-                        {!isAllDay && (
-                          <div
-                            className="absolute top-0 left-0 right-0 h-3 cursor-n-resize hover:bg-black/10 z-30"
-                            onMouseDown={(e) => handleResizeStart(e, todo.id, todo.time, todo.duration, 'top')}
-                          />
+                        {/* 리사이즈 모드 시각적 피드백 */}
+                        {isResizeTarget && (
+                          <>
+                            <div className="absolute top-0 left-0 right-0 h-1 bg-blue-500 rounded-t" />
+                            <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-500 rounded-b" />
+                          </>
                         )}
 
                         {/* Content */}
@@ -562,14 +614,6 @@ export function WeekCalendar({ todos, familyMembers = [], selectedMembers = [], 
                         <div className={`text-xs opacity-90 pointer-events-none ${backgroundColor ? 'text-white' : ''}`}>
                           {isAllDay ? '하루종일' : todo.time}
                         </div>
-
-                        {/* RESIZE HANDLE - BOTTOM (하루종일 일정은 리사이즈 불가) */}
-                        {!isAllDay && (
-                          <div
-                            className="absolute bottom-0 left-0 right-0 h-3 cursor-s-resize hover:bg-black/10 z-30"
-                            onMouseDown={(e) => handleResizeStart(e, todo.id, todo.time, todo.duration, 'bottom')}
-                          />
-                        )}
                       </div>
                     );
                   })}

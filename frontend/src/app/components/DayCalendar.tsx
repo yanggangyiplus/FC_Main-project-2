@@ -49,6 +49,12 @@ export function DayCalendar({ todos, routines = [], familyMembers = [], selected
   const [hasMoved, setHasMoved] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+  // 더블클릭 리사이즈 모드 상태
+  const [lastClickTime, setLastClickTime] = useState(0);
+  const [lastClickedTodo, setLastClickedTodo] = useState<string | null>(null);
+  const [isResizeModeActive, setIsResizeModeActive] = useState(false);
+  const [resizeModeTarget, setResizeModeTarget] = useState<string | null>(null);
+
   const timeSlots = [
     "00:00", "02:00", "04:00", "06:00", "08:00", "10:00",
     "12:00", "14:00", "16:00", "18:00", "20:00", "22:00"
@@ -186,24 +192,39 @@ export function DayCalendar({ todos, routines = [], familyMembers = [], selected
     return colors[category] || colors["기타"];
   };
 
-  const handleMouseDown = (e: React.MouseEvent, todoId: string, time: string, duration: number) => {
+  const handleMouseDown = (e: React.MouseEvent, todoId: string, time: string, duration: number, elementRect: DOMRect) => {
     e.stopPropagation();
-    setDraggedTodo(todoId);
-    setDragStartY(e.clientY);
-    setDragStartTime(time);
-    setDragStartDuration(duration);
-    setResizeMode(null); // Move mode default
-    setHasMoved(false);
-  };
+    const now = Date.now();
+    const DOUBLE_CLICK_THRESHOLD = 300; // 300ms 이내 두 번 클릭 = 더블클릭
 
-  const handleResizeStart = (e: React.MouseEvent, todoId: string, time: string, duration: number, mode: 'top' | 'bottom') => {
-    e.stopPropagation();
-    setDraggedTodo(todoId);
-    setDragStartY(e.clientY);
-    setDragStartTime(time);
-    setDragStartDuration(duration);
-    setResizeMode(mode);
-    setHasMoved(false);
+    // 더블클릭 감지: 같은 일정에 300ms 이내 두 번 클릭
+    if (lastClickedTodo === todoId && now - lastClickTime < DOUBLE_CLICK_THRESHOLD) {
+      // 더블클릭 → 리사이즈 모드 활성화 (방향은 드래그 시 결정)
+      setIsResizeModeActive(true);
+      setResizeModeTarget(todoId);
+
+      setDraggedTodo(todoId);
+      setDragStartY(e.clientY);
+      setDragStartTime(time);
+      setDragStartDuration(duration);
+      setResizeMode(null); // 아직 방향 미결정 - 드래그 방향으로 결정됨
+      setHasMoved(false);
+
+      // 클릭 기록 초기화
+      setLastClickTime(0);
+      setLastClickedTodo(null);
+    } else {
+      // 첫 번째 클릭 또는 다른 일정 클릭 → 이동 모드
+      setLastClickTime(now);
+      setLastClickedTodo(todoId);
+
+      setDraggedTodo(todoId);
+      setDragStartY(e.clientY);
+      setDragStartTime(time);
+      setDragStartDuration(duration);
+      setResizeMode(null); // 이동 모드
+      setHasMoved(false);
+    }
   };
 
   const handleTouchStart = (e: React.TouchEvent, todoId: string, time: string, duration: number) => {
@@ -221,6 +242,16 @@ export function DayCalendar({ todos, routines = [], familyMembers = [], selected
 
     if (Math.abs(deltaY) > 5) {
       setHasMoved(true);
+
+      // 리사이즈 모드에서 드래그 방향에 따라 모드 결정
+      let currentResizeMode = resizeMode;
+      if (isResizeModeActive && resizeMode === null) {
+        // 위로 드래그 (deltaY < 0) → 시작 시간 변경 (top)
+        // 아래로 드래그 (deltaY > 0) → 종료 시간 변경 (bottom)
+        currentResizeMode = deltaY < 0 ? 'top' : 'bottom';
+        setResizeMode(currentResizeMode);
+      }
+
       const minutesDelta = Math.round((deltaY / window.innerHeight) * (24 * 60));
       const [startHours, startMinutes] = dragStartTime.split(":").map(Number);
       const startTotalMinutes = startHours * 60 + startMinutes;
@@ -228,9 +259,9 @@ export function DayCalendar({ todos, routines = [], familyMembers = [], selected
       let newStartTotalMinutes = startTotalMinutes;
       let newDuration = dragStartDuration;
 
-      if (resizeMode === 'bottom') {
+      if (currentResizeMode === 'bottom') {
         newDuration = Math.max(30, dragStartDuration + minutesDelta);
-      } else if (resizeMode === 'top') {
+      } else if (currentResizeMode === 'top') {
         newStartTotalMinutes = Math.max(0, startTotalMinutes + minutesDelta);
         const endTime = startTotalMinutes + dragStartDuration;
         newDuration = endTime - newStartTotalMinutes;
@@ -239,8 +270,8 @@ export function DayCalendar({ todos, routines = [], familyMembers = [], selected
           newDuration = 30;
           newStartTotalMinutes = endTime - 30;
         }
-      } else {
-        // Move
+      } else if (!isResizeModeActive) {
+        // Move (only when not in resize mode)
         newStartTotalMinutes = Math.max(0, Math.min(24 * 60 - dragStartDuration, startTotalMinutes + minutesDelta));
       }
 
@@ -283,7 +314,20 @@ export function DayCalendar({ todos, routines = [], familyMembers = [], selected
     setDraggedTodo(null);
     setResizeMode(null);
     setHasMoved(false);
+    setIsResizeModeActive(false);
+    setResizeModeTarget(null);
   };
+
+  // 리사이즈 모드 자동 해제 (3초 후)
+  useEffect(() => {
+    if (isResizeModeActive && resizeModeTarget) {
+      const timer = setTimeout(() => {
+        setIsResizeModeActive(false);
+        setResizeModeTarget(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [isResizeModeActive, resizeModeTarget]);
 
   const handleTouchEnd = () => {
     setDraggedTodo(null);
@@ -480,19 +524,27 @@ export function DayCalendar({ todos, routines = [], familyMembers = [], selected
                 const top = getTimePosition(todo.time);
                 const height = getDurationHeight(todo.duration);
                 const layoutInfo = layout[todo.id] || { left: 0, width: 100 };
+                // 리사이즈 모드 활성화 여부
+                const isResizeTarget = isResizeModeActive && resizeModeTarget === todo.id;
 
                 return (
                   <div
                     key={todo.id}
-                    className={`absolute ${getCategoryColor(todo.category)} rounded-lg px-3 py-2 cursor-move shadow-md hover:shadow-lg transition-all ${draggedTodo === todo.id ? "opacity-70 ring-2 ring-white scale-105 z-20" : "z-10"
-                      } ${todo.completed ? "opacity-50 line-through" : ""}`}
+                    className={`absolute ${getCategoryColor(todo.category)} rounded-lg px-3 py-2 shadow-md hover:shadow-lg transition-all ${
+                      draggedTodo === todo.id ? "opacity-70 ring-2 ring-white scale-105 z-20" : "z-10"
+                    } ${todo.completed ? "opacity-50 line-through" : ""} ${
+                      isResizeTarget ? "ring-2 ring-blue-400 cursor-ns-resize" : "cursor-grab"
+                    }`}
                     style={{
                       top: `${top}%`,
                       height: `${Math.max(height, 4)}%`,
                       left: `${layoutInfo.left}%`,
                       width: `${layoutInfo.width}%`,
                     }}
-                    onMouseDown={(e) => handleMouseDown(e, todo.id, todo.time, todo.duration)}
+                    onMouseDown={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      handleMouseDown(e, todo.id, todo.time, todo.duration, rect);
+                    }}
                     onTouchStart={(e) => handleTouchStart(e, todo.id, todo.time, todo.duration)}
                     onClick={(e) => {
                       if (!hasMoved && onTodoClick) {
@@ -501,11 +553,13 @@ export function DayCalendar({ todos, routines = [], familyMembers = [], selected
                       }
                     }}
                   >
-                    {/* Resize Handle Top */}
-                    <div
-                      className="absolute top-0 left-0 right-0 h-3 cursor-n-resize hover:bg-black/10 z-30"
-                      onMouseDown={(e) => handleResizeStart(e, todo.id, todo.time, todo.duration, 'top')}
-                    />
+                    {/* 리사이즈 모드 시각적 피드백 */}
+                    {isResizeTarget && (
+                      <>
+                        <div className="absolute top-0 left-0 right-0 h-1.5 bg-blue-400 rounded-t-lg" />
+                        <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-blue-400 rounded-b-lg" />
+                      </>
+                    )}
 
                     <div className={`font-semibold text-sm pointer-events-none ${todo.completed ? 'line-through opacity-70' : ''}`}>{todo.title}</div>
                     <div className="text-xs mt-1 opacity-90 pointer-events-none">
@@ -514,12 +568,6 @@ export function DayCalendar({ todos, routines = [], familyMembers = [], selected
                     <div className="text-xs mt-1 bg-white/20 inline-block px-2 py-0.5 rounded-full pointer-events-none">
                       {todo.category}
                     </div>
-
-                    {/* Resize Handle Bottom */}
-                    <div
-                      className="absolute bottom-0 left-0 right-0 h-3 cursor-s-resize hover:bg-black/10 z-30"
-                      onMouseDown={(e) => handleResizeStart(e, todo.id, todo.time, todo.duration, 'bottom')}
-                    />
                   </div>
                 );
               })}
