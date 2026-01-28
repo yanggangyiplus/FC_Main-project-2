@@ -13,7 +13,19 @@ def get_cors_origins() -> list:
         else "https://always-plan-fc.web.app,http://localhost:5173"
     )
     cors_str = os.getenv("CORS_ORIGINS", default_origins)
-    return [origin.strip() for origin in cors_str.split(",")]
+    origins = [origin.strip() for origin in cors_str.split(",")]
+
+    # Capacitor 앱을 위한 origin 추가 (Android/iOS 앱 지원)
+    capacitor_origins = [
+        "capacitor://localhost",  # Capacitor 기본 origin
+        "https://localhost",      # androidScheme: 'https' 사용 시
+        "http://localhost",       # iOS 앱
+    ]
+    for cap_origin in capacitor_origins:
+        if cap_origin not in origins:
+            origins.append(cap_origin)
+
+    return origins
 
 
 class Settings(BaseSettings):
