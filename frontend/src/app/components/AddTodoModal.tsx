@@ -1,7 +1,8 @@
-import { X, Calendar, Clock, Tag, Bell, Repeat, Plus, Trash2, MapPin, Mic, Camera, FileText } from "lucide-react";
+import { X, Calendar, Clock, Tag, Bell, Repeat, Plus, Trash2, MapPin, Mic, Camera, FileText, ChevronDown } from "lucide-react";
 import { useState, useEffect } from "react";
 import { apiClient } from "@/services/apiClient";
 import { toast } from "sonner";
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "./ui/accordion";
 
 interface FamilyMember {
   id: string;
@@ -580,233 +581,285 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
     <>
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 py-6 bg-[#F5F5F5]">
-            <div className="space-y-6">
-              {/* 마이크/카메라/문서 버튼 - 상단에 배치 (hideModalWrapper가 true일 때는 숨김) */}
-              {!hideModalWrapper && (
-              <div className="flex justify-between items-center px-6 mb-6">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onOpenInputMethod) {
-                      onClose();
-                      onOpenInputMethod('voice');
-                    } else {
-                      toast.info('마이크 기능은 일정 추가 팝업에서 사용하세요.');
-                    }
-                  }}
-                  className="w-16 h-16 rounded-full border-2 border-[#E5E7EB] bg-white flex items-center justify-center shadow-md active:scale-95 transition-all hover:bg-[#FFF5F0] hover:border-[#FF9B82]"
-                  title="음성 입력"
-                >
-                  <Mic size={24} className="text-[#FF9B82]" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onOpenInputMethod) {
-                      onClose();
-                      onOpenInputMethod('camera');
-                    } else {
-                      toast.info('카메라 기능은 일정 추가 팝업에서 사용하세요.');
-                    }
-                  }}
-                  className="w-16 h-16 rounded-full border-2 border-[#E5E7EB] bg-white flex items-center justify-center shadow-md active:scale-95 transition-all hover:bg-[#FFF5F0] hover:border-[#FF9B82]"
-                  title="이미지 입력"
-                >
-                  <Camera size={24} className="text-[#FF9B82]" />
-                </button>
-                <button
-                  type="button"
-                  className="w-16 h-16 rounded-full border-2 border-[#FF9B82] bg-[#FF9B82] flex items-center justify-center shadow-md active:scale-95 transition-all"
-                  title="텍스트 입력"
-                >
-                  <FileText size={24} className="text-white" />
-                </button>
-              </div>
-              )}
+        <div className="space-y-4">
+          {/* 마이크/카메라/문서 버튼 - 상단에 배치 (hideModalWrapper가 true일 때는 숨김) */}
+          {!hideModalWrapper && (
+            <div className="flex justify-between items-center px-6 mb-4">
+              <button
+                type="button"
+                onClick={() => {
+                  if (onOpenInputMethod) {
+                    onClose();
+                    onOpenInputMethod('voice');
+                  } else {
+                    toast.info('마이크 기능은 일정 추가 팝업에서 사용하세요.');
+                  }
+                }}
+                className="w-16 h-16 rounded-full border-2 border-[#E5E7EB] bg-white flex items-center justify-center shadow-md active:scale-95 transition-all hover:bg-[#FFF5F0] hover:border-[#FF9B82]"
+                title="음성 입력"
+              >
+                <Mic size={24} className="text-[#FF9B82]" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onOpenInputMethod) {
+                    onClose();
+                    onOpenInputMethod('camera');
+                  } else {
+                    toast.info('카메라 기능은 일정 추가 팝업에서 사용하세요.');
+                  }
+                }}
+                className="w-16 h-16 rounded-full border-2 border-[#E5E7EB] bg-white flex items-center justify-center shadow-md active:scale-95 transition-all hover:bg-[#FFF5F0] hover:border-[#FF9B82]"
+                title="이미지 입력"
+              >
+                <Camera size={24} className="text-[#FF9B82]" />
+              </button>
+              <button
+                type="button"
+                className="w-16 h-16 rounded-full border-2 border-[#FF9B82] bg-[#FF9B82] flex items-center justify-center shadow-md active:scale-95 transition-all"
+                title="텍스트 입력"
+              >
+                <FileText size={24} className="text-white" />
+              </button>
+            </div>
+          )}
 
-              {/* 담당 프로필 선택 */}
-              {familyMembers.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-[#1F2937] mb-2">
-                    담당 프로필
-                  </label>
-                  <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
-                    {familyMembers.map((member) => {
-                      const isSelected = formData.assignedMemberIds?.includes(member.id) || false;
-                      return (
-                        <button
-                          key={member.id}
-                          type="button"
-                          onClick={() => {
-                            setFormData(prev => {
-                              const currentIds = prev.assignedMemberIds || [];
-                              const newIds = isSelected
-                                ? currentIds.filter(id => id !== member.id)
-                                : [...currentIds, member.id];
-                              return {
-                                ...prev,
-                                assignedMemberIds: newIds,
-                              };
-                            });
-                          }}
-                          className={`px-3 py-2 rounded-full text-sm font-medium flex items-center justify-center gap-1 flex-shrink-0 transition-all ${isSelected
-                              ? 'bg-[#FF9B82] text-white shadow-sm'
-                              : 'bg-[#F3F4F6] text-[#6B7280] hover:bg-[#E5E7EB]'
-                            }`}
-                        >
-                          <span className="text-base">{member.emoji}</span>
-                          <span>{member.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* 일정 제목 */}
+          {/* ===== 기본 정보 (항상 표시) ===== */}
+          <div className="bg-white rounded-xl p-4 shadow-sm space-y-4">
+            {/* 담당 프로필 선택 */}
+            {familyMembers.length > 0 && (
               <div>
                 <label className="block text-sm font-medium text-[#1F2937] mb-2">
-                  일정 제목 *
+                  담당 프로필
                 </label>
-                <input
-                  type="text"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  placeholder="일정 제목을 입력하세요"
-                  className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
-                />
-              </div>
-
-              {/* 날짜 설정 */}
-              <div>
-                <label className="block text-sm font-medium text-[#1F2937] mb-2 flex items-center gap-2">
-                  <Calendar size={18} className="text-[#FF9B82]" />
-                  날짜 설정
-                </label>
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs text-[#6B7280] mb-1">시작 날짜 *</label>
-                    <input
-                      type="date"
-                      value={formData.date}
-                      onChange={(e) => {
-                        const newDate = e.target.value;
-                        setFormData({
-                          ...formData,
-                          date: newDate,
-                          // 종료 날짜가 시작 날짜보다 이전이면 종료 날짜도 시작 날짜와 동일하게 업데이트
-                          // 종료 날짜가 없거나 시작 날짜와 동일한 경우에도 시작 날짜와 동일하게 유지
-                          endDate: formData.endDate && formData.endDate < newDate ? newDate : (formData.endDate || newDate)
-                        });
-                      }}
-                      className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-[#6B7280] mb-1">종료 날짜 (선택사항)</label>
-                    <input
-                      type="date"
-                      value={formData.endDate || ''}
-                      min={formData.date} // 시작 날짜 이후만 선택 가능
-                      onChange={(e) => setFormData({ ...formData, endDate: e.target.value || undefined })}
-                      className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
-                      placeholder="종료 날짜를 선택하면 여러 날에 일정이 생성됩니다"
-                    />
-                    {formData.endDate && (
-                      <p className="text-xs text-[#6B7280] mt-1">
-                        {formData.date}부터 {formData.endDate}까지 일정이 생성됩니다.
-                      </p>
-                    )}
-                  </div>
+                <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-[#FF9B82] scrollbar-track-[#F3F4F6]">
+                  {familyMembers.map((member) => {
+                    const isSelected = formData.assignedMemberIds?.includes(member.id) || false;
+                    return (
+                      <button
+                        key={member.id}
+                        type="button"
+                        onClick={() => {
+                          setFormData(prev => {
+                            const currentIds = prev.assignedMemberIds || [];
+                            const newIds = isSelected
+                              ? currentIds.filter(id => id !== member.id)
+                              : [...currentIds, member.id];
+                            return {
+                              ...prev,
+                              assignedMemberIds: newIds,
+                            };
+                          });
+                        }}
+                        className={`px-3 py-2 rounded-full text-sm font-medium flex items-center justify-center gap-1 flex-shrink-0 transition-all ${isSelected
+                          ? 'bg-[#FF9B82] text-white shadow-sm'
+                          : 'bg-[#F3F4F6] text-[#6B7280] hover:bg-[#E5E7EB]'
+                          }`}
+                      >
+                        <span className="text-base">{member.emoji}</span>
+                        <span>{member.name}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
+            )}
 
-              {/* 시간 설정 */}
-              <div>
-                <label className="block text-sm font-medium text-[#1F2937] mb-2 flex items-center gap-2">
-                  <Clock size={18} className="text-[#FF9B82]" />
-                  시간 설정
-                </label>
-                <div className="grid grid-cols-2 gap-4 mb-3">
-                  <div>
-                    <label className="block text-xs text-[#6B7280] mb-1">시작 시간</label>
-                    <input
-                      type="time"
-                      value={formData.startTime}
-                      onChange={(e) => {
-                        const newStartTime = e.target.value;
-                        // 하루만 선택된 경우 종료 시간 자동 계산 (시작 시간 + 1시간)
-                        let newEndTime = formData.endTime;
-                        if (formData.date === formData.endDate && newStartTime && !formData.isAllDay) {
-                          const [hours, minutes] = newStartTime.split(':').map(Number);
-                          const endHours = (hours + 1) % 24;
-                          newEndTime = `${String(endHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-                        }
-                        setFormData({ ...formData, startTime: newStartTime, endTime: newEndTime });
-                      }}
-                      disabled={formData.isAllDay}
-                      className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-[#6B7280] mb-1">종료 시간</label>
-                    <input
-                      type="time"
-                      value={formData.endTime}
-                      onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
-                      disabled={formData.isAllDay}
-                      className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF]"
-                    />
-                  </div>
-                </div>
-                {/* 하루종일 체크박스 */}
-                <label className="flex items-center gap-2 cursor-pointer">
+            {/* 일정 제목 */}
+            <div>
+              <label className="block text-sm font-medium text-[#1F2937] mb-2">
+                일정 제목 *
+              </label>
+              <input
+                type="text"
+                value={formData.title}
+                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                placeholder="일정 제목을 입력하세요"
+                className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
+              />
+            </div>
+
+            {/* 날짜 설정 */}
+            <div>
+              <label className="block text-sm font-medium text-[#1F2937] mb-2 flex items-center gap-2">
+                <Calendar size={18} className="text-[#FF9B82]" />
+                날짜
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-[#6B7280] mb-1">시작</label>
                   <input
-                    type="checkbox"
-                    checked={formData.isAllDay}
+                    type="date"
+                    value={formData.date}
                     onChange={(e) => {
-                      const isAllDay = e.target.checked;
+                      const newDate = e.target.value;
                       setFormData({
                         ...formData,
-                        isAllDay,
-                        // 하루종일일 때는 시간을 빈 문자열로 설정
-                        startTime: isAllDay ? '' : (formData.startTime || '09:00'),
-                        endTime: isAllDay ? '' : (formData.endTime || '10:00'),
+                        date: newDate,
+                        endDate: formData.endDate && formData.endDate < newDate ? newDate : (formData.endDate || newDate)
                       });
                     }}
-                    className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-2 focus:ring-[#FF9B82]"
+                    className="w-full px-3 py-2.5 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm"
                   />
-                  <span className="text-sm text-[#6B7280]">하루종일</span>
-                </label>
-              </div>
-
-              {/* 카테고리 */}
-              <div>
-                <label className="block text-sm font-medium text-[#1F2937] mb-2 flex items-center gap-2">
-                  <Tag size={18} className="text-[#FF9B82]" />
-                  카테고리
-                </label>
-                <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                  {categories.map((category) => (
-                    <button
-                      key={category}
-                      onClick={() => setFormData({ ...formData, category })}
-                      className={`flex-shrink-0 px-4 py-2 rounded-lg border-2 transition-all whitespace-nowrap ${formData.category === category
-                        ? 'bg-[#FF9B82] text-white border-[#FF9B82]'
-                        : 'bg-white text-[#6B7280] border-[#D1D5DB] hover:border-[#FF9B82]'
-                        }`}
-                    >
-                      {category}
-                    </button>
-                  ))}
+                </div>
+                <div>
+                  <label className="block text-xs text-[#6B7280] mb-1">종료</label>
+                  <input
+                    type="date"
+                    value={formData.endDate || ''}
+                    min={formData.date}
+                    onChange={(e) => setFormData({ ...formData, endDate: e.target.value || undefined })}
+                    className="w-full px-3 py-2.5 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm"
+                  />
                 </div>
               </div>
+            </div>
 
-              {/* 체크리스트 */}
-              <div>
-                <label className="block text-sm font-medium text-[#1F2937] mb-2">
-                  체크리스트
-                </label>
+            {/* 시간 설정 */}
+            <div>
+              <label className="block text-sm font-medium text-[#1F2937] mb-2 flex items-center gap-2">
+                <Clock size={18} className="text-[#FF9B82]" />
+                시간
+              </label>
+              <div className="grid grid-cols-2 gap-3 mb-2">
+                <div>
+                  <label className="block text-xs text-[#6B7280] mb-1">시작</label>
+                  <input
+                    type="time"
+                    value={formData.startTime}
+                    onChange={(e) => {
+                      const newStartTime = e.target.value;
+                      let newEndTime = formData.endTime;
+                      if (formData.date === formData.endDate && newStartTime && !formData.isAllDay) {
+                        const [hours, minutes] = newStartTime.split(':').map(Number);
+                        const endHours = (hours + 1) % 24;
+                        newEndTime = `${String(endHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+                      }
+                      setFormData({ ...formData, startTime: newStartTime, endTime: newEndTime });
+                    }}
+                    disabled={formData.isAllDay}
+                    className="w-full px-3 py-2.5 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#6B7280] mb-1">종료</label>
+                  <input
+                    type="time"
+                    value={formData.endTime}
+                    onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
+                    disabled={formData.isAllDay}
+                    className="w-full px-3 py-2.5 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] text-sm"
+                  />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.isAllDay}
+                  onChange={(e) => {
+                    const isAllDay = e.target.checked;
+                    setFormData({
+                      ...formData,
+                      isAllDay,
+                      startTime: isAllDay ? '' : (formData.startTime || '09:00'),
+                      endTime: isAllDay ? '' : (formData.endTime || '10:00'),
+                    });
+                  }}
+                  className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] rounded focus:ring-2 focus:ring-[#FF9B82]"
+                />
+                <span className="text-sm text-[#6B7280]">하루종일</span>
+              </label>
+            </div>
+          </div>
+
+          {/* ===== 상세 설정 (Accordion) ===== */}
+          <Accordion type="multiple" defaultValue={[]} className="space-y-2">
+            {/* 상세 정보 */}
+            <AccordionItem value="details" className="bg-white rounded-xl shadow-sm border-none overflow-hidden">
+              <AccordionTrigger className="px-4 py-3 hover:no-underline">
+                <div className="flex items-center gap-2">
+                  <Tag size={18} className="text-[#FF9B82]" />
+                  <span className="text-sm font-medium text-[#1F2937]">상세 정보</span>
+                  {(formData.category !== '기타' || formData.location || formData.memo) && (
+                    <span className="text-xs text-[#FF9B82] bg-[#FFF5F0] px-2 py-0.5 rounded-full">설정됨</span>
+                  )}
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="px-4">
+                <div className="space-y-4">
+                  {/* 카테고리 */}
+                  <div>
+                    <label className="block text-xs text-[#6B7280] mb-2">카테고리</label>
+                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                      {categories.map((category) => (
+                        <button
+                          key={category}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, category })}
+                          className={`flex-shrink-0 px-4 py-2 rounded-lg border-2 transition-all whitespace-nowrap text-sm ${formData.category === category
+                            ? 'bg-[#FF9B82] text-white border-[#FF9B82]'
+                            : 'bg-white text-[#6B7280] border-[#D1D5DB] hover:border-[#FF9B82]'
+                            }`}
+                        >
+                          {category}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 장소 */}
+                  <div>
+                    <label className="block text-xs text-[#6B7280] mb-1 flex items-center gap-1">
+                      <MapPin size={14} className="text-[#FF9B82]" />
+                      장소
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.location || ''}
+                      onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                      placeholder="장소를 입력하세요"
+                      className="w-full px-4 py-2.5 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm"
+                    />
+                  </div>
+
+                  {/* 메모 */}
+                  <div>
+                    <label className="block text-xs text-[#6B7280] mb-1">메모</label>
+                    <textarea
+                      value={formData.memo}
+                      onChange={(e) => setFormData({ ...formData, memo: e.target.value })}
+                      placeholder="메모를 입력하세요"
+                      rows={2}
+                      className="w-full px-4 py-2.5 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent resize-none text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleExtractInfo}
+                      disabled={isExtracting || !formData.memo.trim()}
+                      className="mt-2 w-full px-4 py-2 text-sm font-medium text-white bg-[#FF9B82] rounded-lg hover:bg-[#FF8A6D] transition-colors disabled:bg-[#D1D5DB] disabled:text-[#9CA3AF] disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {isExtracting ? '추출 중...' : 'AI로 일정쓰기'}
+                    </button>
+                  </div>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+
+            {/* 체크리스트 */}
+            <AccordionItem value="checklist" className="bg-white rounded-xl shadow-sm border-none overflow-hidden">
+              <AccordionTrigger className="px-4 py-3 hover:no-underline">
+                <div className="flex items-center gap-2">
+                  <Plus size={18} className="text-[#FF9B82]" />
+                  <span className="text-sm font-medium text-[#1F2937]">체크리스트</span>
+                  {formData.checklistItems.filter(item => item.trim()).length > 0 && (
+                    <span className="text-xs text-[#FF9B82] bg-[#FFF5F0] px-2 py-0.5 rounded-full">
+                      {formData.checklistItems.filter(item => item.trim()).length}개
+                    </span>
+                  )}
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="px-4">
                 <div className="space-y-2">
                   {formData.checklistItems.map((item, index) => (
                     <div key={index} className="flex gap-2">
@@ -815,125 +868,80 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                         value={item}
                         onChange={(e) => handleChecklistItemChange(index, e.target.value)}
                         placeholder={`항목 ${index + 1}`}
-                        className="flex-1 px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
+                        className="flex-1 px-3 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm"
                       />
                       {formData.checklistItems.length > 1 && (
                         <button
+                          type="button"
                           onClick={() => handleRemoveChecklistItem(index)}
                           className="p-2 text-[#EF4444] hover:bg-[#FEE2E2] rounded-lg transition-colors"
                         >
-                          <Trash2 size={20} />
+                          <Trash2 size={18} />
                         </button>
                       )}
                     </div>
                   ))}
                   <button
+                    type="button"
                     onClick={handleAddChecklistItem}
-                    className="w-full px-4 py-2 border-2 border-dashed border-[#D1D5DB] rounded-lg text-[#6B7280] hover:border-[#FF9B82] hover:text-[#FF9B82] transition-all flex items-center justify-center gap-2"
+                    className="w-full px-4 py-2 border-2 border-dashed border-[#D1D5DB] rounded-lg text-[#6B7280] hover:border-[#FF9B82] hover:text-[#FF9B82] transition-all flex items-center justify-center gap-2 text-sm"
                   >
-                    <Plus size={18} />
+                    <Plus size={16} />
                     항목 추가
                   </button>
                 </div>
-              </div>
+              </AccordionContent>
+            </AccordionItem>
 
-              {/* 장소 */}
-              <div>
-                <label className="block text-sm font-medium text-[#1F2937] mb-2 flex items-center gap-2">
-                  <MapPin size={18} className="text-[#FF9B82]" />
-                  장소
-                </label>
-                <input
-                  type="text"
-                  value={formData.location || ''}
-                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                  placeholder="장소를 입력하세요"
-                  className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
-                />
-              </div>
-
-              {/* 메모 */}
-              <div>
-                <label className="block text-sm font-medium text-[#1F2937] mb-2">
-                  메모
-                </label>
-                <textarea
-                  value={formData.memo}
-                  onChange={(e) => setFormData({ ...formData, memo: e.target.value })}
-                  placeholder="메모를 입력하세요"
-                  rows={3}
-                  className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent resize-none"
-                />
-                <button
-                  type="button"
-                  onClick={handleExtractInfo}
-                  disabled={isExtracting || !formData.memo.trim()}
-                  className="mt-2 w-full px-4 py-2 text-sm font-medium text-white bg-[#FF9B82] rounded-lg hover:bg-[#FF8A6D] transition-colors disabled:bg-[#D1D5DB] disabled:text-[#9CA3AF] disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  {isExtracting ? (
-                    <>
-                      <span>추출 중...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>AI로 일정쓰기</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {/* 반복 설정 */}
-              <div>
-                <label className="block text-sm font-medium text-[#1F2937] mb-2 flex items-center gap-2">
+            {/* 반복 설정 */}
+            <AccordionItem value="repeat" className="bg-white rounded-xl shadow-sm border-none overflow-hidden">
+              <AccordionTrigger className="px-4 py-3 hover:no-underline">
+                <div className="flex items-center gap-2">
                   <Repeat size={18} className="text-[#FF9B82]" />
-                  반복 설정
-                </label>
-                <select
-                  value={formData.repeatType}
-                  onChange={(e) => {
-                    const newRepeatType = e.target.value as any;
-                    setFormData({
-                      ...formData,
-                      repeatType: newRepeatType,
-                      // 반복이 없음으로 변경되면 반복 종료일도 초기화
-                      repeatEndDate: newRepeatType === 'none' ? undefined : formData.repeatEndDate
-                    });
-                  }}
-                  className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent appearance-none bg-white mb-3"
-                >
-                  {repeatOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                {/* 반복이 선택된 경우 반복 종료일 설정 (맞춤 옵션이 아닌 경우만) */}
-                {formData.repeatType && formData.repeatType !== 'none' && formData.repeatType !== 'custom' && (
-                  <div>
-                    <label className="block text-xs text-[#6B7280] mb-1">반복 종료일 (선택사항)</label>
-                    <input
-                      type="date"
-                      value={formData.repeatEndDate || ''}
-                      min={formData.date} // 시작 날짜 이후만 선택 가능
-                      onChange={(e) => setFormData({ ...formData, repeatEndDate: e.target.value || undefined })}
-                      className="w-full px-4 py-3 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
-                      placeholder="반복 종료일을 선택하세요"
-                    />
-                    {formData.repeatEndDate && (
-                      <p className="text-xs text-[#6B7280] mt-1">
-                        {formData.date}부터 {formData.repeatEndDate}까지 반복됩니다.
-                      </p>
-                    )}
-                  </div>
-                )}
-                {/* 맞춤 반복인 경우 추가 설정 */}
-                {formData.repeatType === 'custom' && (
-                  <div className="mt-3 p-4 space-y-4">
-                    {/* 반복 주기 */}
+                  <span className="text-sm font-medium text-[#1F2937]">반복 설정</span>
+                  {formData.repeatType !== 'none' && (
+                    <span className="text-xs text-[#FF9B82] bg-[#FFF5F0] px-2 py-0.5 rounded-full">
+                      {repeatOptions.find(o => o.value === formData.repeatType)?.label}
+                    </span>
+                  )}
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="px-4">
+                <div className="space-y-3">
+                  <select
+                    value={formData.repeatType}
+                    onChange={(e) => {
+                      const newRepeatType = e.target.value as any;
+                      setFormData({
+                        ...formData,
+                        repeatType: newRepeatType,
+                        repeatEndDate: newRepeatType === 'none' ? undefined : formData.repeatEndDate
+                      });
+                    }}
+                    className="w-full px-4 py-2.5 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent appearance-none bg-white text-sm"
+                  >
+                    {repeatOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  {formData.repeatType && formData.repeatType !== 'none' && formData.repeatType !== 'custom' && (
                     <div>
-                      <label className="block text-xs font-medium text-[#6B7280] mb-2">
-                        반복 주기
-                      </label>
+                      <label className="block text-xs text-[#6B7280] mb-1">반복 종료일</label>
+                      <input
+                        type="date"
+                        value={formData.repeatEndDate || ''}
+                        min={formData.date}
+                        onChange={(e) => setFormData({ ...formData, repeatEndDate: e.target.value || undefined })}
+                        className="w-full px-4 py-2.5 border border-[#D1D5DB] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm"
+                      />
+                    </div>
+                  )}
+
+                  {formData.repeatType === 'custom' && (
+                    <div className="space-y-3 pt-2">
                       <div className="flex items-center gap-2">
                         <input
                           type="number"
@@ -953,20 +961,14 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                           })}
                           className="flex-1 px-3 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm"
                         >
-                          <option value="days">일</option>
-                          <option value="weeks">주</option>
-                          <option value="months">월</option>
-                          <option value="years">년</option>
+                          <option value="days">일마다</option>
+                          <option value="weeks">주마다</option>
+                          <option value="months">월마다</option>
+                          <option value="years">년마다</option>
                         </select>
                       </div>
-                    </div>
 
-                    {/* 반복 요일 (맞춤 옵션에서는 항상 표시) */}
-                    <div>
-                      <label className="block text-xs font-medium text-[#6B7280] mb-2">
-                        반복 요일
-                      </label>
-                      <div className="flex gap-2 justify-center">
+                      <div className="flex gap-1.5 justify-center flex-wrap">
                         {[
                           { value: 0, label: '일' },
                           { value: 1, label: '월' },
@@ -975,25 +977,24 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                           { value: 4, label: '목' },
                           { value: 5, label: '금' },
                           { value: 6, label: '토' },
-                          ].map((day) => (
-                            <button
-                              key={day.value}
-                              type="button"
-                              onClick={() => {
-                                const currentDays = formData.customRepeatDays || [];
-                                const isSelected = currentDays.includes(day.value);
-                                const newDays = isSelected
-                                  ? currentDays.filter(d => d !== day.value)
-                                  : [...currentDays, day.value].sort();
-                                // 요일이 선택되면 자동으로 주 단위로 설정
-                                const newUnit = newDays.length > 0 ? 'weeks' : formData.customRepeatUnit;
-                                setFormData({
-                                  ...formData,
-                                  customRepeatDays: newDays,
-                                  customRepeatUnit: newUnit,
-                                });
-                              }}
-                            className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${(formData.customRepeatDays || []).includes(day.value)
+                        ].map((day) => (
+                          <button
+                            key={day.value}
+                            type="button"
+                            onClick={() => {
+                              const currentDays = formData.customRepeatDays || [];
+                              const isSelected = currentDays.includes(day.value);
+                              const newDays = isSelected
+                                ? currentDays.filter(d => d !== day.value)
+                                : [...currentDays, day.value].sort();
+                              const newUnit = newDays.length > 0 ? 'weeks' : formData.customRepeatUnit;
+                              setFormData({
+                                ...formData,
+                                customRepeatDays: newDays,
+                                customRepeatUnit: newUnit,
+                              });
+                            }}
+                            className={`w-9 h-9 rounded-full text-sm font-medium transition-colors ${(formData.customRepeatDays || []).includes(day.value)
                               ? 'bg-[#FF9B82] text-white'
                               : 'bg-white border border-[#D1D5DB] text-[#6B7280] hover:bg-[#F9FAFB]'
                               }`}
@@ -1002,184 +1003,162 @@ export function AddTodoModal({ isOpen, onClose, onSave, initialData, onOpenInput
                           </button>
                         ))}
                       </div>
-                    </div>
 
-                    {/* 종료 */}
-                    <div>
-                      <label className="block text-xs font-medium text-[#6B7280] mb-2">
-                        종료
-                      </label>
-                      <div className="space-y-2">
+                      <div className="space-y-2 text-sm">
                         <label className="flex items-center gap-2">
                           <input
                             type="radio"
                             name="customRepeatEnd"
                             value="never"
                             checked={formData.customRepeatEndType === 'never'}
-                            onChange={(e) => setFormData({
-                              ...formData,
-                              customRepeatEndType: 'never'
-                            })}
+                            onChange={() => setFormData({ ...formData, customRepeatEndType: 'never' })}
                             className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] focus:ring-[#FF9B82]"
                           />
-                          <span className="text-sm text-[#6B7280]">없음</span>
+                          <span className="text-[#6B7280]">종료 없음</span>
                         </label>
-
                         <label className="flex items-center gap-2">
                           <input
                             type="radio"
                             name="customRepeatEnd"
                             value="date"
                             checked={formData.customRepeatEndType === 'date'}
-                            onChange={(e) => setFormData({
-                              ...formData,
-                              customRepeatEndType: 'date'
-                            })}
+                            onChange={() => setFormData({ ...formData, customRepeatEndType: 'date' })}
                             className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] focus:ring-[#FF9B82]"
                           />
-                          <span className="text-sm text-[#6B7280]">날짜:</span>
+                          <span className="text-[#6B7280]">종료일:</span>
                           <input
                             type="date"
                             value={formData.customRepeatEndDate || ''}
-                            onChange={(e) => setFormData({
-                              ...formData,
-                              customRepeatEndDate: e.target.value
-                            })}
+                            onChange={(e) => setFormData({ ...formData, customRepeatEndDate: e.target.value })}
                             min={formData.date}
                             disabled={formData.customRepeatEndType !== 'date'}
-                            className="flex-1 px-3 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF]"
+                            className="flex-1 px-2 py-1.5 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF]"
                           />
                         </label>
-
                         <label className="flex items-center gap-2">
                           <input
                             type="radio"
                             name="customRepeatEnd"
                             value="count"
                             checked={formData.customRepeatEndType === 'count'}
-                            onChange={(e) => setFormData({
-                              ...formData,
-                              customRepeatEndType: 'count'
-                            })}
+                            onChange={() => setFormData({ ...formData, customRepeatEndType: 'count' })}
                             className="w-4 h-4 text-[#FF9B82] border-[#D1D5DB] focus:ring-[#FF9B82]"
                           />
-                          <span className="text-sm text-[#6B7280]">다음</span>
                           <input
                             type="number"
                             min="1"
                             value={formData.customRepeatCount || 10}
-                            onChange={(e) => setFormData({
-                              ...formData,
-                              customRepeatCount: parseInt(e.target.value) || 10
-                            })}
+                            onChange={(e) => setFormData({ ...formData, customRepeatCount: parseInt(e.target.value) || 10 })}
                             disabled={formData.customRepeatEndType !== 'count'}
-                            className="w-20 px-3 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF]"
+                            className="w-16 px-2 py-1.5 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF]"
                           />
-                          <span className="text-sm text-[#6B7280]">회 반복</span>
+                          <span className="text-[#6B7280]">회 반복</span>
                         </label>
                       </div>
                     </div>
-                  </div>
-                )}
-              </div>
-
-              {/* 알림 여부 */}
-              <div>
-                <label className="flex items-center justify-between cursor-pointer">
-                  <div className="flex items-center gap-2">
-                    <Bell size={18} className="text-[#FF9B82]" />
-                    <span className="text-sm font-medium text-[#1F2937]">알림 설정</span>
-                  </div>
-                  <div className="relative">
-                    <input
-                      type="checkbox"
-                      checked={formData.hasNotification}
-                      onChange={(e) => setFormData({ ...formData, hasNotification: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-14 h-8 bg-[#D1D5DB] rounded-full peer peer-checked:bg-[#FF9B82] transition-colors"></div>
-                    <div className="absolute left-1 top-1 w-6 h-6 bg-white rounded-full transition-transform peer-checked:translate-x-6"></div>
-                  </div>
-                </label>
-              </div>
-
-              {/* 알림 리마인더 */}
-              {formData.hasNotification && (
-                <div>
-                  <label className="block text-sm font-medium text-[#1F2937] mb-2">
-                    알림 설정
-                  </label>
-                  <div className="space-y-2">
-                    {formData.notificationReminders.map((reminder, index) => (
-                      <div key={index} className="flex gap-2">
-                        <input
-                          type="number"
-                          min="1"
-                          value={reminder.value}
-                          onChange={(e) => handleReminderValueChange(index, parseInt(e.target.value) || 1)}
-                          className="w-20 px-3 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
-                          placeholder="30"
-                        />
-                        <select
-                          value={reminder.unit}
-                          onChange={(e) => handleReminderUnitChange(index, e.target.value as 'minutes' | 'hours' | 'days' | 'weeks')}
-                          className="flex-1 px-3 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent"
-                        >
-                          <option value="minutes">분 전</option>
-                          <option value="hours">시간 전</option>
-                          <option value="days">일 전</option>
-                          <option value="weeks">주 전</option>
-                        </select>
-                        <button
-                          onClick={() => handleRemoveReminder(index)}
-                          className="p-2 text-[#EF4444] hover:bg-[#FEE2E2] rounded-lg transition-colors"
-                        >
-                          <Trash2 size={20} />
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      onClick={handleAddReminder}
-                      className="w-full px-4 py-2 border-2 border-dashed border-[#D1D5DB] rounded-lg text-[#6B7280] hover:border-[#FF9B82] hover:text-[#FF9B82] transition-all flex items-center justify-center gap-2"
-                    >
-                      <Plus size={18} />
-                      알림 추가
-                    </button>
-                  </div>
-                  {formData.notificationReminders.length > 0 && (
-                    <p className="text-xs text-[#6B7280] mt-2">
-                      예: {formData.notificationReminders.map(r => `${r.value}${r.unit === 'minutes' ? '분' : r.unit === 'hours' ? '시간' : r.unit === 'days' ? '일' : '주'} 전`).join(', ')}
-                    </p>
                   )}
                 </div>
-              )}
-            </div>
-          </div>
+              </AccordionContent>
+            </AccordionItem>
 
-          {/* Footer */}
-          <div className="px-6 py-4 bg-[#F9FAFB] border-t border-[#E5E7EB] flex gap-3">
-            <button
-              onClick={onClose}
-              className="flex-1 px-6 py-3 bg-white border border-[#D1D5DB] text-[#6B7280] rounded-lg hover:bg-[#F3F4F6] transition-colors"
-            >
-              취소
-            </button>
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('[저장 버튼] 클릭됨', { isExtracting, disabled: isExtracting });
-                if (!isExtracting) {
-                  handleSave();
-                }
-              }}
-              disabled={isExtracting}
-              className="flex-1 px-6 py-3 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-              type="button"
-            >
-              {isExtracting ? '추출 중...' : '저장'}
-            </button>
-          </div>
+            {/* 알림 설정 */}
+            <AccordionItem value="notification" className="bg-white rounded-xl shadow-sm border-none overflow-hidden">
+              <AccordionTrigger className="px-4 py-3 hover:no-underline">
+                <div className="flex items-center gap-2">
+                  <Bell size={18} className="text-[#FF9B82]" />
+                  <span className="text-sm font-medium text-[#1F2937]">알림 설정</span>
+                  {formData.hasNotification && (
+                    <span className="text-xs text-[#FF9B82] bg-[#FFF5F0] px-2 py-0.5 rounded-full">켜짐</span>
+                  )}
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="px-4">
+                <div className="space-y-3">
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <span className="text-sm text-[#6B7280]">알림 받기</span>
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={formData.hasNotification}
+                        onChange={(e) => setFormData({ ...formData, hasNotification: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-12 h-7 bg-[#D1D5DB] rounded-full peer peer-checked:bg-[#FF9B82] transition-colors"></div>
+                      <div className="absolute left-1 top-1 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                    </div>
+                  </label>
+
+                  {formData.hasNotification && (
+                    <div className="space-y-2 pt-2">
+                      {formData.notificationReminders.map((reminder, index) => (
+                        <div key={index} className="flex gap-2">
+                          <input
+                            type="number"
+                            min="1"
+                            value={reminder.value}
+                            onChange={(e) => handleReminderValueChange(index, parseInt(e.target.value) || 1)}
+                            className="w-16 px-2 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm"
+                          />
+                          <select
+                            value={reminder.unit}
+                            onChange={(e) => handleReminderUnitChange(index, e.target.value as 'minutes' | 'hours' | 'days' | 'weeks')}
+                            className="flex-1 px-2 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF9B82] focus:border-transparent text-sm"
+                          >
+                            <option value="minutes">분 전</option>
+                            <option value="hours">시간 전</option>
+                            <option value="days">일 전</option>
+                            <option value="weeks">주 전</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveReminder(index)}
+                            className="p-2 text-[#EF4444] hover:bg-[#FEE2E2] rounded-lg transition-colors"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={handleAddReminder}
+                        className="w-full px-4 py-2 border-2 border-dashed border-[#D1D5DB] rounded-lg text-[#6B7280] hover:border-[#FF9B82] hover:text-[#FF9B82] transition-all flex items-center justify-center gap-2 text-sm"
+                      >
+                        <Plus size={16} />
+                        알림 추가
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="px-6 py-4 bg-[#F9FAFB] border-t border-[#E5E7EB] flex gap-3">
+        <button
+          onClick={onClose}
+          className="flex-1 px-6 py-3 bg-white border border-[#D1D5DB] text-[#6B7280] rounded-lg hover:bg-[#F3F4F6] transition-colors"
+        >
+          취소
+        </button>
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('[저장 버튼] 클릭됨', { isExtracting, disabled: isExtracting });
+            if (!isExtracting) {
+              handleSave();
+            }
+          }}
+          disabled={isExtracting}
+          className="flex-1 px-6 py-3 bg-[#FF9B82] text-white rounded-lg hover:bg-[#FF8A6D] transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+          type="button"
+        >
+          {isExtracting ? '추출 중...' : '저장'}
+        </button>
+      </div>
     </>
   );
 
