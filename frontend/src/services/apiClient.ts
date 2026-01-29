@@ -113,9 +113,9 @@ class APIClient {
   }
 
   // Todo endpoints
-  async getTodos(date?: string, status?: string) {
+  async getTodos(date?: string, status?: string, skip: number = 0, limit: number = 10000) {
     return this.client.get('/todos', {
-      params: { date, status },
+      params: { date, status, skip, limit },
     })
   }
 
@@ -190,9 +190,9 @@ class APIClient {
   }
 
   // Receipt endpoints
-  async getReceipts(date?: string, category?: string) {
+  async getReceipts(date?: string, category?: string, skip: number = 0, limit: number = 100) {
     return this.client.get('/receipts', {
-      params: { date, category },
+      params: { date, category, skip, limit },
     })
   }
 
@@ -207,8 +207,10 @@ class APIClient {
   }
 
   // Routine (시간표) endpoints
-  async getRoutines() {
-    return this.client.get('/routines')
+  async getRoutines(skip: number = 0, limit: number = 100) {
+    return this.client.get('/routines', {
+      params: { skip, limit }
+    })
   }
 
   async getRoutine(id: string) {
@@ -232,8 +234,10 @@ class APIClient {
   }
 
   // Family endpoints
-  async getFamilyMembers() {
-    return this.client.get('/family/members')
+  async getFamilyMembers(skip: number = 0, limit: number = 100) {
+    return this.client.get('/family/members', {
+      params: { skip, limit }
+    })
   }
 
   async createFamilyMember(data: any) {

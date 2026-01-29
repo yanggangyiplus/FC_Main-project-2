@@ -21,14 +21,16 @@ router = APIRouter(
 
 @router.get("/members", response_model=List[FamilyMemberResponse])
 async def get_family_members(
+    skip: int = 0,
+    limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get all family members for current user"""
+    """Get all family members for current user (페이지네이션 지원)"""
     return db.query(FamilyMember).filter(
         FamilyMember.user_id == current_user.id,
         FamilyMember.deleted_at.is_(None)
-    ).all()
+    ).offset(skip).limit(limit).all()
 
 
 @router.post("/members", response_model=FamilyMemberResponse, status_code=status.HTTP_201_CREATED)

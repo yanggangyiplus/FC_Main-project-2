@@ -21,16 +21,18 @@ router = APIRouter(
 
 @router.get("/", response_model=List[RoutineResponse])
 async def get_routines(
+    skip: int = 0,
+    limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """사용자의 모든 시간표 조회"""
+    """사용자의 모든 시간표 조회 (페이지네이션 지원)"""
     query = db.query(Routine).filter(
         Routine.user_id == current_user.id
     )
     if hasattr(Routine, 'deleted_at'):
         query = query.filter(Routine.deleted_at.is_(None))
-    routines = query.all()
+    routines = query.offset(skip).limit(limit).all()
     
     # time_slots를 JSON에서 파싱
     result = []
