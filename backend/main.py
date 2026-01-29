@@ -5,6 +5,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.core.rate_limit import limiter
 import logging
 import os
 from dotenv import load_dotenv
@@ -36,6 +39,10 @@ app = FastAPI(
     description="가족 일정 관리 및 음성 인식 기반 할일 추가 플랫폼",
     version="1.0.0"
 )
+
+# Rate Limiter를 앱에 연결
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # 프록시 헤더 미들웨어 추가 (CORS보다 먼저)
 app.add_middleware(ProxyHeadersMiddleware)

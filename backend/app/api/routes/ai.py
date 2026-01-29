@@ -2,7 +2,7 @@
 STT and AI processing endpoints
 """
 from typing import Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -14,6 +14,7 @@ from app.models.models import FamilyMember
 from app.schemas import STTResponse, OCRResponse, OCRReceiptResponse
 from app.services.ai_service import GeminiSTTService, GeminiOCRService, ClaudeOCRService, TesseractOCRService
 from app.api.routes.auth import get_current_user
+from app.core.rate_limit import limiter, AI_RATE_LIMIT
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,9 @@ tesseract_ocr = TesseractOCRService()
 
 
 @router.post("/stt/transcribe", response_model=STTResponse)
+@limiter.limit(AI_RATE_LIMIT)
 async def transcribe_audio(
+    request: Request,
     file: UploadFile = File(...),
     language: str = "ko-KR",
     db: Session = Depends(get_db),
@@ -82,7 +85,9 @@ async def transcribe_audio(
 
 
 @router.post("/ocr/extract-text", response_model=OCRResponse)
+@limiter.limit(AI_RATE_LIMIT)
 async def extract_text_from_image(
+    request: Request,
     file: UploadFile = File(...),
     method: str = "gemini",
     db: Session = Depends(get_db),
@@ -150,7 +155,9 @@ async def extract_text_from_image(
 
 
 @router.post("/ocr/extract-receipt")
+@limiter.limit(AI_RATE_LIMIT)
 async def extract_receipt_data(
+    request: Request,
     file: UploadFile = File(...),
     method: str = "claude",
     db: Session = Depends(get_db),
@@ -193,7 +200,9 @@ async def extract_receipt_data(
 
 
 @router.post("/ocr/extract-contact")
+@limiter.limit(AI_RATE_LIMIT)
 async def extract_contact_data(
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -230,7 +239,9 @@ class TodoExtractionRequest(BaseModel):
 
 
 @router.post("/todo/extract")
+@limiter.limit(AI_RATE_LIMIT)
 async def extract_todo_info(
+    http_request: Request,
     request: TodoExtractionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)

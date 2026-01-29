@@ -3,7 +3,7 @@ Todo endpoints for CRUD operations and automation
 """
 import json
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, date
@@ -16,6 +16,7 @@ from app.schemas import (
 )
 from app.api.routes.auth import get_current_user
 from app.api.routes.notifications import send_scheduled_emails
+from app.core.rate_limit import limiter, DEFAULT_RATE_LIMIT
 
 router = APIRouter(
     prefix="/todos",
@@ -25,7 +26,9 @@ router = APIRouter(
 
 
 @router.get("/", response_model=List[TodoResponse])
+@limiter.limit(DEFAULT_RATE_LIMIT)
 async def get_todos(
+    request: Request,
     skip: int = 0,
     limit: int = 10000,
     status_filter: str = None,
