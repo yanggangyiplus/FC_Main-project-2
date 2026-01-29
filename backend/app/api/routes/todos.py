@@ -27,7 +27,7 @@ router = APIRouter(
 @router.get("/", response_model=List[TodoResponse])
 async def get_todos(
     skip: int = 0,
-    limit: int = 100000,
+    limit: int = 10000,
     status_filter: str = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)

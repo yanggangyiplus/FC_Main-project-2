@@ -97,9 +97,9 @@ async def sync_all_todos_to_google_calendar(
         logger.info("[SYNC_ALL] Google Calendar 이벤트 목록 가져오기 시작...")
         existing_events = []
         try:
-            # 최근 3년 전부터 3년 후까지의 이벤트 가져오기 (과거 일정도 포함)
-            time_min = datetime.utcnow() - timedelta(days=3*365)
-            time_max = datetime.utcnow() + timedelta(days=3*365)
+            # 최근 5년 전부터 5년 후까지의 이벤트 가져오기 (과거 일정도 포함)
+            time_min = datetime.utcnow() - timedelta(days=5*365)
+            time_max = datetime.utcnow() + timedelta(days=5*365)
             # max_results는 페이지당 개수이므로, 페이지네이션으로 모든 이벤트를 가져옴
             existing_events = await GoogleCalendarService.list_events(
                 token_json=current_user.google_calendar_token,
@@ -107,7 +107,7 @@ async def sync_all_todos_to_google_calendar(
                 time_max=time_max,
                 max_results=2500  # Google Calendar API 최대값 (2500)
             )
-            logger.info(f"[SYNC_ALL] Google Calendar에서 {len(existing_events)}개 이벤트 가져옴 (3년 범위)")
+            logger.info(f"[SYNC_ALL] Google Calendar에서 {len(existing_events)}개 이벤트 가져옴 (5년 범위)")
         except Exception as e:
             logger.warning(f"[SYNC_ALL] Google Calendar 이벤트 목록 가져오기 실패 (계속 진행): {e}")
         
@@ -779,16 +779,16 @@ async def export_todos_to_google_calendar(
         logger.info("[EXPORT] Google Calendar 이벤트 목록 가져오기 시작...")
         existing_events = []
         try:
-            # 최근 3년 전부터 3년 후까지의 이벤트 가져오기
-            time_min = datetime.utcnow() - timedelta(days=3*365)
-            time_max = datetime.utcnow() + timedelta(days=3*365)
+            # 최근 5년 전부터 5년 후까지의 이벤트 가져오기
+            time_min = datetime.utcnow() - timedelta(days=5*365)
+            time_max = datetime.utcnow() + timedelta(days=5*365)
             existing_events = await GoogleCalendarService.list_events(
                 token_json=current_user.google_calendar_token,
                 time_min=time_min,
                 time_max=time_max,
                 max_results=2500  # Google Calendar API 최대값 (2500)
             )
-            logger.info(f"[EXPORT] Google Calendar에서 {len(existing_events)}개 이벤트 가져옴 (3년 범위)")
+            logger.info(f"[EXPORT] Google Calendar에서 {len(existing_events)}개 이벤트 가져옴 (5년 범위)")
         except Exception as e:
             logger.warning(f"[EXPORT] Google Calendar 이벤트 목록 가져오기 실패 (계속 진행): {e}")
         
@@ -1375,16 +1375,16 @@ async def toggle_calendar_export(
             # 1단계: Google Calendar에서 현재 이벤트 목록 가져오기 (중복 체크용)
             existing_events = []
             try:
-                # 최근 3년 전부터 3년 후까지의 이벤트 가져오기 (과거 일정도 포함)
-                time_min = datetime.utcnow() - timedelta(days=3*365)
-                time_max = datetime.utcnow() + timedelta(days=3*365)
+                # 최근 5년 전부터 5년 후까지의 이벤트 가져오기 (과거 일정도 포함)
+                time_min = datetime.utcnow() - timedelta(days=5*365)
+                time_max = datetime.utcnow() + timedelta(days=5*365)
                 existing_events = await GoogleCalendarService.list_events(
                     token_json=current_user.google_calendar_token,
                     time_min=time_min,
                     time_max=time_max,
                     max_results=2500  # Google Calendar API 최대값
                 )
-                logger.info(f"[TOGGLE_EXPORT] Google Calendar에서 {len(existing_events)}개 이벤트 가져옴 (3년 범위)")
+                logger.info(f"[TOGGLE_EXPORT] Google Calendar에서 {len(existing_events)}개 이벤트 가져옴 (5년 범위)")
             except Exception as e:
                 logger.warning(f"[TOGGLE_EXPORT] Google Calendar 이벤트 목록 가져오기 실패 (계속 진행): {e}")
             
