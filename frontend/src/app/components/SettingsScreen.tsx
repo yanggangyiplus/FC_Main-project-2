@@ -220,7 +220,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
               )}
             </button>
 
-            {/* 푸시 알림 */}
+            {/* 푸시만 - 숨김 (미완성)
             <button
               onClick={() => handleNotificationPreferenceChange('push')}
               disabled={isNotificationLoading || pushPermissionStatus === 'denied'}
@@ -245,8 +245,9 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
                 </div>
               )}
             </button>
+            */}
 
-            {/* 이메일 + 푸시 */}
+            {/* 이메일 + 푸시 - 숨김 (미완성)
             <button
               onClick={() => handleNotificationPreferenceChange('both')}
               disabled={isNotificationLoading || pushPermissionStatus === 'denied'}
@@ -270,6 +271,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
                 </div>
               )}
             </button>
+            */}
 
             {/* 알림 끄기 */}
             <button
@@ -294,7 +296,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
             </button>
           </div>
 
-          {/* 푸시 권한 안내 */}
+          {/* 푸시 권한 안내 - 숨김 (미완성)
           {pushPermissionStatus === 'denied' && (
             <div className="mt-3 p-3 bg-[#FEF2F2] rounded-lg">
               <p className="text-xs text-[#DC2626]">
@@ -310,6 +312,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
               </p>
             </div>
           )}
+          */}
         </div>
 
         {/* Google Calendar Integration */}
@@ -422,7 +425,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
                 </button>
               </div>
 
-              {/* Google Calendar 내보내기 토글 */}
+              {/* Google Calendar 내보내기 토글 - 숨김 (미완성)
               <div className="flex items-center justify-between py-3 border-b border-[#F3F4F6]">
                 <div className="flex-1">
                   <div className="font-medium text-[#1F2937]">Always Plan 일정 내보내기</div>
@@ -499,6 +502,7 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
                   />
                 </button>
               </div>
+              */}
 
               {/* 동기화 새로고침 버튼 */}
               <div className="pt-2">
