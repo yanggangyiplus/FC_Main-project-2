@@ -27,6 +27,8 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
   const [googleCalendarExportEnabled, setGoogleCalendarExportEnabled] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncLoading, setIsSyncLoading] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // 알림 설정 및 Google Calendar 연동 상태 확인
   useEffect(() => {
@@ -571,7 +573,66 @@ export function SettingsScreen({ isOpen, onClose, onRefreshCalendar, onRefreshTo
             </div>
           </div>
         </div>
+
+        {/* 회원 탈퇴 */}
+        <div className="bg-white p-6 mt-4">
+          <h3 className="font-medium text-[#1F2937] mb-4">계정</h3>
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="w-full py-3 text-[#DC2626] text-sm font-medium hover:bg-[#FEF2F2] rounded-lg transition-colors"
+          >
+            회원 탈퇴
+          </button>
+          <p className="text-xs text-[#9CA3AF] mt-2 text-center">
+            탈퇴 시 모든 데이터가 삭제되며 복구할 수 없습니다.
+          </p>
+        </div>
       </div>
+
+      {/* 회원 탈퇴 확인 모달 */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6">
+            <h3 className="text-lg font-bold text-[#1F2937] mb-2">회원 탈퇴</h3>
+            <p className="text-sm text-[#6B7280] mb-6">
+              정말 탈퇴하시겠습니까?<br />
+              모든 일정, 메모, 설정 등 모든 데이터가 영구적으로 삭제됩니다.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+                className="flex-1 py-3 bg-[#F3F4F6] text-[#1F2937] rounded-lg font-medium hover:bg-[#E5E7EB] transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={async () => {
+                  setIsDeleting(true);
+                  try {
+                    await apiClient.deleteAccount();
+                    toast.success("계정이 삭제되었습니다.");
+                    // 로컬 스토리지 정리 및 로그인 페이지로 이동
+                    localStorage.removeItem('access_token');
+                    localStorage.removeItem('refresh_token');
+                    window.location.href = '/';
+                  } catch (error: any) {
+                    console.error("회원 탈퇴 실패:", error);
+                    toast.error("회원 탈퇴에 실패했습니다. 다시 시도해주세요.");
+                  } finally {
+                    setIsDeleting(false);
+                    setShowDeleteConfirm(false);
+                  }
+                }}
+                disabled={isDeleting}
+                className="flex-1 py-3 bg-[#DC2626] text-white rounded-lg font-medium hover:bg-[#B91C1C] transition-colors disabled:opacity-50"
+              >
+                {isDeleting ? "삭제 중..." : "탈퇴하기"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

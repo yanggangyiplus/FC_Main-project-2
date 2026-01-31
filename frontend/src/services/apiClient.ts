@@ -108,6 +108,10 @@ class APIClient {
     return this.client.post('/auth/logout')
   }
 
+  async deleteAccount() {
+    return this.client.delete('/auth/me')
+  }
+
   async getCurrentUser() {
     return this.client.get('/auth/me')
   }
