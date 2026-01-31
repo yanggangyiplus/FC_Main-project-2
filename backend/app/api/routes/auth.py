@@ -399,7 +399,64 @@ async def test_google_login(db: Session = Depends(get_db)):
         
         logger.info(f"[TEST] Login successful, returning response")
         return response
-        
+
     except Exception as e:
         logger.error(f"[TEST] Error: {type(e).__name__}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"테스트 로그인 실패: {str(e)}")
+
+
+@router.delete("/me")
+async def delete_current_user(
+    response: Response,
+    current_user: 'User' = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    회원 탈퇴 (계정 및 모든 데이터 삭제)
+    Google Play 정책 준수를 위한 계정 삭제 기능
+    """
+    try:
+        user_id = current_user.id
+        user_email = current_user.email
+        logger.info(f"[DELETE_USER] Starting account deletion for user: {user_email}")
+
+        # 1. 관련 데이터 모두 삭제 (cascade 설정되어 있지만 명시적으로 삭제)
+        from app.models.models import Todo, FamilyMember, Rule, Notification, Receipt, Memo, Routine, AudioFile, ImageFile
+
+        # 각 테이블에서 사용자 데이터 삭제
+        deleted_counts = {}
+
+        deleted_counts['todos'] = db.query(Todo).filter(Todo.user_id == user_id).delete()
+        deleted_counts['family_members'] = db.query(FamilyMember).filter(FamilyMember.user_id == user_id).delete()
+        deleted_counts['rules'] = db.query(Rule).filter(Rule.user_id == user_id).delete()
+        deleted_counts['notifications'] = db.query(Notification).filter(Notification.user_id == user_id).delete()
+        deleted_counts['receipts'] = db.query(Receipt).filter(Receipt.user_id == user_id).delete()
+        deleted_counts['memos'] = db.query(Memo).filter(Memo.user_id == user_id).delete()
+        deleted_counts['routines'] = db.query(Routine).filter(Routine.user_id == user_id).delete()
+        deleted_counts['audio_files'] = db.query(AudioFile).filter(AudioFile.user_id == user_id).delete()
+        deleted_counts['image_files'] = db.query(ImageFile).filter(ImageFile.user_id == user_id).delete()
+
+        logger.info(f"[DELETE_USER] Deleted related data: {deleted_counts}")
+
+        # 2. 사용자 계정 삭제
+        db.delete(current_user)
+        db.commit()
+
+        logger.info(f"[DELETE_USER] User account deleted: {user_email}")
+
+        # 3. 쿠키 삭제
+        response = JSONResponse({
+            'success': True,
+            'message': '계정이 성공적으로 삭제되었습니다.',
+            'deleted_data': deleted_counts
+        })
+
+        response.delete_cookie('access_token')
+        response.delete_cookie('refresh_token')
+
+        return response
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"[DELETE_USER] Error deleting user: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"계정 삭제 실패: {str(e)}")
