@@ -1188,6 +1188,7 @@ export function CalendarHomeScreen() {
           <ChevronRight size={18} className="text-[#9CA3AF]" />
         </button>
 
+        {/* 커뮤니티 기능 숨김 (미완성)
         <button
           onClick={() => setShowCommunityScreen(true)}
           className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-[#F9FAFB] transition-colors"
@@ -1198,6 +1199,7 @@ export function CalendarHomeScreen() {
           </div>
           <ChevronRight size={18} className="text-[#9CA3AF]" />
         </button>
+        */}
 
         <button
           onClick={() => setShowCustomerService(true)}
@@ -2125,6 +2127,7 @@ export function CalendarHomeScreen() {
                   <ChevronRight size={18} className="text-[#9CA3AF]" />
                 </button>
 
+                {/* 커뮤니티 기능 숨김 (미완성)
                 <button
                   onClick={() => {
                     setShowProfileMenu(false);
@@ -2138,6 +2141,7 @@ export function CalendarHomeScreen() {
                   </div>
                   <ChevronRight size={18} className="text-[#9CA3AF]" />
                 </button>
+                */}
 
                 <button
                   onClick={() => {
@@ -2905,16 +2909,7 @@ export function CalendarHomeScreen() {
                       </div>
                       <div>
                         <div className="font-medium text-[#1F2937]">이메일</div>
-                        <div className="text-sm text-[#6B7280]">support@always-plan.com</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 p-4 bg-[#F9FAFB] rounded-lg">
-                      <div className="w-10 h-10 bg-[#FF9B82] rounded-full flex items-center justify-center">
-                        💬
-                      </div>
-                      <div>
-                        <div className="font-medium text-[#1F2937]">실시간 채팅</div>
-                        <div className="text-sm text-[#6B7280]">평일 09:00 - 18:00</div>
+                        <div className="text-sm text-[#6B7280]">nowhereuri@gmail.com</div>
                       </div>
                     </div>
                   </div>
