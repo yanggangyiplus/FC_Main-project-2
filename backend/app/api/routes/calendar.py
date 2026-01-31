@@ -1259,16 +1259,16 @@ async def enable_calendar_sync(
         )
     
     current_user.google_calendar_enabled = "true"
-    # 기본값으로 가져오기와 내보내기는 비활성화 (사용자가 직접 활성화해야 함)
+    # 기본값: 가져오기는 활성화, 내보내기는 비활성화
     if not hasattr(current_user, 'google_calendar_import_enabled') or current_user.google_calendar_import_enabled is None:
-        current_user.google_calendar_import_enabled = "false"
+        current_user.google_calendar_import_enabled = "true"
     if not hasattr(current_user, 'google_calendar_export_enabled') or current_user.google_calendar_export_enabled is None:
         current_user.google_calendar_export_enabled = "false"
     db.commit()
-    
+
     return {
         "success": True,
-        "message": "Google Calendar 연동이 활성화되었습니다"
+        "message": "Google Calendar 연동이 활성화되었습니다. 일정 가져오기가 기본으로 켜져 있습니다."
     }
 
 
