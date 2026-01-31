@@ -166,7 +166,16 @@ export function LoginScreen() {
 
         {/* Terms */}
         <p className="text-xs text-[#9CA3AF] text-center mt-6 px-4">
-          로그인만 하면 이용약관 및 개인정보 처리방침에 동의하는 것으로 간주됩니다.
+          로그인하면{' '}
+          <a
+            href="/privacy.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#6366F1] underline hover:text-[#4F46E5]"
+          >
+            개인정보처리방침
+          </a>
+          에 동의하는 것으로 간주됩니다.
         </p>
       </div>
     </div>
